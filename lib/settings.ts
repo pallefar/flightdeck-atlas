@@ -9,6 +9,8 @@ export const dashboardSettingsSchema = z.object({
   showWellbeing: z.boolean().catch(true),
 });
 export const globeSettingsSchema = z.object({
+  mode: z.enum(["explore", "scan"]).catch("explore"),
+  shadows: z.boolean().catch(false),
   mapStyle: z.enum(["satellite", "street"]).catch("satellite"),
   buildings: z.boolean().catch(true),
   terrain: z.boolean().catch(true),

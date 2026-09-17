@@ -212,11 +212,20 @@ export default function ViewFlight({
     for (let x = -4; x <= 4; x += 2) box(0.12, 18, 12.1, x, 9, 0, chalk);
     const ground = material(dark ? "#172b36" : "#88a09e");
     box(14000, 1, 14000, 0, -0.8, 0, ground, scene, false);
-    const road = material(dark ? "#203542" : "#607b85");
-    for (let n = -7; n <= 7; n++) {
-      box(8, 0.035, 900, n * 38, 0.025, 0, road, scene, false);
-      box(900, 0.035, 8, 0, 0.03, n * 38, road, scene, false);
-    }
+    // One textured district avoids intersecting road strips and depth flicker at high altitude.
+    const districtTexture = cityMap(dark);
+    resources.push(districtTexture);
+    const districtGeometry = new THREE.PlaneGeometry(580, 580);
+    resources.push(districtGeometry);
+    const districtMaterial = new THREE.MeshStandardMaterial({
+      map: districtTexture,
+      roughness: 1,
+    });
+    resources.push(districtMaterial);
+    const district = new THREE.Mesh(districtGeometry, districtMaterial);
+    district.rotation.x = -Math.PI / 2;
+    district.position.y = 0.08;
+    scene.add(district);
     const cityMaterial = material(dark ? "#526473" : "#a4b4bc");
     const city = new THREE.InstancedMesh(cube, cityMaterial, 168);
     let index = 0;
@@ -241,8 +250,8 @@ export default function ViewFlight({
         index++;
       }
     city.count = index;
-    city.castShadow = true;
-    city.receiveShadow = true;
+    city.castShadow = false;
+    city.receiveShadow = false;
     scene.add(city);
     resources.push(city);
     // Soft cloud banks carry the transition into the live Cesium view; no map location is implied.
@@ -304,6 +313,8 @@ export default function ViewFlight({
       const w = node.clientWidth,
         h = node.clientHeight;
       if (!w || !h) return;
+      if (dashboardSnapshot.current)
+        dashboardSnapshot.current.style.width = `${w}px`;
       renderer.setSize(w, h);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
@@ -330,6 +341,11 @@ export default function ViewFlight({
       // The spline supplies continuous position even if the destination reverses mid-flight.
       const eased = t * t * (3 - 2 * t);
       camera.position.copy(positions.getPoint(eased));
+      const near = Math.max(0.025, camera.position.y / 600);
+      if (Math.abs(camera.near - near) > 0.001) {
+        camera.near = near;
+        camera.updateProjectionMatrix();
+      }
       camera.lookAt(looks.getPoint(eased));
       for (const cloud of clouds) cloud.quaternion.copy(camera.quaternion);
       const fade =
@@ -573,4 +589,28 @@ function quadTransform(points: number[][], width: number, height: number) {
   const h =
     Math.abs(denominator) < 1e-8 ? 0 : (dx1 * dy3 - dx3 * dy1) / denominator;
   return `matrix3d(${(x1 - x0 + g * x1) / width},${(y1 - y0 + g * y1) / width},0,${g / width},${(x3 - x0 + h * x3) / height},${(y3 - y0 + h * y3) / height},0,${h / height},0,0,1,0,${x0},${y0},0,1)`;
+}
+
+function cityMap(dark: boolean) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1024;
+  canvas.height = 1024;
+  const context = canvas.getContext("2d")!;
+  context.fillStyle = dark ? "#263f49" : "#8ca3a4";
+  context.fillRect(0, 0, 1024, 1024);
+  const scale = 1024 / 580;
+  context.strokeStyle = dark ? "#172b36" : "#637e86";
+  context.lineWidth = 8 * scale;
+  context.beginPath();
+  for (let n = -7; n <= 7; n++) {
+    const p = 512 + n * 38 * scale;
+    context.moveTo(p, 0);
+    context.lineTo(p, 1024);
+    context.moveTo(0, p);
+    context.lineTo(1024, p);
+  }
+  context.stroke();
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
 }

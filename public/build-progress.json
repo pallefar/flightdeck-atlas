@@ -1,9 +1,17 @@
 {
-  "updated": "Personal hub, project bridge and animated views verified",
+  "updated": "Immersive God\u2019s Eye, cinematic project search and top navigation implemented",
   "stages": [
     {
       "name": "TE dashboard and God\u2019s Eye globe",
       "status": "Implemented and reviewed"
+    },
+    {
+      "name": "Top navigation, full-width God\u2019s Eye and visible map settings",
+      "status": "Implemented and tested"
+    },
+    {
+      "name": "Project scanner, attention filters, guided tour and marker hover",
+      "status": "Implemented; search, cancellation and interaction tested"
     },
     {
       "name": "Reversible dashboard-to-sky transition and hover effects",

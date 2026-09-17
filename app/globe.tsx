@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type * as CesiumType from "cesium";
-import { ArrowRight, Globe2, Minus, Plus, RotateCcw } from "lucide-react";
+import { ArrowRight, Globe2, Minus, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Project } from "@/lib/projects";
 import { motionScale, type GlobeSettings } from "@/lib/settings";
@@ -38,11 +38,19 @@ export default function Globe({
   target,
   onOpen,
   settings,
+  resetCommand = 0,
+  stopCommand = 0,
+  onInteract,
+  onSelectionChange,
 }: {
   projects: Project[];
   target: Project | null;
   onOpen: (p: Project) => void;
   settings: GlobeSettings;
+  resetCommand?: number;
+  stopCommand?: number;
+  onInteract?: () => void;
+  onSelectionChange?: (project: Project | null) => void;
 }) {
   const container = useRef<HTMLDivElement>(null),
     viewer = useRef<CesiumType.Viewer | null>(null),
@@ -61,6 +69,15 @@ export default function Globe({
     [mapMode, setMapMode] = useState("Satellite imagery"),
     [imageryReady, setImageryReady] = useState(false),
     [buildingsReady, setBuildingsReady] = useState(false);
+  const [hovered, setHovered] = useState<{
+    project: Project;
+    x: number;
+    y: number;
+  } | null>(null);
+  const interaction = useRef(onInteract);
+  interaction.current = onInteract;
+  const selectionChange = useRef(onSelectionChange);
+  selectionChange.current = onSelectionChange;
   currentProjects.current = projects;
   currentSettings.current = settings;
   function fly(p: Project, close = false, complete?: () => void) {
@@ -95,6 +112,7 @@ export default function Globe({
     setJourney(false);
     setEntering(false);
     setSelected(p);
+    selectionChange.current?.(p);
     fly(p);
   }
   useEffect(() => {
@@ -102,6 +120,7 @@ export default function Globe({
     active.current = true;
     let handler: CesiumType.ScreenSpaceEventHandler | undefined;
     let removeOcclusion: (() => void) | undefined;
+    let removeMouseLeave: (() => void) | undefined;
     void (async () => {
       try {
         const C = await getCesium();
@@ -143,12 +162,20 @@ export default function Globe({
           ),
           v.camera.positionWC,
         );
-        removeOcclusion = v.scene.preRender.addEventListener(() => {
+        removeOcclusion = v.scene.postRender.addEventListener(() => {
           occluder.cameraPosition = v.camera.positionWC;
+          let changed = false;
           for (const entity of v.entities.values) {
             const position = entity.position?.getValue(v.clock.currentTime);
-            if (position) entity.show = occluder.isPointVisible(position);
+            if (position) {
+              const visible = occluder.isPointVisible(position);
+              if (entity.show !== visible) {
+                entity.show = visible;
+                changed = true;
+              }
+            }
           }
+          if (changed) v.scene.requestRender();
         });
         handler = new C.ScreenSpaceEventHandler(v.scene.canvas);
         handler.setInputAction(
@@ -156,9 +183,86 @@ export default function Globe({
             const hit = v.scene.pick(movement.position);
             const id = hit?.id?.id;
             const p = currentProjects.current.find((x) => x.id === id);
-            if (p) choose(p);
+            if (p) {
+              interaction.current?.();
+              choose(p);
+            }
           },
           C.ScreenSpaceEventType.LEFT_CLICK,
+        );
+        handler.setInputAction(
+          () => interaction.current?.(),
+          C.ScreenSpaceEventType.LEFT_DOWN,
+        );
+        handler.setInputAction(
+          () => interaction.current?.(),
+          C.ScreenSpaceEventType.RIGHT_DOWN,
+        );
+        handler.setInputAction(
+          () => interaction.current?.(),
+          C.ScreenSpaceEventType.MIDDLE_DOWN,
+        );
+        handler.setInputAction(() => {
+          setHovered(null);
+          interaction.current?.();
+        }, C.ScreenSpaceEventType.WHEEL);
+        let lastHover = "",
+          lastMove = 0;
+        const clearHover = () => {
+          const old = v.entities.getById(lastHover);
+          if (old?.point) old.point.pixelSize = new C.ConstantProperty(11);
+          lastHover = "";
+          setHovered(null);
+          v.scene.canvas.style.cursor = "";
+          v.scene.requestRender();
+        };
+        v.scene.canvas.addEventListener("mouseleave", clearHover);
+        removeMouseLeave = () =>
+          v.scene.canvas.removeEventListener("mouseleave", clearHover);
+        handler.setInputAction(
+          (movement: { endPosition: CesiumType.Cartesian2 }) => {
+            if (
+              !window.matchMedia("(hover:hover)").matches ||
+              performance.now() - lastMove < 40
+            )
+              return;
+            lastMove = performance.now();
+            const hit = v.scene.pick(movement.endPosition),
+              id = hit?.id?.id;
+            const project = currentProjects.current.find((p) => p.id === id);
+            if (!project) {
+              if (lastHover) clearHover();
+              return;
+            }
+            if (lastHover !== project.id) {
+              const old = v.entities.getById(lastHover);
+              if (old?.point) old.point.pixelSize = new C.ConstantProperty(11);
+              const entity = v.entities.getById(project.id);
+              if (entity?.point)
+                entity.point.pixelSize = new C.ConstantProperty(18);
+              lastHover = project.id;
+              v.scene.requestRender();
+            }
+            v.scene.canvas.style.cursor = "pointer";
+            setHovered({
+              project,
+              x: Math.max(
+                12,
+                Math.min(
+                  movement.endPosition.x + 18,
+                  v.scene.canvas.clientWidth - 244,
+                ),
+              ),
+              y: Math.max(
+                12,
+                Math.min(
+                  movement.endPosition.y + 18,
+                  v.scene.canvas.clientHeight - 100,
+                ),
+              ),
+            });
+          },
+          C.ScreenSpaceEventType.MOUSE_MOVE,
         );
         void (async () => {
           try {
@@ -217,6 +321,7 @@ export default function Globe({
       active.current = false;
       generation.current++;
       handler?.destroy();
+      removeMouseLeave?.();
       removeOcclusion?.();
       const v = viewer.current;
       if (v && !v.isDestroyed()) v.destroy();
@@ -278,6 +383,22 @@ export default function Globe({
     v.scene.requestRender();
   }, [ready, settings.buildings, settings.terrain]);
   useEffect(() => {
+    const v = viewer.current;
+    if (!ready || !v) return;
+    v.shadows = settings.shadows;
+    v.scene.globe.enableLighting = settings.shadows;
+    v.scene.requestRender();
+  }, [ready, settings.shadows]);
+  useEffect(() => {
+    if (ready && resetCommand) reset();
+  }, [ready, resetCommand]);
+  useEffect(() => {
+    if (!stopCommand) return;
+    viewer.current?.camera.cancelFlight();
+    generation.current++;
+    setEntering(false);
+  }, [stopCommand]);
+  useEffect(() => {
     viewer.current?.camera.cancelFlight();
     generation.current++;
     setEntering(false);
@@ -287,7 +408,12 @@ export default function Globe({
     const C = cesiumRef.current,
       v = viewer.current;
     if (!ready || !C || !v) return;
+    setHovered(null);
     v.entities.removeAll();
+    const pointOccluder = new C.Occluder(
+      new C.BoundingSphere(C.Cartesian3.ZERO, C.Ellipsoid.WGS84.minimumRadius),
+      v.camera.positionWC,
+    );
     projects
       .filter((p) => p.latitude !== null && p.longitude !== null)
       .forEach((p) => {
@@ -301,6 +427,9 @@ export default function Globe({
         );
         v.entities.add({
           id: p.id,
+          show: pointOccluder.isPointVisible(
+            C.Cartesian3.fromDegrees(p.longitude!, p.latitude!, 160),
+          ),
           position: C.Cartesian3.fromDegrees(p.longitude!, p.latitude!, 160),
           point: {
             heightReference: C.HeightReference.RELATIVE_TO_GROUND,
@@ -344,6 +473,7 @@ export default function Globe({
     setJourney(false);
     setEntering(false);
     setSelected(null);
+    selectionChange.current?.(null);
     const C = cesiumRef.current,
       v = viewer.current;
     if (C && v) {
@@ -356,6 +486,7 @@ export default function Globe({
   }
   function enter() {
     if (!selected) return;
+    interaction.current?.();
     if (motionScale(settings.motion) === 0) {
       viewer.current?.camera.cancelFlight();
       onOpen(selected);
@@ -390,12 +521,19 @@ export default function Globe({
       {ready && (
         <>
           <div className="globe-controls">
-            <button onClick={reset} aria-label="Reset to globe">
+            <button
+              onClick={() => {
+                interaction.current?.();
+                reset();
+              }}
+              aria-label="Reset to globe"
+            >
               <Globe2 size={17} />
               <span>World</span>
             </button>
             <button
               onClick={() => {
+                interaction.current?.();
                 viewer.current?.camera.zoomIn(
                   viewer.current.camera.positionCartographic.height * 0.4,
                 );
@@ -407,6 +545,7 @@ export default function Globe({
             </button>
             <button
               onClick={() => {
+                interaction.current?.();
                 viewer.current?.camera.zoomOut(
                   viewer.current.camera.positionCartographic.height * 0.6,
                 );
@@ -424,8 +563,33 @@ export default function Globe({
           </div>
         </>
       )}
+      {hovered && (
+        <div
+          className="globe-marker-tooltip"
+          style={{ left: hovered.x, top: hovered.y }}
+          role="tooltip"
+        >
+          <strong>{hovered.project.name}</strong>
+          <span>{hovered.project.location || "Project location"}</span>
+          <small>{hovered.project.status} · Click to explore</small>
+        </div>
+      )}
       {selected && !journey && (
         <div className="destination-card">
+          <button
+            className="destination-close"
+            aria-label="Close selected project"
+            onClick={() => {
+              viewer.current?.camera.cancelFlight();
+              generation.current++;
+              setEntering(false);
+              setSelected(null);
+              selectionChange.current?.(null);
+              interaction.current?.();
+            }}
+          >
+            <X size={15} />
+          </button>
           <span className="eyebrow">DESTINATION SELECTED</span>
           <h2>{selected.name}</h2>
           <p>

@@ -41,7 +41,7 @@ import {
   type Project,
   type ProjectFields,
 } from "@/lib/projects";
-import Globe from "./globe";
+import GlobeWorkspace from "./globe-workspace";
 import ViewFlight, { type PortfolioView } from "./view-flight";
 import { useTheme } from "next-themes";
 import Settings from "./settings";
@@ -331,7 +331,9 @@ export default function Atlas() {
       key={access?.userId || "loading"}
       userId={access?.userId}
     >
-      <div className="atlas-shell">
+      <div
+        className={`atlas-shell ${view === "globe" ? "immersive-globe" : ""}`}
+      >
         <aside className="sidebar">
           <a className="brand" href="/" aria-label="Atlas home">
             <img
@@ -433,30 +435,74 @@ export default function Atlas() {
         </aside>
         <div className="main-shell">
           <header className="topbar">
-            <div className="breadcrumbs">
-              Workspace <span>/</span>{" "}
-              <strong>
-                {view === "dashboard"
-                  ? "Overview"
-                  : view === "globe"
-                    ? "God’s Eye"
-                    : view === "briefing"
-                      ? "Briefings"
-                      : view === "ideas"
-                        ? "Ideas & AI"
-                        : view === "access"
-                          ? "Access"
-                          : view === "wellbeing"
-                            ? "Wellbeing"
-                            : "Connections"}
-              </strong>
+            {view === "globe" && (
+              <a
+                className="globe-top-brand"
+                href="/?view=dashboard"
+                aria-label="Atlas dashboard"
+              >
+                <img src="/te-logo.png" alt="TE Connectivity" />
+                <span>ATLAS</span>
+              </a>
+            )}
+            <div className="view-tabs-bar">
+              <div
+                className="view-tabs"
+                role="tablist"
+                aria-label="Project views"
+                style={
+                  {
+                    "--active-tab": view === "globe" ? 1 : 0,
+                  } as React.CSSProperties
+                }
+              >
+                {(view === "dashboard" || view === "globe") && (
+                  <span className="view-tab-indicator" aria-hidden="true" />
+                )}
+                <button
+                  id="dashboard-tab"
+                  role="tab"
+                  aria-label="Dashboard"
+                  aria-selected={view === "dashboard"}
+                  aria-controls="dashboard-panel"
+                  tabIndex={view === "globe" ? -1 : 0}
+                  disabled={!loaded}
+                  ref={(el) => {
+                    tabRefs.current.dashboard = el;
+                  }}
+                  onKeyDown={(e) => handleTabKey(e, "dashboard")}
+                  onClick={() => navigate("dashboard")}
+                >
+                  <LayoutDashboard size={17} />
+                  <span>Dashboard</span>
+                </button>
+                <button
+                  id="globe-tab"
+                  role="tab"
+                  aria-label="God’s Eye"
+                  aria-selected={view === "globe"}
+                  aria-controls="globe-panel"
+                  tabIndex={view === "globe" ? 0 : -1}
+                  disabled={!loaded}
+                  ref={(el) => {
+                    tabRefs.current.globe = el;
+                  }}
+                  onKeyDown={(e) => handleTabKey(e, "globe")}
+                  onClick={() => navigate("globe")}
+                >
+                  <Globe2 size={17} />
+                  <span>God’s Eye</span>
+                </button>
+              </div>
             </div>
             <div className="topbar-right">
               <FocusBadge onOpen={() => navigate("wellbeing")} />
               <button
-                className="theme-toggle"
+                className={`theme-toggle ${view === "globe" ? "globe-settings-trigger" : ""}`}
                 ref={settingsTrigger}
-                aria-label="Open settings"
+                aria-label={
+                  view === "globe" ? "Open God’s Eye settings" : "Open settings"
+                }
                 title="Settings"
                 disabled={!loaded}
                 onClick={() => {
@@ -465,6 +511,7 @@ export default function Atlas() {
                 }}
               >
                 <Settings2 size={18} />
+                {view === "globe" && <span>God’s Eye settings</span>}
               </button>
               <button
                 className="theme-toggle"
@@ -495,63 +542,6 @@ export default function Atlas() {
               </Button>
             </div>
           </header>
-          <div className="view-tabs-bar">
-            <div
-              className="view-tabs"
-              role="tablist"
-              aria-label="Project views"
-              style={
-                {
-                  "--active-tab": view === "globe" ? 1 : 0,
-                } as React.CSSProperties
-              }
-            >
-              {(view === "dashboard" || view === "globe") && (
-                <span className="view-tab-indicator" aria-hidden="true" />
-              )}
-              <button
-                id="dashboard-tab"
-                role="tab"
-                aria-label="Dashboard"
-                aria-selected={view === "dashboard"}
-                aria-controls="dashboard-panel"
-                tabIndex={view === "globe" ? -1 : 0}
-                disabled={!loaded}
-                ref={(el) => {
-                  tabRefs.current.dashboard = el;
-                }}
-                onKeyDown={(e) => handleTabKey(e, "dashboard")}
-                onClick={() => navigate("dashboard")}
-              >
-                <LayoutDashboard size={17} />
-                <span>Dashboard</span>
-              </button>
-              <button
-                id="globe-tab"
-                role="tab"
-                aria-label="God’s Eye"
-                aria-selected={view === "globe"}
-                aria-controls="globe-panel"
-                tabIndex={view === "globe" ? 0 : -1}
-                disabled={!loaded}
-                ref={(el) => {
-                  tabRefs.current.globe = el;
-                }}
-                onKeyDown={(e) => handleTabKey(e, "globe")}
-                onClick={() => navigate("globe")}
-              >
-                <Globe2 size={17} />
-                <span>God’s Eye</span>
-              </button>
-            </div>
-            <span className="view-tabs-caption">
-              {flight
-                ? "Changing perspective"
-                : view === "globe"
-                  ? "Your projects, around the world"
-                  : "Your work, in focus"}
-            </span>
-          </div>
           <div className="view-content" inert={!!flight} aria-busy={!!flight}>
             {error && (
               <div className="error-banner" role="alert">
@@ -604,53 +594,19 @@ export default function Atlas() {
                 onImported={load}
               />
             ) : view === "globe" ? (
-              <div
-                className="globe-page"
-                role="tabpanel"
-                id="globe-panel"
-                aria-labelledby="globe-tab"
-                tabIndex={0}
-              >
-                <Globe
-                  projects={globeProjects}
-                  target={flightTarget}
-                  onOpen={openProject}
-                  settings={settings.globe}
-                />
-                <div className="globe-heading">
-                  <span className="eyebrow">A WORLD OF WORK</span>
-                  <h1>God’s Eye</h1>
-                  <p>
-                    {globeProjects.filter((p) => p.latitude !== null).length}{" "}
-                    project locations. One perspective.
-                  </p>
-                </div>
-                {settings.globe.projectList && (
-                  <div className="globe-projects">
-                    <div className="panel-caption">
-                      PROJECT LOCATIONS <span>{demo ? "DEMO" : "ATLAS"}</span>
-                    </div>
-                    {globeProjects
-                      .filter((p) => p.latitude !== null)
-                      .map((p) => (
-                        <button
-                          className={`location-row ${flightTarget?.id === p.id ? "selected" : ""}`}
-                          key={p.id}
-                          onClick={() => setFlightTarget(p)}
-                        >
-                          <span className={`project-symbol ${p.color}`}>
-                            {p.name.slice(0, 1)}
-                          </span>
-                          <span>
-                            <strong>{p.name}</strong>
-                            <small>{p.location}</small>
-                          </span>
-                          <ArrowUpRight size={17} />
-                        </button>
-                      ))}
-                  </div>
-                )}
-              </div>
+              <GlobeWorkspace
+                projects={globeProjects}
+                target={flightTarget}
+                onOpen={openProject}
+                settings={settings.globe}
+                onSettingsChange={(patch) =>
+                  updateSettings({
+                    ...settings,
+                    globe: { ...settings.globe, ...patch },
+                  })
+                }
+                demo={demo}
+              />
             ) : (
               <main
                 className="dashboard"

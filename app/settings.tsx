@@ -203,6 +203,29 @@ export default function Settings({
               </>
             ) : (
               <>
+                <SettingRow id="settings-globe-mode" title="Globe experience">
+                  <select
+                    id="settings-globe-mode"
+                    value={globe.mode}
+                    onChange={(e) =>
+                      setGlobe({ mode: e.target.value as typeof globe.mode })
+                    }
+                  >
+                    <option value="explore">Explore</option>
+                    <option value="scan">Cinematic scan</option>
+                  </select>
+                </SettingRow>
+                <SettingRow
+                  id="settings-shadows"
+                  title="Sunlight & shadows"
+                  description="Illuminate the globe and cast building shadows using the current sun position."
+                >
+                  <Switch
+                    id="settings-shadows"
+                    checked={globe.shadows}
+                    onCheckedChange={(shadows) => setGlobe({ shadows })}
+                  />
+                </SettingRow>
                 <SettingRow id="settings-map" title="Map style">
                   <select
                     id="settings-map"
@@ -253,7 +276,7 @@ export default function Settings({
                 <SettingRow
                   id="settings-locations"
                   title="Location list"
-                  description="Browse projects beside the globe."
+                  description="Show the project panel in Explore mode. Scanner results remain available in Cinematic scan."
                 >
                   <Switch
                     id="settings-locations"

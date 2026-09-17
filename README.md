@@ -69,3 +69,11 @@ Connections has **From FlightDeck** and **To FlightDeck** flows. Atlas onboardin
 - Configurable Pomodoro with wall-clock persistence, pause/resume/reset, a longer break after four daily focus sessions, and in-app break reminders. Sessions start only when chosen.
 - A compact dashboard widget, full Wellbeing page, running timer indicator, reduced-motion support and a dashboard visibility toggle.
 - Outlook summary and calendar panels are explicitly disconnected pending Microsoft 365 app registration and delegated sign-in. No email/calendar data is fetched. See [personal hub requirements](docs/PERSONAL-HUB-CONTRACT.md).
+
+## Immersive God’s Eye
+
+Dashboard/God’s Eye tabs sit inside the top navigation. God’s Eye hides the sidebar and exposes a labeled settings control. Its saved Explore/Scan preference, imagery, labels, terrain, building layers and optional sunlight/shadows are available there.
+
+Cinematic scan searches actual active Atlas project fields and task text, with accent-insensitive token matching, attention/high-priority/completed filters, animated index channels and a cancellable reveal. It does not query cameras, people, external tracking feeds or the disconnected OS. Example data is explicitly labeled. Unmapped results open the project for editing instead of inventing coordinates.
+
+Tour locations visits mapped results and stops on manual interaction, workspace entry, Stop or Escape. `/` opens search; reduced motion skips scan travel. Map markers enlarge on hover and show project tooltips. Panels can be hidden to explore the globe unobstructed.
