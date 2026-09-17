@@ -1,32 +1,36 @@
 {
-  "updated": "Atlas build verified; SDK connection pending",
+  "updated": "Action hub, settings and access management verified",
   "stages": [
     {
-      "name": "Dashboard and project workspaces",
+      "name": "TE dashboard and God’s Eye globe",
       "status": "Implemented and reviewed"
     },
     {
-      "name": "Durable project and task storage",
+      "name": "Saved dashboard and globe settings",
+      "status": "Implemented and tested"
+    },
+    {
+      "name": "Actions, project updates and archive/restore",
+      "status": "Implemented and tested"
+    },
+    {
+      "name": "Daily and weekly briefings",
+      "status": "Implemented and tested"
+    },
+    {
+      "name": "AI radar and consultancy onboarding pilots",
       "status": "Implemented and reviewed"
     },
     {
-      "name": "God’s Eye globe",
-      "status": "Implemented and reviewed"
+      "name": "Super Admin, users and custom roles",
+      "status": "Implemented; authorization reviewed"
     },
     {
-      "name": "Building → room → laptop journey",
-      "status": "Implemented and reviewed"
+      "name": "FlightDeck master-app and TEOA Advantage contract",
+      "status": "Prepared; waiting for deployed OS and SDK"
     },
     {
-      "name": "TE theme, logo and light/dark modes",
-      "status": "Implemented and reviewed"
-    },
-    {
-      "name": "FlightDeck SDK adapter and requirements",
-      "status": "Prepared; waiting for SDK"
-    },
-    {
-      "name": "GitHub source and private preview",
+      "name": "Updated source and private site",
       "status": "Ready for publication"
     }
   ]

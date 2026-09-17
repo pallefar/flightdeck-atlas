@@ -4,6 +4,7 @@ import type * as CesiumType from "cesium";
 import { ArrowRight, Globe2, Minus, Plus, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Project } from "@/lib/projects";
+import { motionScale, type GlobeSettings } from "@/lib/settings";
 import RoomJourney from "./room-journey";
 type CesiumModule = typeof CesiumType;
 declare global {
@@ -36,15 +37,20 @@ export default function Globe({
   projects,
   target,
   onOpen,
+  settings,
 }: {
   projects: Project[];
   target: Project | null;
   onOpen: (p: Project) => void;
+  settings: GlobeSettings;
 }) {
   const container = useRef<HTMLDivElement>(null),
     viewer = useRef<CesiumType.Viewer | null>(null),
     cesiumRef = useRef<CesiumModule | null>(null),
     currentProjects = useRef(projects),
+    currentSettings = useRef(settings),
+    terrainProvider = useRef<CesiumType.CesiumTerrainProvider | null>(null),
+    buildingTiles = useRef<CesiumType.Cesium3DTileset | null>(null),
     active = useRef(true),
     generation = useRef(0);
   const [ready, setReady] = useState(false),
@@ -53,8 +59,10 @@ export default function Globe({
     [journey, setJourney] = useState(false),
     [entering, setEntering] = useState(false),
     [mapMode, setMapMode] = useState("Satellite imagery"),
-    [imageryReady, setImageryReady] = useState(false);
+    [imageryReady, setImageryReady] = useState(false),
+    [buildingsReady, setBuildingsReady] = useState(false);
   currentProjects.current = projects;
+  currentSettings.current = settings;
   function fly(p: Project, close = false, complete?: () => void) {
     const C = cesiumRef.current,
       v = viewer.current;
@@ -73,11 +81,8 @@ export default function Globe({
         C.Math.toRadians(close ? -15 : -40),
         close ? 150 : 1500,
       ),
-      duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-        ? 0
-        : close
-          ? 2.5
-          : 4.5,
+      duration:
+        (close ? 2.5 : 4.5) * motionScale(currentSettings.current.motion),
       easingFunction: C.EasingFunction.CUBIC_IN_OUT,
       cancel: () => {
         if (active.current) setEntering(false);
@@ -157,29 +162,6 @@ export default function Globe({
         );
         void (async () => {
           try {
-            const imagery = await C.ArcGisMapServerImageryProvider.fromUrl(
-              "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer",
-              { enablePickFeatures: false },
-            );
-            if (disposed) return;
-            const layer = v.imageryLayers.addImageryProvider(imagery);
-            layer.brightness = 0.87;
-            layer.saturation = 0.72;
-            setImageryReady(true);
-            v.scene.requestRender();
-          } catch {
-            if (disposed) return;
-            v.imageryLayers.addImageryProvider(
-              new C.OpenStreetMapImageryProvider({
-                url: "https://tile.openstreetmap.org/",
-              }),
-            );
-            setMapMode("Street map fallback");
-            setImageryReady(true);
-          }
-        })();
-        void (async () => {
-          try {
             const terrain = await C.CesiumTerrainProvider.fromUrl(
               "https://terrain.reearth.land/cesium-mesh/ellipsoid",
               {
@@ -189,7 +171,11 @@ export default function Globe({
                 ),
               },
             );
-            if (!disposed) v.terrainProvider = terrain;
+            if (!disposed) {
+              terrainProvider.current = terrain;
+              if (currentSettings.current.terrain) v.terrainProvider = terrain;
+              v.scene.requestRender();
+            }
           } catch {
             /* Ellipsoid remains a supported fallback. */
           }
@@ -207,14 +193,16 @@ export default function Globe({
             buildings.style = new C.Cesium3DTileStyle({
               color: "color('#a4b8c6', 0.96)",
             });
+            buildings.show = currentSettings.current.buildings;
+            buildingTiles.current = buildings;
             v.scene.primitives.add(buildings);
+            setBuildingsReady(true);
             v.cesiumWidget.creditDisplay.addStaticCredit(
               new C.Credit(
                 'Buildings: <a href="https://buildings.reearth.land/">Re:Earth</a> · © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> · <a href="https://docs.overturemaps.org/attribution/">Overture Maps</a>',
                 true,
               ),
             );
-            setMapMode("Satellite + 3D building footprints");
             v.scene.requestRender();
           } catch {
             /* Satellite-only view remains usable without community tiles. */
@@ -233,8 +221,68 @@ export default function Globe({
       const v = viewer.current;
       if (v && !v.isDestroyed()) v.destroy();
       viewer.current = null;
+      buildingTiles.current = null;
+      terrainProvider.current = null;
     };
   }, []);
+  useEffect(() => {
+    const C = cesiumRef.current,
+      v = viewer.current;
+    if (!ready || !C || !v) return;
+    let disposed = false;
+    setImageryReady(false);
+    void (async () => {
+      let provider: CesiumType.ImageryProvider;
+      let caption = "Street map";
+      try {
+        if (settings.mapStyle === "satellite") {
+          provider = await C.ArcGisMapServerImageryProvider.fromUrl(
+            "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer",
+            { enablePickFeatures: false },
+          );
+          caption = "Satellite imagery";
+        } else {
+          provider = new C.OpenStreetMapImageryProvider({
+            url: "https://tile.openstreetmap.org/",
+          });
+        }
+      } catch {
+        if (disposed) return;
+        provider = new C.OpenStreetMapImageryProvider({
+          url: "https://tile.openstreetmap.org/",
+        });
+        caption = "Street map (satellite unavailable)";
+      }
+      if (disposed || v.isDestroyed()) return;
+      v.imageryLayers.removeAll();
+      const layer = v.imageryLayers.addImageryProvider(provider);
+      layer.brightness = caption === "Satellite imagery" ? 0.87 : 1;
+      layer.saturation = caption === "Satellite imagery" ? 0.72 : 1;
+      setMapMode(caption);
+      setImageryReady(true);
+      v.scene.requestRender();
+    })();
+    return () => {
+      disposed = true;
+    };
+  }, [ready, settings.mapStyle]);
+  useEffect(() => {
+    const C = cesiumRef.current,
+      v = viewer.current;
+    if (!ready || !C || !v) return;
+    if (buildingTiles.current) buildingTiles.current.show = settings.buildings;
+    v.terrainProvider =
+      settings.terrain && terrainProvider.current
+        ? terrainProvider.current
+        : new C.EllipsoidTerrainProvider();
+    v.scene.requestRender();
+  }, [ready, settings.buildings, settings.terrain]);
+  useEffect(() => {
+    viewer.current?.camera.cancelFlight();
+    generation.current++;
+    setEntering(false);
+    if (settings.motion === "instant") setJourney(false);
+  }, [settings.motion]);
   useEffect(() => {
     const C = cesiumRef.current,
       v = viewer.current;
@@ -263,6 +311,7 @@ export default function Globe({
             disableDepthTestDistance: 0,
           },
           label: {
+            show: settings.labels,
             heightReference: C.HeightReference.RELATIVE_TO_GROUND,
             text: p.name,
             font: "13px sans-serif",
@@ -281,7 +330,7 @@ export default function Globe({
         });
       });
     v.scene.requestRender();
-  }, [ready, projects]);
+  }, [ready, projects, settings.labels]);
   useEffect(() => {
     if (ready && target) choose(target);
   }, [ready, target]);
@@ -301,15 +350,14 @@ export default function Globe({
       v.camera.cancelFlight();
       v.camera.flyTo({
         destination: C.Cartesian3.fromDegrees(18, 30, 15_500_000),
-        duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-          ? 0
-          : 2,
+        duration: 2 * motionScale(currentSettings.current.motion),
       });
     }
   }
   function enter() {
     if (!selected) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (motionScale(settings.motion) === 0) {
+      viewer.current?.camera.cancelFlight();
       onOpen(selected);
       return;
     }
@@ -370,7 +418,9 @@ export default function Globe({
             </button>
           </div>
           <div className="globe-hint">
-            {mapMode} · Drag to orbit · Scroll to zoom
+            {mapMode}
+            {settings.buildings && buildingsReady ? " + 3D buildings" : ""} ·
+            Drag to orbit · Scroll to zoom
           </div>
         </>
       )}
@@ -387,7 +437,11 @@ export default function Globe({
             {entering ? "Approaching your workspace…" : "Enter workspace"}
             <ArrowRight size={16} />
           </Button>
-          <small>Building → stylized room → your project</small>
+          <small>
+            {motionScale(settings.motion) === 0
+              ? "Opens your project immediately"
+              : "Building → stylized room → your project"}
+          </small>
           <button
             className="text-link"
             style={{ marginTop: 12, fontSize: 11 }}
@@ -405,6 +459,7 @@ export default function Globe({
       {journey && selected && (
         <RoomJourney
           project={selected}
+          durationScale={motionScale(settings.motion)}
           onComplete={() => {
             setJourney(false);
             onOpen(selected);

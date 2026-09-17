@@ -3,6 +3,13 @@ export const taskSchema = z.object({
   id: z.string().max(80),
   title: z.string().trim().min(1).max(200),
   done: z.boolean(),
+  dueDate: z
+    .string()
+    .regex(/^$|^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  priority: z.enum(["High", "Normal", "Low"]).optional(),
+  assignee: z.string().max(100).optional(),
+  completedAt: z.string().nullable().optional(),
 });
 export const projectSchema = z
   .object({
@@ -16,13 +23,41 @@ export const projectSchema = z
     dueDate: z.string().regex(/^$|^\d{4}-\d{2}-\d{2}$/),
     color: z.enum(["orange", "blue", "green", "violet"]),
     tasks: z.array(taskSchema).max(200),
+    functionArea: z.string().max(80).optional(),
+    priority: z.enum(["High", "Normal", "Low"]).optional(),
+    sponsor: z.string().max(100).optional(),
+    nextAction: z.string().max(300).optional(),
+    blocker: z.string().max(500).optional(),
+    benefit: z.string().max(500).optional(),
+    archived: z.boolean().optional(),
+    onboardingStage: z
+      .enum(["Discovery", "Pilot", "Ready for FlightDeck", "Rolled out"])
+      .optional(),
   })
   .refine(
     (p) => (p.latitude === null) === (p.longitude === null),
     "Provide both coordinates or neither",
   );
 export type ProjectFields = z.infer<typeof projectSchema>;
+export type ProjectEvent = {
+  id: string;
+  at: string;
+  kind:
+    | "created"
+    | "project"
+    | "task-completed"
+    | "task-reopened"
+    | "task-added"
+    | "task-removed"
+    | "note";
+  text: string;
+  taskId?: string;
+};
 export type Project = ProjectFields & {
+  activity?: ProjectEvent[];
+  canEdit?: boolean;
+  canArchive?: boolean;
+  ownedByMe?: boolean;
   id: string;
   source: "atlas" | "flightdeck";
   updatedAt: string;

@@ -1,6 +1,6 @@
 # FlightDeck Atlas
 
-A TE Connectivity themed project workspace with a dashboard and a Cesium-based God’s Eye globe.
+A TE Connectivity themed portfolio and action hub, with a dashboard, God’s Eye globe, daily/weekly briefings, consultancy pilots, and Super Admin-controlled access.
 
 ## Included
 
@@ -21,17 +21,18 @@ npm ci
 npm run db:generate # only if the schema changes
 npm run build
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_brave_vector.sql
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0001_past_blue_shield.sql
 npm run dev
 ```
 
-Apply the initial migration once per local database. `npm run dev` prints the local URL. The bundled local sign-in flow supplies a development-only identity on loopback. Production identity comes from the private hosting dispatcher; do not expose a bare Worker that trusts arbitrary identity headers.
+Before starting development, create an ignored `.env.local` containing `ATLAS_SUPERADMIN_EMAIL=seedy@sites.test` for the loopback fixture. Apply each migration once per local database. `npm run dev` prints the local URL. The bundled local sign-in flow supplies a development-only identity on loopback. Production identity comes from the private hosting dispatcher; do not expose a bare Worker that trusts arbitrary identity headers.
 
 ```sh
 npx tsc --noEmit
 npx playwright test
 ```
 
-The browser tests use an already running local server at port 5173 and Chrome. They create and remove a temporary project. The SDK adapter tests use fixtures and do not contact FlightDeck.
+The browser tests use an already running local server at port 5173 and Chrome. They create and remove temporary projects and access fixtures in the local database. The SDK adapter tests use fixtures and do not contact FlightDeck.
 
 ## FlightDeck integration
 
@@ -44,3 +45,15 @@ The globe uses Cesium, Esri satellite imagery, Re:Earth terrain, and community b
 Cesium runtime assets are copied from the locked package into `public/cesium` before development/build and are not committed. Keep map provider attributions visible. The globe/camera approach follows God’s Eye View; the unrelated intelligence feeds and reference footage are not bundled.
 
 TE branding uses the TE Connectivity logo already present in FlightDeck OS. The theme uses TE Orange (#E98300), Dark Teal (#2E4957), and complementary brand colors from TE’s published guidelines. See [third-party notices](THIRD_PARTY_NOTICES.md).
+
+## Personal action hub and access
+
+- Dashboard and globe settings are validated and saved in browser storage. Direct view links take precedence over the saved start view.
+- Tasks have due dates, priorities and owner labels. Project updates and server-stamped completion activity power daily/weekly briefings and Markdown exports. Archiving is reversible.
+- AI radar reads public official RSS feeds with source links, dates, timeouts and an in-memory 30-minute cache. It never sends project data to a model. Consultancy playbooks are suggested hypotheses, not generated findings or verified savings.
+- A pilot creates an editable onboarding checklist and exportable handoff. It does not create OS accounts or mutate FlightDeck.
+- Set `ATLAS_SUPERADMIN_EMAIL` as a production secret to the trusted sign-in email. The deployment in this task is configured for the Site owner. No user can self-register as Super Admin. For loopback development only, an ignored `.env.local` can bind it to `seedy@sites.test`.
+- Apply each generated D1 migration once. The second migration adds role grants, members, and the access audit. Project enrichment remains in the existing JSON column. Use `--persist-to .wrangler/state` for the local database.
+- Additional users require both private-site admission and an Atlas role. The access UI never silently changes hosting audience or sends email invitations.
+
+The future SDK/master-app/TEOA contract is in [docs/MASTER-APP-CONTRACT.md](docs/MASTER-APP-CONTRACT.md).

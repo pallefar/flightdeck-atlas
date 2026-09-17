@@ -24,3 +24,7 @@ Atlas provides a project dashboard, globe, local project enrichment, durable pri
 - A project opens in either app with the same workspace/project context.
 
 The private Sites preview currently uses its platform sign-in. It is a preview identity boundary, not the proposed FlightDeck SSO implementation.
+
+## Master app, users, and TEOA Advantage
+
+See [MASTER-APP-CONTRACT.md](MASTER-APP-CONTRACT.md) for the proposed external master-app registration, Atlas role model, verified identity migration, Advantage portfolio data and context-aware launch requirements. Atlas roles must never expand permissions in FlightDeck or TEOA Advantage. Shared sign-in and external grants remain pending the SDK.

@@ -4,10 +4,10 @@ export default function Integration() {
       <a href="/?view=connection">← Back to connections</a>
       <h1>Ready for the FlightDeck SDK</h1>
       <p>
-        Atlas stores your projects and tasks now. FlightDeck is not deployed yet,
-        so shared sign-in and project synchronization are pending the new SDK.
-        The current OS source has been reviewed and a typed project reader is
-        prepared for its authenticated transport.
+        Atlas stores your projects and tasks now. FlightDeck is not deployed
+        yet, so shared sign-in and project synchronization are pending the new
+        SDK. The current OS source has been reviewed and a typed project reader
+        is prepared for its authenticated transport.
       </p>
       <h2>What the SDK needs to provide</h2>
       <ul>
@@ -31,15 +31,28 @@ export default function Integration() {
         </li>
         <li>
           A sub-app launch contract with workspace/project context, deep links,
-          theme and session events, plus a test environment for the complete flow.
+          theme and session events, plus a test environment for the complete
+          flow.
         </li>
       </ul>
+      <h2>Master app and TEOA Advantage</h2>
+      <p>
+        Atlas now manages local users, roles, actions, and onboarding pilots.
+        The SDK must connect verified users to explicit Atlas grants, then
+        provide permitted Advantage summaries and context-aware launch. Atlas
+        roles do not expand access inside FlightDeck.
+      </p>
+      <p>
+        <a href="https://github.com/pallefar/flightdeck-atlas/blob/main/docs/MASTER-APP-CONTRACT.md">
+          Read the master-app, roles, and Advantage contract ↗
+        </a>
+      </p>
       <h2>What Atlas owns</h2>
       <p>
         Locations, descriptions, tasks, deadlines, and progress remain Atlas
-        enrichment. The current OS project list supplies the source identity
-        and label; it does not yet supply these richer project fields. Future
-        SDK writes can extend this boundary once field ownership is agreed.
+        enrichment. The current OS project list supplies the source identity and
+        label; it does not yet supply these richer project fields. Future SDK
+        writes can extend this boundary once field ownership is agreed.
       </p>
       <h2>Before we enable the connection</h2>
       <p>

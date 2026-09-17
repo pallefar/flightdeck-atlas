@@ -11,10 +11,12 @@ import {
 } from "@/components/ui/dialog";
 export default function RoomJourney({
   project,
+  durationScale = 1,
   onComplete,
   onCancel,
 }: {
   project: Project;
+  durationScale?: number;
   onComplete: () => void;
   onCancel: () => void;
 }) {
@@ -228,7 +230,8 @@ export default function RoomJourney({
     let lastPhase = "";
     function tick() {
       if (disposed) return;
-      const t = (performance.now() - start) / 1000;
+      const t =
+        (performance.now() - start) / (1000 * Math.max(0.1, durationScale));
       if (t < 3) {
         camera.position.lerpVectors(positionA, positionB, ease(t / 3));
       } else if (t < 6) {
@@ -267,7 +270,7 @@ export default function RoomJourney({
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [project, mountNode]);
+  }, [project, mountNode, durationScale]);
   return (
     <Dialog
       open

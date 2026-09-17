@@ -1,3 +1,5 @@
+import { authorize } from "@/lib/access";
+import { canChangeProject } from "@/lib/access-policy";
 import {
   database,
   owner,
@@ -9,16 +11,21 @@ import {
 } from "@/lib/server-projects";
 export const dynamic = "force-dynamic";
 export async function GET() {
-  const user = await owner();
-  if (!user) return json({ error: "Sign in to load your projects." }, 401);
+  const auth = await authorize("projects.read");
+  if (auth.error) return auth.error;
   try {
     const result = await database()
-      .prepare(
-        "SELECT * FROM atlas_projects WHERE owner_id = ? ORDER BY updated_at DESC",
-      )
-      .bind(user)
+      .prepare("SELECT * FROM atlas_projects ORDER BY updated_at DESC")
       .all();
-    return json({ projects: result.results.map(fromRow) });
+    return json({
+      access: auth.access,
+      projects: result.results.map((row) => ({
+        ...fromRow(row),
+        canEdit: canChangeProject(auth.access, row.owner_id as string),
+        canArchive: canChangeProject(auth.access, row.owner_id as string, true),
+        ownedByMe: row.owner_id === auth.access.userId,
+      })),
+    });
   } catch {
     console.error("Atlas project list unavailable");
     return json(
@@ -30,8 +37,9 @@ export async function GET() {
 export async function POST(request: Request) {
   if (!sameOrigin(request))
     return json({ error: "Request origin is not allowed." }, 403);
-  const user = await owner();
-  if (!user) return json({ error: "Sign in to create a project." }, 401);
+  const auth = await authorize("projects.create");
+  if (auth.error) return auth.error;
+  const user = auth.access.userId;
   let fields;
   try {
     ({ fields } = await readFields(request));
@@ -47,13 +55,27 @@ export async function POST(request: Request) {
       .bind(
         project.id,
         user,
-        JSON.stringify(fields),
+        JSON.stringify({
+          ...fields,
+          tasks: project.tasks,
+          activity: project.activity,
+        }),
         project.source,
         project.updatedAt,
         project.revision,
       )
       .run();
-    return json({ project }, 201);
+    return json(
+      {
+        project: {
+          ...project,
+          canEdit: canChangeProject(auth.access, user),
+          canArchive: canChangeProject(auth.access, user, true),
+          ownedByMe: true,
+        },
+      },
+      201,
+    );
   } catch {
     console.error("Atlas project creation unavailable");
     return json(
