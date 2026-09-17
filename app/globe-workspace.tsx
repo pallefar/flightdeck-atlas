@@ -234,7 +234,11 @@ export default function GlobeWorkspace({
         settings={settings}
         resetCommand={command}
         stopCommand={stopCommand}
-        onInteract={() => setTour(false)}
+        onInteract={() => {
+          setTour(false);
+          if (window.matchMedia("(max-width:760px)").matches)
+            setPanelOpen(false);
+        }}
         onSelectionChange={setLocalTarget}
       />
       <div className="globe-command-bar">

@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import type { Project, ProjectFields } from "@/lib/projects";
 import {
   briefing,
+  blockerSummary,
   briefingMarkdown,
   downloadText,
   localDate,
@@ -168,7 +169,7 @@ export default function Briefing({
                 onClick={() => onOpen(p)}
               >
                 <strong>{p.name}</strong>
-                <span>{p.blocker}</span>
+                <span>{blockerSummary(p)}</span>
               </button>
             ))}
             {b.needsNext.map((p) => (

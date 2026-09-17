@@ -65,6 +65,24 @@ export default function Integration() {
           Read the project bridge contract and acceptance checks ↗
         </a>
       </p>
+      <h2>Strategy, KPIs and your AI advisor</h2>
+      <p>
+        Atlas now supports manual goals and KPI measurements, richer tasks, a
+        daily plan, and rule-based watch-outs. FlightDeck remains the selected
+        AI provider; no project data is sent to an AI service yet.
+      </p>
+      <p>
+        The SDK needs permission-scoped strategy and KPI reads with units,
+        periods, timestamps, missing-data states, TEOA provenance and source
+        links. AI reviews need authorized project snapshots, evidence-linked
+        recommendations, and draft actions that you approve before they change
+        anything.
+      </p>
+      <p>
+        <a href="https://github.com/pallefar/flightdeck-atlas/blob/main/docs/STRATEGY-AI-CONTRACT.md">
+          Read the strategy, KPI and AI handoff ↗
+        </a>
+      </p>
       <h2>What Atlas owns</h2>
       <p>
         Locations, descriptions, tasks, deadlines, and progress remain Atlas

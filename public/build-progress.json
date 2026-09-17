@@ -1,6 +1,26 @@
 {
-  "updated": "Immersive God\u2019s Eye, cinematic project search and top navigation implemented",
+  "updated": "Productivity workspace, Today advisor and circular globe flights implemented",
   "stages": [
+    {
+      "name": "Today, quick capture, focus budget and rule-based advisor",
+      "status": "Implemented; planning and persistence tested"
+    },
+    {
+      "name": "Expanded project workspace, task board, owners and checklists",
+      "status": "Implemented; drafts, saves and mobile controls reviewed"
+    },
+    {
+      "name": "Manual strategy goals and KPI measurements",
+      "status": "Implemented; persistence, reductions and validation tested"
+    },
+    {
+      "name": "Circular camera zoom, orbit and risk marker colors",
+      "status": "Implemented; cancellation and reduced motion reviewed"
+    },
+    {
+      "name": "FlightDeck AI, strategy and KPI source integration",
+      "status": "Contract prepared; awaiting FlightDeck OS service and SDK"
+    },
     {
       "name": "TE dashboard and God\u2019s Eye globe",
       "status": "Implemented and reviewed"

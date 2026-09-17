@@ -133,7 +133,7 @@ export default function Settings({
                 <SettingRow
                   id="settings-layout"
                   title="Project layout"
-                  description="Roomy cards or a compact list."
+                  description="Cards, a compact list, or a status board."
                 >
                   <select
                     id="settings-layout"
@@ -146,6 +146,7 @@ export default function Settings({
                   >
                     <option value="cards">Cards</option>
                     <option value="list">List</option>
+                    <option value="board">Board</option>
                   </select>
                 </SettingRow>
                 <SettingRow id="settings-sort" title="Project order">
@@ -162,6 +163,19 @@ export default function Settings({
                     <option value="name">Name A–Z</option>
                     <option value="due">Due date</option>
                   </select>
+                </SettingRow>
+                <SettingRow
+                  id="settings-planner"
+                  title="Deadline planner"
+                  description="Seven-day agenda and projects needing a check-in."
+                >
+                  <Switch
+                    id="settings-planner"
+                    checked={dashboard.showPlanner}
+                    onCheckedChange={(showPlanner) =>
+                      setDashboard({ showPlanner })
+                    }
+                  />
                 </SettingRow>
                 <SettingRow
                   id="settings-metrics"
@@ -225,6 +239,31 @@ export default function Settings({
                     checked={globe.shadows}
                     onCheckedChange={(shadows) => setGlobe({ shadows })}
                   />
+                </SettingRow>
+                <SettingRow
+                  id="settings-zoom-lens"
+                  title="Circular zoom lens"
+                  description="Animated target rings while flying into a project or zooming."
+                >
+                  <Switch
+                    id="settings-zoom-lens"
+                    checked={globe.zoomLens}
+                    onCheckedChange={(zoomLens) => setGlobe({ zoomLens })}
+                  />
+                </SettingRow>
+                <SettingRow id="settings-marker-color" title="Marker colors">
+                  <select
+                    id="settings-marker-color"
+                    value={globe.markerColor}
+                    onChange={(e) =>
+                      setGlobe({
+                        markerColor: e.target.value as typeof globe.markerColor,
+                      })
+                    }
+                  >
+                    <option value="project">Project colors</option>
+                    <option value="risk">Risk signals</option>
+                  </select>
                 </SettingRow>
                 <SettingRow id="settings-map" title="Map style">
                   <select

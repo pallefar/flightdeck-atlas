@@ -9,8 +9,65 @@ export const taskSchema = z.object({
     .optional(),
   priority: z.enum(["High", "Normal", "Low"]).optional(),
   assignee: z.string().max(100).optional(),
+  plannedDate: z
+    .string()
+    .regex(/^$|^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  workflow: z.enum(["todo", "doing", "blocked"]).optional(),
+  description: z.string().max(2000).optional(),
+  estimateMinutes: z.number().int().min(0).max(100000).optional(),
+  checklist: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(80),
+        title: z.string().trim().min(1).max(200),
+        done: z.boolean(),
+      }),
+    )
+    .max(30)
+    .optional(),
   completedAt: z.string().nullable().optional(),
 });
+export const objectiveSchema = z.object({
+  id: z.string().min(1).max(80),
+  title: z.string().trim().min(1).max(200),
+  description: z.string().max(1000).default(""),
+  owner: z.string().max(100).default(""),
+  dueDate: z
+    .string()
+    .regex(/^$|^\d{4}-\d{2}-\d{2}$/)
+    .default(""),
+  status: z.enum(["Planned", "In progress", "Achieved"]).default("Planned"),
+});
+export const kpiSchema = z
+  .object({
+    id: z.string().min(1).max(80),
+    name: z.string().trim().min(1).max(100),
+    unit: z.string().max(30).default(""),
+    baseline: z.number().finite(),
+    current: z.number().finite(),
+    target: z.number().finite(),
+    objectiveId: z.string().max(80).default(""),
+  })
+  .refine(
+    (k) => k.target !== k.baseline,
+    "KPI target must differ from its baseline.",
+  );
+export type Objective = z.infer<typeof objectiveSchema>;
+export type KPI = z.infer<typeof kpiSchema>;
+export function kpiProgress(k: KPI) {
+  return Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(((k.current - k.baseline) / (k.target - k.baseline)) * 100),
+    ),
+  );
+}
+export type Task = z.infer<typeof taskSchema>;
+export function taskState(t: Task) {
+  return t.done ? "done" : t.workflow || "todo";
+}
 export const projectSchema = z
   .object({
     name: z.string().trim().min(1).max(100),
@@ -23,6 +80,8 @@ export const projectSchema = z
     dueDate: z.string().regex(/^$|^\d{4}-\d{2}-\d{2}$/),
     color: z.enum(["orange", "blue", "green", "violet"]),
     tasks: z.array(taskSchema).max(200),
+    objectives: z.array(objectiveSchema).max(30).optional(),
+    kpis: z.array(kpiSchema).max(40).optional(),
     functionArea: z.string().max(80).optional(),
     priority: z.enum(["High", "Normal", "Low"]).optional(),
     sponsor: z.string().max(100).optional(),
@@ -44,7 +103,31 @@ export const projectSchema = z
   .refine(
     (p) => (p.latitude === null) === (p.longitude === null),
     "Provide both coordinates or neither",
-  );
+  )
+  .superRefine((p, ctx) => {
+    for (const items of [
+      p.tasks,
+      p.objectives || [],
+      p.kpis || [],
+      ...p.tasks.map((t) => t.checklist || []),
+    ]) {
+      if (new Set(items.map((x) => x.id)).size !== items.length)
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Record IDs must be unique.",
+        });
+    }
+    if (
+      p.kpis?.some(
+        (k) =>
+          k.objectiveId && !p.objectives?.some((o) => o.id === k.objectiveId),
+      )
+    )
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Choose an existing strategy goal for this KPI.",
+      });
+  });
 export type ProjectFields = z.infer<typeof projectSchema>;
 export type ProjectEvent = {
   id: string;

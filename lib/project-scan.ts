@@ -23,7 +23,9 @@ export function projectSignals(project: Project, today = localDay()) {
   return {
     overdue,
     late,
-    blocked: !!project.blocker?.trim(),
+    blocked:
+      !!project.blocker?.trim() ||
+      project.tasks.some((t) => !t.done && t.workflow === "blocked"),
     located: project.latitude !== null && project.longitude !== null,
   };
 }

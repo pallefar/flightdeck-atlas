@@ -24,6 +24,7 @@ import {
   Lightbulb,
   ShieldCheck,
   Heart,
+  ListTodo,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,6 +42,11 @@ import {
   type Project,
   type ProjectFields,
 } from "@/lib/projects";
+import Today from "./today";
+import PortfolioPlan from "./portfolio-plan";
+import ProjectBoard from "./project-board";
+import CommandMenu from "./command-menu";
+import { briefing } from "@/lib/briefing";
 import GlobeWorkspace from "./globe-workspace";
 import ViewFlight, { type PortfolioView } from "./view-flight";
 import { useTheme } from "next-themes";
@@ -66,6 +72,7 @@ import {
   type AtlasSettings,
 } from "@/lib/settings";
 type View =
+  | "today"
   | "dashboard"
   | "globe"
   | "connection"
@@ -162,6 +169,7 @@ export default function Atlas() {
         v === "briefing" ||
         v === "ideas" ||
         v === "wellbeing" ||
+        v === "today" ||
         v === "access"
         ? v
         : restored.startView,
@@ -259,9 +267,7 @@ export default function Atlas() {
     });
   const active = data.filter((p) => p.status === "In progress").length,
     done = data.reduce((s, p) => s + p.tasks.filter((t) => t.done).length, 0),
-    tasks = data.flatMap((p) =>
-      p.tasks.filter((t) => !t.done).map((t) => ({ p, t })),
-    );
+    tasks = briefing(allData, "day").actions;
   async function save(
     fields: ProjectFields,
     existing?: Project,
@@ -349,6 +355,16 @@ export default function Atlas() {
           </a>
           <div className="workspace-label">TE CONNECTIVITY</div>
           <nav aria-label="Main navigation">
+            <button
+              aria-label="Today and advisor"
+              aria-current={view === "today" ? "page" : undefined}
+              disabled={!loaded}
+              className={view === "today" ? "nav-item active" : "nav-item"}
+              onClick={() => navigate("today")}
+            >
+              <ListTodo />
+              Today & advisor
+            </button>
             <button
               aria-label="Portfolio"
               aria-current={
@@ -497,6 +513,79 @@ export default function Atlas() {
             </div>
             <div className="topbar-right">
               <FocusBadge onOpen={() => navigate("wellbeing")} />
+              <CommandMenu
+                projects={allData}
+                onOpen={openProject}
+                disabled={
+                  !loaded || !!flight || !!selected || creating || settingsOpen
+                }
+                commands={[
+                  {
+                    id: "today",
+                    label: "Today, quick capture & advisor",
+                    run: () => navigate("today"),
+                  },
+                  {
+                    id: "dashboard",
+                    label: "Dashboard",
+                    run: () => navigate("dashboard"),
+                  },
+                  {
+                    id: "globe",
+                    label: "God’s Eye",
+                    run: () => navigate("globe"),
+                  },
+                  {
+                    id: "wellbeing",
+                    label: "Wellbeing & focus timer",
+                    run: () => navigate("wellbeing"),
+                  },
+                  {
+                    id: "connection",
+                    label: "FlightDeck connection",
+                    run: () => navigate("connection"),
+                  },
+                  ...(access?.permissions.includes("briefings.read")
+                    ? [
+                        {
+                          id: "briefing",
+                          label: "Daily & weekly briefings",
+                          run: () => navigate("briefing"),
+                        },
+                      ]
+                    : []),
+                  ...(access?.permissions.includes("ideas.use")
+                    ? [
+                        {
+                          id: "ideas",
+                          label: "Ideas & AI",
+                          run: () => navigate("ideas"),
+                        },
+                      ]
+                    : []),
+                  ...(access?.superAdmin
+                    ? [
+                        {
+                          id: "access",
+                          label: "People & access",
+                          run: () => navigate("access"),
+                        },
+                      ]
+                    : []),
+                  ...(access?.permissions.includes("projects.create")
+                    ? [
+                        {
+                          id: "new",
+                          label: "New project",
+                          run: () => {
+                            setError("");
+                            setCreating(true);
+                          },
+                        },
+                      ]
+                    : []),
+                ]}
+              />
               <button
                 className={`theme-toggle ${view === "globe" ? "globe-settings-trigger" : ""}`}
                 ref={settingsTrigger}
@@ -551,7 +640,24 @@ export default function Atlas() {
                 </button>
               </div>
             )}
-            {view === "wellbeing" ? (
+            {view === "today" ? (
+              <Today
+                projects={allData}
+                demo={demo}
+                busy={saving}
+                onOpen={openProject}
+                onSave={save}
+                onFocus={() => navigate("wellbeing")}
+                capacity={settings.dailyFocusMinutes}
+                onCapacityChange={(minutes) =>
+                  updateSettings({
+                    ...settings,
+                    dailyFocusMinutes:
+                      minutes as AtlasSettings["dailyFocusMinutes"],
+                  })
+                }
+              />
+            ) : view === "wellbeing" ? (
               <WellbeingPage />
             ) : view === "access" ? (
               access?.superAdmin ? (
@@ -624,6 +730,13 @@ export default function Atlas() {
                     <p>Your projects, your progress, your next move.</p>
                   </div>
                   <button
+                    className="today-launch"
+                    onClick={() => navigate("today")}
+                  >
+                    <ListTodo size={18} />
+                    Plan today <ArrowUpRight size={14} />
+                  </button>
+                  <button
                     className="globe-link"
                     onClick={() => navigate("globe")}
                   >
@@ -686,6 +799,9 @@ export default function Atlas() {
                     />
                   </section>
                 )}
+                {settings.dashboard.showPlanner && (
+                  <PortfolioPlan projects={allData} onOpen={openProject} />
+                )}
                 <div
                   className={`work-grid ${settings.dashboard.showFocus || settings.dashboard.showWellbeing ? "" : "without-focus"}`}
                 >
@@ -713,6 +829,26 @@ export default function Atlas() {
                         <option value="name">Name A–Z</option>
                         <option value="due">Due date</option>
                       </select>
+                    </div>
+                    <div
+                      className="project-layout-switch"
+                      aria-label="Project layout"
+                    >
+                      {(["cards", "list", "board"] as const).map((layout) => (
+                        <button
+                          key={layout}
+                          disabled={!loaded}
+                          aria-pressed={settings.dashboard.layout === layout}
+                          onClick={() =>
+                            updateSettings({
+                              ...settings,
+                              dashboard: { ...settings.dashboard, layout },
+                            })
+                          }
+                        >
+                          {layout[0].toUpperCase() + layout.slice(1)}
+                        </button>
+                      ))}
                     </div>
                     <div className="project-toolbar">
                       <div className="filter-tabs" aria-label="Filter projects">
@@ -744,59 +880,71 @@ export default function Atlas() {
                         />
                       </label>
                     </div>
-                    <div
-                      className={`project-grid ${settings.dashboard.layout === "list" ? "project-list" : ""}`}
-                    >
-                      {filtered.map((p) => (
-                        <button
-                          key={p.id}
-                          className="project-card"
-                          onClick={() => openProject(p)}
-                        >
-                          <div className="project-card-top">
-                            <span className={`project-symbol ${p.color}`}>
-                              {p.name
-                                .split(" ")
-                                .slice(0, 2)
-                                .map((s) => s[0])
-                                .join("")}
-                            </span>
-                            <span
-                              className={`status ${p.status.toLowerCase().replaceAll(" ", "-")}`}
-                            >
-                              {p.status}
-                            </span>
-                          </div>
-                          <div className="project-category">{p.category}</div>
-                          <h3>
-                            {p.name}
-                            <ArrowUpRight size={17} />
-                          </h3>
-                          <p className="project-description">{p.description}</p>
-                          <div className="project-progress">
-                            <span>Progress</span>
-                            <strong>{progress(p)}%</strong>
-                          </div>
-                          <Progress
-                            aria-label={`${p.name} progress`}
-                            value={progress(p)}
-                            className={`progress-bar ${p.color}`}
-                          />
-                          <div className="project-card-footer">
-                            <span>
-                              <MapPin size={13} />
-                              {p.dueDate
-                                ? `Due ${p.dueDate}`
-                                : p.location || "Location not set"}
-                            </span>
-                            <span>
-                              {p.tasks.filter((t) => t.done).length}/
-                              {p.tasks.length} tasks
-                            </span>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
+                    {settings.dashboard.layout === "board" ? (
+                      <ProjectBoard
+                        projects={filtered}
+                        onOpen={openProject}
+                        onSave={save}
+                        busy={saving}
+                        demo={demo}
+                      />
+                    ) : (
+                      <div
+                        className={`project-grid ${settings.dashboard.layout === "list" ? "project-list" : ""}`}
+                      >
+                        {filtered.map((p) => (
+                          <button
+                            key={p.id}
+                            className="project-card"
+                            onClick={() => openProject(p)}
+                          >
+                            <div className="project-card-top">
+                              <span className={`project-symbol ${p.color}`}>
+                                {p.name
+                                  .split(" ")
+                                  .slice(0, 2)
+                                  .map((s) => s[0])
+                                  .join("")}
+                              </span>
+                              <span
+                                className={`status ${p.status.toLowerCase().replaceAll(" ", "-")}`}
+                              >
+                                {p.status}
+                              </span>
+                            </div>
+                            <div className="project-category">{p.category}</div>
+                            <h3>
+                              {p.name}
+                              <ArrowUpRight size={17} />
+                            </h3>
+                            <p className="project-description">
+                              {p.description}
+                            </p>
+                            <div className="project-progress">
+                              <span>Progress</span>
+                              <strong>{progress(p)}%</strong>
+                            </div>
+                            <Progress
+                              aria-label={`${p.name} progress`}
+                              value={progress(p)}
+                              className={`progress-bar ${p.color}`}
+                            />
+                            <div className="project-card-footer">
+                              <span>
+                                <MapPin size={13} />
+                                {p.dueDate
+                                  ? `Due ${p.dueDate}`
+                                  : p.location || "Location not set"}
+                              </span>
+                              <span>
+                                {p.tasks.filter((t) => t.done).length}/
+                                {p.tasks.length} tasks
+                              </span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     {!filtered.length && (
                       <div className="empty-state">
                         <Folder size={32} />
@@ -841,20 +989,43 @@ export default function Atlas() {
                           </p>
                           <div className="focus-tasks">
                             {tasks.slice(0, 5).map(({ p, t }) => (
-                              <button
+                              <div
                                 key={`${p.id}-${t.id}`}
-                                onClick={() => openProject(p)}
-                                className="focus-task"
+                                className="focus-task actionable-focus"
                               >
-                                <Circle size={18} />
-                                <span>
-                                  <strong>{t.title}</strong>
-                                  <small>
-                                    <span className={`color-dot ${p.color}`} />
-                                    {p.name}
-                                  </small>
-                                </span>
-                              </button>
+                                <input
+                                  type="checkbox"
+                                  aria-label={`Complete ${t.title}`}
+                                  checked={false}
+                                  disabled={
+                                    demo || saving || p.canEdit === false
+                                  }
+                                  onChange={() =>
+                                    void save(
+                                      {
+                                        ...p,
+                                        tasks: p.tasks.map((x) =>
+                                          x.id === t.id
+                                            ? { ...x, done: true }
+                                            : x,
+                                        ),
+                                      },
+                                      p,
+                                    )
+                                  }
+                                />
+                                <button onClick={() => openProject(p)}>
+                                  <span>
+                                    <strong>{t.title}</strong>
+                                    <small>
+                                      <span
+                                        className={`color-dot ${p.color}`}
+                                      />
+                                      {p.name}
+                                    </small>
+                                  </span>
+                                </button>
+                              </div>
                             ))}
                             {!tasks.length && (
                               <p className="secondary-text">

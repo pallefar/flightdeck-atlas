@@ -1,14 +1,9 @@
 "use client";
+import TaskWorkbench from "./task-workbench";
+import ProjectStrategy from "./project-strategy";
+import { taskState } from "@/lib/projects";
 import { useState } from "react";
-import {
-  Archive,
-  Download,
-  Globe2,
-  Pencil,
-  Plus,
-  Trash2,
-  Undo2,
-} from "lucide-react";
+import { Archive, Download, Globe2, Undo2, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -16,12 +11,10 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { progress, type Project, type ProjectFields } from "@/lib/projects";
 import { downloadText } from "@/lib/briefing";
-type Task = ProjectFields["tasks"][number];
 export default function ProjectWorkspace({
   project,
   demo,
@@ -46,22 +39,10 @@ export default function ProjectWorkspace({
   onGlobe: () => void;
 }) {
   const readOnly = demo || project.canEdit === false;
-  const [tab, setTab] = useState<"tasks" | "updates">("tasks");
-  const [title, setTitle] = useState(""),
-    [due, setDue] = useState(""),
-    [priority, setPriority] = useState<Task["priority"]>("Normal"),
-    [note, setNote] = useState("");
-  const [editing, setEditing] = useState<Task | null>(null);
-  async function saveTask(task: Task) {
-    const result = await onSave(
-      {
-        ...project,
-        tasks: project.tasks.map((t) => (t.id === task.id ? task : t)),
-      },
-      project,
-    );
-    if (result) setEditing(null);
-  }
+  const [tab, setTab] = useState<"overview" | "tasks" | "strategy" | "updates">(
+    "tasks",
+  );
+  const [note, setNote] = useState("");
   return (
     <Dialog
       open
@@ -69,8 +50,17 @@ export default function ProjectWorkspace({
         if (!open && !busy) onClose();
       }}
     >
-      <DialogContent className="project-dialog workspace-dialog">
-        <DialogTitle>{project.name}</DialogTitle>
+      <DialogContent
+        className="project-dialog workspace-dialog"
+        showCloseButton={false}
+      >
+        <div className="workspace-sticky-heading">
+          <DialogTitle>{project.name}</DialogTitle>
+          <button aria-label="Close" disabled={busy} onClick={onClose}>
+            <X size={19} />
+            <span>Close</span>
+          </button>
+        </div>
         <DialogDescription>
           {project.description || "Project workspace"}
         </DialogDescription>
@@ -105,28 +95,6 @@ export default function ProjectWorkspace({
             <span className="priority-high">High priority</span>
           )}
         </div>
-        {(project.nextAction || project.blocker || project.benefit) && (
-          <div className="project-context">
-            {project.nextAction && (
-              <p>
-                <strong>Next action</strong>
-                {project.nextAction}
-              </p>
-            )}
-            {project.blocker && (
-              <p className="attention">
-                <strong>Blocker</strong>
-                {project.blocker}
-              </p>
-            )}
-            {project.benefit && (
-              <p>
-                <strong>Success measure</strong>
-                {project.benefit}
-              </p>
-            )}
-          </div>
-        )}
         <div className="section-heading">
           <h3>Project progress</h3>
           <span>{progress(project)}% complete</span>
@@ -136,220 +104,102 @@ export default function ProjectWorkspace({
           value={progress(project)}
           className={`progress-bar ${project.color}`}
         />
-        <div className="workspace-tabs filter-tabs">
-          <button
-            className={tab === "tasks" ? "chosen" : ""}
-            aria-pressed={tab === "tasks"}
-            onClick={() => setTab("tasks")}
-          >
-            Tasks · {project.tasks.length}
-          </button>
-          <button
-            className={tab === "updates" ? "chosen" : ""}
-            aria-pressed={tab === "updates"}
-            onClick={() => setTab("updates")}
-          >
-            Updates · {project.activity?.length || 0}
-          </button>
+        <div className="workspace-kpis">
+          <span>
+            <strong>{project.tasks.filter((t) => !t.done).length}</strong> open
+            tasks
+          </span>
+          <span>
+            <strong>
+              {project.tasks.filter((t) => taskState(t) === "blocked").length}
+            </strong>{" "}
+            blocked
+          </span>
+          <span>
+            <strong>
+              {project.tasks
+                .filter((t) => !t.done)
+                .reduce((n, t) => n + (t.estimateMinutes || 0), 0)}
+            </strong>{" "}
+            estimated min left
+          </span>
+          <span>
+            <strong>{project.objectives?.length || 0}</strong> strategy goals
+          </span>
         </div>
-        {tab === "tasks" ? (
-          <>
-            <div className="workspace-tasks">
-              {project.tasks.map((t) => (
-                <div className="workspace-task" key={t.id}>
-                  {editing?.id === t.id ? (
-                    <form
-                      className="edit-task-form"
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        void saveTask(editing);
-                      }}
-                    >
-                      <Input
-                        aria-label="Task title"
-                        required
-                        maxLength={200}
-                        value={editing.title}
-                        onChange={(e) =>
-                          setEditing({ ...editing, title: e.target.value })
-                        }
-                      />
-                      <div className="task-options">
-                        <label>
-                          Due date
-                          <Input
-                            type="date"
-                            value={editing.dueDate || ""}
-                            onChange={(e) =>
-                              setEditing({
-                                ...editing,
-                                dueDate: e.target.value,
-                              })
-                            }
-                          />
-                        </label>
-                        <label>
-                          Priority
-                          <select
-                            value={editing.priority || "Normal"}
-                            onChange={(e) =>
-                              setEditing({
-                                ...editing,
-                                priority: e.target.value as Task["priority"],
-                              })
-                            }
-                          >
-                            <option>Normal</option>
-                            <option>High</option>
-                            <option>Low</option>
-                          </select>
-                        </label>
-                      </div>
-                      <Input
-                        aria-label="Task owner"
-                        placeholder="Owner (optional)"
-                        maxLength={100}
-                        value={editing.assignee || ""}
-                        onChange={(e) =>
-                          setEditing({ ...editing, assignee: e.target.value })
-                        }
-                      />
-                      <div className="task-edit-actions">
-                        <Button type="submit" disabled={busy}>
-                          Save task
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setEditing(null)}
-                        >
-                          Cancel
-                        </Button>
-                        <button
-                          type="button"
-                          aria-label={`Remove ${t.title}`}
-                          disabled={busy}
-                          onClick={() =>
-                            void onSave(
-                              {
-                                ...project,
-                                tasks: project.tasks.filter(
-                                  (x) => x.id !== t.id,
-                                ),
-                              },
-                              project,
-                            ).then((result) => {
-                              if (result) setEditing(null);
-                            })
-                          }
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </form>
-                  ) : (
-                    <>
-                      <label className="workspace-task-check">
-                        <input
-                          type="checkbox"
-                          checked={t.done}
-                          disabled={readOnly || busy}
-                          onChange={() =>
-                            void saveTask({ ...t, done: !t.done })
-                          }
-                        />
-                        <span className={t.done ? "task-done" : ""}>
-                          {t.title}
-                        </span>
-                      </label>
-                      <div className="task-metadata">
-                        <span>
-                          {t.dueDate || "No date"}
-                          {t.priority === "High" ? " · High" : ""}
-                          {t.assignee ? ` · ${t.assignee}` : ""}
-                        </span>
-                        {!readOnly && (
-                          <button
-                            aria-label={`Edit ${t.title}`}
-                            disabled={busy}
-                            onClick={() => setEditing({ ...t })}
-                          >
-                            <Pencil size={14} />
-                          </button>
-                        )}
-                      </div>
-                    </>
+        <div
+          className="workspace-tabs filter-tabs"
+          aria-label="Project sections"
+        >
+          {(["overview", "tasks", "strategy", "updates"] as const).map((t) => (
+            <button
+              key={t}
+              className={tab === t ? "chosen" : ""}
+              aria-pressed={tab === t}
+              onClick={() => setTab(t)}
+            >
+              {t === "overview"
+                ? "Overview"
+                : t === "tasks"
+                  ? `Tasks · ${project.tasks.length}`
+                  : t === "strategy"
+                    ? "Strategy & KPIs"
+                    : `Updates · ${project.activity?.length || 0}`}
+            </button>
+          ))}
+        </div>
+        {tab === "overview" ? (
+          <div className="project-overview">
+            <div>
+              <h3>Outcome & direction</h3>{" "}
+              {(project.nextAction || project.blocker || project.benefit) && (
+                <div className="project-context">
+                  {project.nextAction && (
+                    <p>
+                      <strong>Next action</strong>
+                      {project.nextAction}
+                    </p>
+                  )}
+                  {project.blocker && (
+                    <p className="attention">
+                      <strong>Blocker</strong>
+                      {project.blocker}
+                    </p>
+                  )}
+                  {project.benefit && (
+                    <p>
+                      <strong>Success measure</strong>
+                      {project.benefit}
+                    </p>
                   )}
                 </div>
-              ))}
+              )}
+              <p className="hub-muted">
+                {!project.nextAction && !project.blocker && !project.benefit
+                  ? "Set a next action and success measure in Edit project."
+                  : ""}
+              </p>
             </div>
-            {!readOnly && (
-              <form
-                className="add-action-form"
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  if (!title.trim()) return;
-                  const result = await onSave(
-                    {
-                      ...project,
-                      tasks: [
-                        ...project.tasks,
-                        {
-                          id: crypto.randomUUID(),
-                          title: title.trim(),
-                          done: false,
-                          dueDate: due,
-                          priority,
-                        },
-                      ],
-                    },
-                    project,
-                  );
-                  if (result) {
-                    setTitle("");
-                    setDue("");
-                    setPriority("Normal");
-                  }
-                }}
-              >
-                <Input
-                  aria-label="New task"
-                  required
-                  maxLength={200}
-                  placeholder="Add the next step…"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                />
-                <div className="task-options">
-                  <label>
-                    Task due date
-                    <Input
-                      type="date"
-                      value={due}
-                      onChange={(e) => setDue(e.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Task priority
-                    <select
-                      value={priority}
-                      onChange={(e) =>
-                        setPriority(e.target.value as Task["priority"])
-                      }
-                    >
-                      <option>Normal</option>
-                      <option>High</option>
-                      <option>Low</option>
-                    </select>
-                  </label>
-                  <Button type="submit" disabled={busy || !title.trim()}>
-                    <Plus size={15} /> Add
-                  </Button>
-                </div>
-              </form>
-            )}
-          </>
-        ) : (
+            <dl>
+              <div>
+                <dt>Sponsor</dt>
+                <dd>{project.sponsor || "Not assigned"}</dd>
+              </div>
+              <div>
+                <dt>Location</dt>
+                <dd>{project.location || "Not set"}</dd>
+              </div>
+              <div>
+                <dt>Onboarding</dt>
+                <dd>{project.onboardingStage || "Discovery"}</dd>
+              </div>
+              <div>
+                <dt>Last update</dt>
+                <dd>{new Date(project.updatedAt).toLocaleDateString()}</dd>
+              </div>
+            </dl>
+          </div>
+        ) : tab !== "updates" ? null : (
           <div className="workspace-updates">
             {!readOnly && (
               <form
@@ -361,6 +211,7 @@ export default function ProjectWorkspace({
                 }}
               >
                 <Textarea
+                  disabled={busy}
                   aria-label="Project update"
                   maxLength={1000}
                   required
@@ -387,6 +238,22 @@ export default function ProjectWorkspace({
             )}
           </div>
         )}
+        <div hidden={tab !== "tasks"}>
+          <TaskWorkbench
+            project={project}
+            readOnly={readOnly}
+            busy={busy}
+            onSave={onSave}
+          />
+        </div>
+        <div hidden={tab !== "strategy"}>
+          <ProjectStrategy
+            project={project}
+            readOnly={readOnly}
+            busy={busy}
+            onSave={onSave}
+          />
+        </div>
         {error && (
           <p role="alert" className="form-error">
             {error}

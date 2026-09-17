@@ -1,10 +1,11 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type * as CesiumType from "cesium";
-import { ArrowRight, Globe2, Minus, Plus, X } from "lucide-react";
+import { ArrowRight, Globe2, Minus, Plus, X, Orbit, Pause } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Project } from "@/lib/projects";
 import { motionScale, type GlobeSettings } from "@/lib/settings";
+import { projectSignals } from "@/lib/project-scan";
 import RoomJourney from "./room-journey";
 type CesiumModule = typeof CesiumType;
 declare global {
@@ -74,6 +75,26 @@ export default function Globe({
     x: number;
     y: number;
   } | null>(null);
+  const [orbit, setOrbit] = useState(false);
+  const orbitCleanup = useRef<(() => void) | null>(null);
+  const [flightLens, setFlightLens] = useState<{
+    label: string;
+    duration: number;
+    started: number;
+  } | null>(null);
+  const [cameraHeight, setCameraHeight] = useState(0);
+  function stopOrbit() {
+    orbitCleanup.current?.();
+    orbitCleanup.current = null;
+    setOrbit(false);
+  }
+  function takeControl() {
+    stopOrbit();
+    viewer.current?.camera.cancelFlight();
+    interaction.current?.();
+  }
+  const control = useRef(takeControl);
+  control.current = takeControl;
   const interaction = useRef(onInteract);
   interaction.current = onInteract;
   const selectionChange = useRef(onSelectionChange);
@@ -91,6 +112,16 @@ export default function Globe({
       p.longitude === null
     )
       return;
+    v.camera.cancelFlight();
+    const duration =
+      (close ? 2.5 : 4.5) * motionScale(currentSettings.current.motion);
+    setCameraHeight(Math.max(0, v.camera.positionCartographic.height));
+    if (currentSettings.current.zoomLens && duration)
+      setFlightLens({
+        label: close ? `Approaching ${p.name}` : p.name,
+        duration,
+        started: performance.now(),
+      });
     const point = C.Cartesian3.fromDegrees(p.longitude, p.latitude, 35);
     v.camera.flyToBoundingSphere(new C.BoundingSphere(point, 0), {
       offset: new C.HeadingPitchRange(
@@ -98,16 +129,24 @@ export default function Globe({
         C.Math.toRadians(close ? -15 : -40),
         close ? 150 : 1500,
       ),
-      duration:
-        (close ? 2.5 : 4.5) * motionScale(currentSettings.current.motion),
+      duration,
       easingFunction: C.EasingFunction.CUBIC_IN_OUT,
       cancel: () => {
-        if (active.current) setEntering(false);
+        if (active.current) {
+          setEntering(false);
+          setFlightLens(null);
+        }
       },
-      complete,
+      complete: () => {
+        if (active.current) {
+          setFlightLens(null);
+          complete?.();
+        }
+      },
     });
   }
   function choose(p: Project) {
+    stopOrbit();
     generation.current++;
     setJourney(false);
     setEntering(false);
@@ -184,27 +223,27 @@ export default function Globe({
             const id = hit?.id?.id;
             const p = currentProjects.current.find((x) => x.id === id);
             if (p) {
-              interaction.current?.();
+              control.current();
               choose(p);
             }
           },
           C.ScreenSpaceEventType.LEFT_CLICK,
         );
         handler.setInputAction(
-          () => interaction.current?.(),
+          () => control.current(),
           C.ScreenSpaceEventType.LEFT_DOWN,
         );
         handler.setInputAction(
-          () => interaction.current?.(),
+          () => control.current(),
           C.ScreenSpaceEventType.RIGHT_DOWN,
         );
         handler.setInputAction(
-          () => interaction.current?.(),
+          () => control.current(),
           C.ScreenSpaceEventType.MIDDLE_DOWN,
         );
         handler.setInputAction(() => {
           setHovered(null);
-          interaction.current?.();
+          control.current();
         }, C.ScreenSpaceEventType.WHEEL);
         let lastHover = "",
           lastMove = 0;
@@ -319,6 +358,7 @@ export default function Globe({
     return () => {
       disposed = true;
       active.current = false;
+      orbitCleanup.current?.();
       generation.current++;
       handler?.destroy();
       removeMouseLeave?.();
@@ -394,6 +434,7 @@ export default function Globe({
   }, [ready, resetCommand]);
   useEffect(() => {
     if (!stopCommand) return;
+    stopOrbit();
     viewer.current?.camera.cancelFlight();
     generation.current++;
     setEntering(false);
@@ -403,7 +444,88 @@ export default function Globe({
     generation.current++;
     setEntering(false);
     if (settings.motion === "instant") setJourney(false);
+    stopOrbit();
+    setFlightLens(null);
   }, [settings.motion]);
+  useEffect(() => {
+    if (!flightLens) return;
+    const id = window.setInterval(() => {
+      const v = viewer.current;
+      if (v && !v.isDestroyed())
+        setCameraHeight(Math.max(0, v.camera.positionCartographic.height));
+    }, 100);
+    return () => clearInterval(id);
+  }, [flightLens]);
+  useEffect(() => {
+    if (!settings.zoomLens) setFlightLens(null);
+  }, [settings.zoomLens]);
+  useEffect(() => {
+    const v = viewer.current,
+      C = cesiumRef.current;
+    if (
+      !orbit ||
+      !selected ||
+      !ready ||
+      !C ||
+      !v ||
+      motionScale(settings.motion) === 0
+    )
+      return;
+    let disposed = false,
+      frame = 0,
+      last = 0,
+      heading = C.Math.toRadians(25);
+    const center = C.Cartesian3.fromDegrees(
+      selected.longitude!,
+      selected.latitude!,
+      35,
+    );
+    const cleanup = () => {
+      if (disposed) return;
+      disposed = true;
+      cancelAnimationFrame(frame);
+      if (!v.isDestroyed()) {
+        v.camera.cancelFlight();
+        v.camera.lookAtTransform(C.Matrix4.IDENTITY);
+        v.scene.requestRender();
+      }
+    };
+    orbitCleanup.current = cleanup;
+    fly(selected, false, () => {
+      if (disposed) return;
+      const tick = (now: number) => {
+        if (disposed) return;
+        if (!last) last = now;
+        heading += Math.min(now - last, 50) * 0.00007;
+        last = now;
+        v.camera.lookAt(
+          center,
+          new C.HeadingPitchRange(heading, C.Math.toRadians(-35), 1500),
+        );
+        v.scene.requestRender();
+        frame = requestAnimationFrame(tick);
+      };
+      frame = requestAnimationFrame(tick);
+    });
+    return () => {
+      cleanup();
+      if (orbitCleanup.current === cleanup) orbitCleanup.current = null;
+    };
+  }, [orbit, selected?.id, ready, settings.motion]);
+  useEffect(() => {
+    const stop = (e: KeyboardEvent) => {
+      if (e.key === "Escape") control.current();
+    };
+    const hidden = () => {
+      if (document.hidden) control.current();
+    };
+    window.addEventListener("keydown", stop);
+    document.addEventListener("visibilitychange", hidden);
+    return () => {
+      window.removeEventListener("keydown", stop);
+      document.removeEventListener("visibilitychange", hidden);
+    };
+  }, []);
   useEffect(() => {
     const C = cesiumRef.current,
       v = viewer.current;
@@ -417,13 +539,22 @@ export default function Globe({
     projects
       .filter((p) => p.latitude !== null && p.longitude !== null)
       .forEach((p) => {
+        const signal = projectSignals(p);
         const color = C.Color.fromCssColorString(
-          {
-            orange: "#ff9170",
-            blue: "#88baff",
-            green: "#9be2be",
-            violet: "#c3acff",
-          }[p.color],
+          settings.markerColor === "risk"
+            ? signal.blocked
+              ? "#ff6975"
+              : signal.late || signal.overdue
+                ? "#ffbf58"
+                : p.status === "Completed"
+                  ? "#79dfb0"
+                  : "#88baff"
+            : {
+                orange: "#ff9170",
+                blue: "#88baff",
+                green: "#9be2be",
+                violet: "#c3acff",
+              }[p.color],
         );
         v.entities.add({
           id: p.id,
@@ -459,7 +590,7 @@ export default function Globe({
         });
       });
     v.scene.requestRender();
-  }, [ready, projects, settings.labels]);
+  }, [ready, projects, settings.labels, settings.markerColor]);
   useEffect(() => {
     if (ready && target) choose(target);
   }, [ready, target]);
@@ -469,6 +600,8 @@ export default function Globe({
     );
   }, [projects]);
   function reset() {
+    stopOrbit();
+    setFlightLens(null);
     generation.current++;
     setJourney(false);
     setEntering(false);
@@ -484,8 +617,38 @@ export default function Globe({
       });
     }
   }
+  function zoom(inward: boolean) {
+    takeControl();
+    const C = cesiumRef.current,
+      v = viewer.current;
+    if (!C || !v) return;
+    const point = v.camera.positionCartographic;
+    const duration = 0.85 * motionScale(settings.motion);
+    if (settings.zoomLens && duration)
+      setFlightLens({
+        label: inward ? "Zooming in" : "Zooming out",
+        duration,
+        started: performance.now(),
+      });
+    v.camera.flyTo({
+      destination: C.Cartesian3.fromRadians(
+        point.longitude,
+        point.latitude,
+        Math.min(40000000, Math.max(60, point.height * (inward ? 0.6 : 1.6))),
+      ),
+      orientation: {
+        heading: v.camera.heading,
+        pitch: v.camera.pitch,
+        roll: v.camera.roll,
+      },
+      duration,
+      complete: () => setFlightLens(null),
+      cancel: () => setFlightLens(null),
+    });
+  }
   function enter() {
     if (!selected) return;
+    stopOrbit();
     interaction.current?.();
     if (motionScale(settings.motion) === 0) {
       viewer.current?.camera.cancelFlight();
@@ -531,28 +694,10 @@ export default function Globe({
               <Globe2 size={17} />
               <span>World</span>
             </button>
-            <button
-              onClick={() => {
-                interaction.current?.();
-                viewer.current?.camera.zoomIn(
-                  viewer.current.camera.positionCartographic.height * 0.4,
-                );
-                viewer.current?.scene.requestRender();
-              }}
-              aria-label="Zoom in"
-            >
+            <button onClick={() => zoom(true)} aria-label="Zoom in">
               <Plus size={17} />
             </button>
-            <button
-              onClick={() => {
-                interaction.current?.();
-                viewer.current?.camera.zoomOut(
-                  viewer.current.camera.positionCartographic.height * 0.6,
-                );
-                viewer.current?.scene.requestRender();
-              }}
-              aria-label="Zoom out"
-            >
+            <button onClick={() => zoom(false)} aria-label="Zoom out">
               <Minus size={17} />
             </button>
           </div>
@@ -562,6 +707,57 @@ export default function Globe({
             Drag to orbit · Scroll to zoom
           </div>
         </>
+      )}
+      {settings.markerColor === "risk" && (
+        <div className="globe-risk-legend">
+          <span>
+            <i style={{ background: "#ff6975" }} />
+            Blocked
+          </span>
+          <span>
+            <i style={{ background: "#ffbf58" }} />
+            Overdue
+          </span>
+          <span>
+            <i style={{ background: "#79dfb0" }} />
+            Completed
+          </span>
+          <span>
+            <i style={{ background: "#88baff" }} />
+            No alert
+          </span>
+        </div>
+      )}
+      {flightLens && (
+        <div className="zoom-flight-hud" aria-label="Camera flight">
+          <div
+            className="zoom-lens"
+            key={flightLens.started}
+            style={
+              {
+                "--zoom-duration": `${flightLens.duration}s`,
+              } as React.CSSProperties
+            }
+            aria-hidden="true"
+          >
+            <span />
+            <span />
+            <span />
+            <i />
+            <b />
+          </div>
+          <div className="zoom-readout">
+            <span>
+              LOCATING /{" "}
+              {cameraHeight >= 1000
+                ? `${(cameraHeight / 1000).toFixed(1)} KM`
+                : `${Math.round(cameraHeight)} M`}{" "}
+              ALTITUDE
+            </span>
+            <strong>{flightLens.label}</strong>
+            <button onClick={takeControl}>Stop flight</button>
+          </div>
+        </div>
       )}
       {hovered && (
         <div
@@ -575,11 +771,14 @@ export default function Globe({
         </div>
       )}
       {selected && !journey && (
-        <div className="destination-card">
+        <div
+          className={`destination-card ${flightLens ? "destination-in-flight" : ""}`}
+        >
           <button
             className="destination-close"
             aria-label="Close selected project"
             onClick={() => {
+              stopOrbit();
               viewer.current?.camera.cancelFlight();
               generation.current++;
               setEntering(false);
@@ -597,6 +796,19 @@ export default function Globe({
             <br />
             {selected.latitude?.toFixed(4)}°, {selected.longitude?.toFixed(4)}°
           </p>
+          <button
+            className="orbit-control"
+            aria-pressed={orbit}
+            disabled={motionScale(settings.motion) === 0 || entering}
+            onClick={() => {
+              interaction.current?.();
+              if (orbit) stopOrbit();
+              else setOrbit(true);
+            }}
+          >
+            {orbit ? <Pause size={15} /> : <Orbit size={15} />}{" "}
+            {orbit ? "Stop orbit" : "Orbit this project"}
+          </button>
           <Button onClick={enter} disabled={entering || !imageryReady}>
             {entering ? "Approaching your workspace…" : "Enter workspace"}
             <ArrowRight size={16} />
@@ -610,7 +822,7 @@ export default function Globe({
             className="text-link"
             style={{ marginTop: 12, fontSize: 11 }}
             onClick={() => {
-              viewer.current?.camera.cancelFlight();
+              takeControl();
               generation.current++;
               setEntering(false);
               onOpen(selected);

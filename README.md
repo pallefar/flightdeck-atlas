@@ -77,3 +77,11 @@ Dashboard/God’s Eye tabs sit inside the top navigation. God’s Eye hides the 
 Cinematic scan searches actual active Atlas project fields and task text, with accent-insensitive token matching, attention/high-priority/completed filters, animated index channels and a cancellable reveal. It does not query cameras, people, external tracking feeds or the disconnected OS. Example data is explicitly labeled. Unmapped results open the project for editing instead of inventing coordinates.
 
 Tour locations visits mapped results and stops on manual interaction, workspace entry, Stop or Escape. `/` opens search; reduced motion skips scan travel. Map markers enlarge on hover and show project tooltips. Panels can be hidden to explore the globe unobstructed.
+
+## Productivity workspace
+
+Today & advisor combines quick capture, planned work dates, a prioritized action queue, a focus-time budget and explicit rule-based watch-outs. Project workspaces include a task list/board, owners, due dates, estimates, checklists, notes, manual goals and goal-linked KPI measurements. All product records persist through the authorized project API and revision checks. Dashboard cards/list/status board, a collapsible deadline planner and a cross-view command menu make these tools reachable.
+
+God’s Eye adds circular flight targeting, smooth zoom controls, project orbit and risk marker colors; manual control and Escape stop motion. Reduced motion and the circular-lens setting are respected.
+
+FlightDeck is the chosen future AI provider. Live AI, OS strategy/KPI feeds, TEOA and Outlook remain disconnected. See [research and selected roadmap](docs/PRODUCTIVITY-RESEARCH.md) and [strategy/AI SDK contract](docs/STRATEGY-AI-CONTRACT.md).

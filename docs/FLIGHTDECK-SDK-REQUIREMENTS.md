@@ -32,3 +32,7 @@ See [MASTER-APP-CONTRACT.md](MASTER-APP-CONTRACT.md) for the proposed external m
 ## Project onboarding in both directions
 
 See [PROJECT-BRIDGE-CONTRACT.md](PROJECT-BRIDGE-CONTRACT.md) for OS-to-Atlas import, Atlas-to-OS creation, instance-scoped references, durable idempotency, and the access controls required before enabling either flow. Draft preparation is available now; live discovery and creation await the SDK. This extends the initial read-only scope with separately authorized project creation.
+
+## Strategy, KPI and AI reviews
+
+See [STRATEGY-AI-CONTRACT.md](STRATEGY-AI-CONTRACT.md). The user selected FlightDeck OS’s AI service. Atlas now stores manual goals, KPIs, task detail and separate plan dates; model reviews and source-owned metrics await permission-scoped SDK reads and an evidence-linked review contract.

@@ -131,13 +131,33 @@ export function recordChanges(
     ];
     if (details.some((key) => fields[key] !== previous[key]))
       add("project", "Project details updated");
+    if (
+      JSON.stringify(fields.objectives || []) !==
+      JSON.stringify(previous.objectives || [])
+    )
+      add("project", "Strategy goals updated");
+    if (
+      JSON.stringify(fields.kpis || []) !== JSON.stringify(previous.kpis || [])
+    )
+      add("project", "KPI measurements updated");
     for (const task of fields.tasks) {
       const old = previous.tasks.find((t) => t.id === task.id);
       if (
         old &&
-        ["title", "dueDate", "priority", "assignee"].some(
+        [
+          "title",
+          "dueDate",
+          "priority",
+          "assignee",
+          "workflow",
+          "description",
+          "estimateMinutes",
+          "plannedDate",
+          "checklist",
+        ].some(
           (key) =>
-            task[key as keyof typeof task] !== old[key as keyof typeof old],
+            JSON.stringify(task[key as keyof typeof task]) !==
+            JSON.stringify(old[key as keyof typeof old]),
         )
       )
         add("project", `Task details updated: ${task.title}`, task.id);

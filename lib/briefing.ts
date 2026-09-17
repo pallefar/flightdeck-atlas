@@ -2,6 +2,16 @@ import type { Project } from "./projects";
 export function localDate(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
+export function blockerSummary(p: Project) {
+  return [
+    p.blocker?.trim(),
+    ...p.tasks
+      .filter((t) => !t.done && t.workflow === "blocked")
+      .map((t) => `Blocked task: ${t.title}`),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
 export function briefing(
   projects: Project[],
   period: "day" | "week",
@@ -65,7 +75,10 @@ export function briefing(
     events,
     deadlines,
     overdue: actions.filter((a) => a.overdue),
-    blocked: live.filter((p) => p.blocker),
+    blocked: live.filter(
+      (p) =>
+        p.blocker || p.tasks.some((t) => !t.done && t.workflow === "blocked"),
+    ),
     needsNext: live.filter(
       (p) =>
         p.status !== "Completed" &&
@@ -99,7 +112,7 @@ export function briefingMarkdown(
       .map((p) => `- ${p.nextAction} — ${p.name}`),
     "",
     "## Blockers",
-    ...b.blocked.map((p) => `- ${p.name}: ${p.blocker}`),
+    ...b.blocked.map((p) => `- ${p.name}: ${blockerSummary(p)}`),
     "",
     "## Project deadlines",
     ...b.deadlines.map((p) => `- ${p.name}: ${p.dueDate}`),

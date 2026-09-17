@@ -2,14 +2,17 @@ import { z } from "zod";
 
 export const SETTINGS_KEY = "atlas-settings-v1";
 export const dashboardSettingsSchema = z.object({
-  layout: z.enum(["cards", "list"]).catch("cards"),
+  layout: z.enum(["cards", "list", "board"]).catch("cards"),
   sort: z.enum(["updated", "name", "due"]).catch("updated"),
+  showPlanner: z.boolean().catch(true),
   showMetrics: z.boolean().catch(true),
   showFocus: z.boolean().catch(true),
   showWellbeing: z.boolean().catch(true),
 });
 export const globeSettingsSchema = z.object({
   mode: z.enum(["explore", "scan"]).catch("explore"),
+  zoomLens: z.boolean().catch(true),
+  markerColor: z.enum(["project", "risk"]).catch("project"),
   shadows: z.boolean().catch(false),
   mapStyle: z.enum(["satellite", "street"]).catch("satellite"),
   buildings: z.boolean().catch(true),
@@ -19,6 +22,15 @@ export const globeSettingsSchema = z.object({
   motion: z.enum(["cinematic", "quick", "instant"]).catch("cinematic"),
 });
 export const settingsSchema = z.object({
+  dailyFocusMinutes: z
+    .union([
+      z.literal(60),
+      z.literal(120),
+      z.literal(180),
+      z.literal(240),
+      z.literal(360),
+    ])
+    .catch(180),
   viewAnimation: z.enum(["cinematic", "quick", "instant"]).catch("cinematic"),
   startView: z.enum(["dashboard", "globe"]).catch("dashboard"),
   dashboard: dashboardSettingsSchema.catch(dashboardSettingsSchema.parse({})),
