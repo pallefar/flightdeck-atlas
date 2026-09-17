@@ -87,6 +87,27 @@ export default function Settings({
                 <option value="globe">God’s Eye</option>
               </select>
             </SettingRow>
+            <SettingRow
+              id="settings-view-motion"
+              title="View transitions"
+              description="Travel from your dashboard into the sky. Reduced motion is always respected."
+            >
+              <select
+                id="settings-view-motion"
+                value={settings.viewAnimation}
+                onChange={(e) =>
+                  onChange({
+                    ...settings,
+                    viewAnimation: e.target
+                      .value as AtlasSettings["viewAnimation"],
+                  })
+                }
+              >
+                <option value="cinematic">Cinematic</option>
+                <option value="quick">Quick</option>
+                <option value="instant">Instant</option>
+              </select>
+            </SettingRow>
           </section>
           <div className="settings-tabs" aria-label="View settings">
             <button
@@ -164,6 +185,19 @@ export default function Settings({
                     id="settings-focus"
                     checked={dashboard.showFocus}
                     onCheckedChange={(showFocus) => setDashboard({ showFocus })}
+                  />
+                </SettingRow>
+                <SettingRow
+                  id="settings-wellbeing"
+                  title="Wellbeing widget"
+                  description="Show your mood, readiness and focus timer on the dashboard."
+                >
+                  <Switch
+                    id="settings-wellbeing"
+                    checked={dashboard.showWellbeing}
+                    onCheckedChange={(showWellbeing) =>
+                      setDashboard({ showWellbeing })
+                    }
                   />
                 </SettingRow>
               </>

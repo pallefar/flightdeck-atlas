@@ -6,7 +6,8 @@ A TE Connectivity themed portfolio and action hub, with a dashboard, God’s Eye
 
 - Project creation and editing, task completion, progress and location metadata.
 - Durable project records in D1, protected server-side by authenticated user identity.
-- Shared project state between the dashboard and the globe.
+- Dashboard and God’s Eye tabs with shared project state, keyboard navigation, and a reversible laptop → office → sky camera journey. View transitions can be cinematic, quick or instant.
+- Soft card shadows, button/visual hover effects and keyboard focus feedback, respecting reduced-motion settings.
 - Globe → building → stylized 3D room → laptop → project journey, with skip, cancel and reduced-motion support.
 - Light and dark themes with a remembered device preference.
 - FlightDeck DTO validation, an injectable SDK transport, and an integration handoff. **Live FlightDeck SSO and sync are pending the new SDK.**
@@ -57,3 +58,14 @@ TE branding uses the TE Connectivity logo already present in FlightDeck OS. The 
 - Additional users require both private-site admission and an Atlas role. The access UI never silently changes hosting audience or sends email invitations.
 
 The future SDK/master-app/TEOA contract is in [docs/MASTER-APP-CONTRACT.md](docs/MASTER-APP-CONTRACT.md).
+
+## Project onboarding bridge
+
+Connections has **From FlightDeck** and **To FlightDeck** flows. Atlas onboarding drafts persist with proposed OS names and workspace planning notes; users can edit, remove and export them. The OS intake list and creation endpoints stay explicitly disconnected until delegated identity, project-level access, durable external links and idempotent creation are implemented with the SDK. No draft sends data to the OS or submits automatically. See [the bridge contract](docs/PROJECT-BRIDGE-CONTRACT.md).
+
+## Wellbeing and personal overview
+
+- Account-specific browser storage for daily mood, rest/energy/clarity check-ins, a transparent self-reported readiness score, habits and original daily reflections. No check-in enters shared project APIs or AI feeds.
+- Configurable Pomodoro with wall-clock persistence, pause/resume/reset, a longer break after four daily focus sessions, and in-app break reminders. Sessions start only when chosen.
+- A compact dashboard widget, full Wellbeing page, running timer indicator, reduced-motion support and a dashboard visibility toggle.
+- Outlook summary and calendar panels are explicitly disconnected pending Microsoft 365 app registration and delegated sign-in. No email/calendar data is fetched. See [personal hub requirements](docs/PERSONAL-HUB-CONTRACT.md).

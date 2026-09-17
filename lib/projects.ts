@@ -30,6 +30,13 @@ export const projectSchema = z
     blocker: z.string().max(500).optional(),
     benefit: z.string().max(500).optional(),
     archived: z.boolean().optional(),
+    flightdeckDraft: z
+      .object({
+        label: z.string().trim().min(1).max(100),
+        workspaceHint: z.string().trim().max(100),
+      })
+      .nullable()
+      .optional(),
     onboardingStage: z
       .enum(["Discovery", "Pilot", "Ready for FlightDeck", "Rolled out"])
       .optional(),

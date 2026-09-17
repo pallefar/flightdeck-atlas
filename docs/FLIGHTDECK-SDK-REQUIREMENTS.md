@@ -28,3 +28,7 @@ The private Sites preview currently uses its platform sign-in. It is a preview i
 ## Master app, users, and TEOA Advantage
 
 See [MASTER-APP-CONTRACT.md](MASTER-APP-CONTRACT.md) for the proposed external master-app registration, Atlas role model, verified identity migration, Advantage portfolio data and context-aware launch requirements. Atlas roles must never expand permissions in FlightDeck or TEOA Advantage. Shared sign-in and external grants remain pending the SDK.
+
+## Project onboarding in both directions
+
+See [PROJECT-BRIDGE-CONTRACT.md](PROJECT-BRIDGE-CONTRACT.md) for OS-to-Atlas import, Atlas-to-OS creation, instance-scoped references, durable idempotency, and the access controls required before enabling either flow. Draft preparation is available now; live discovery and creation await the SDK. This extends the initial read-only scope with separately authorized project creation.

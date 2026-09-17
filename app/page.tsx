@@ -17,6 +17,7 @@ export default async function Home({
       "briefing",
       "ideas",
       "access",
+      "wellbeing",
     ].includes(params.view)
       ? params.view
       : null;

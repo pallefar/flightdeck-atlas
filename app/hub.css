@@ -749,3 +749,145 @@
     flex-shrink: 0;
   }
 }
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  padding: 18px 22px;
+  border-radius: 12px;
+  margin-bottom: 24px;
+}
+.connection-status p {
+  flex: 1;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.bridge-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.bridge-toolbar .filter-tabs {
+  display: flex;
+}
+.bridge-toolbar .filter-tabs span {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--secondary);
+  margin-left: 5px;
+}
+.bridge-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 460px;
+  color: var(--muted-foreground);
+  margin: 18px 0;
+}
+.bridge-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 0;
+}
+.bridge-row h3,
+.bridge-project-name {
+  font-size: 16px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.bridge-row > div {
+  min-width: 0;
+}
+.bridge-row p {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+.bridge-project {
+  border-top: 1px solid var(--border);
+  padding-bottom: 20px;
+}
+.bridge-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.bridge-actions .text-link {
+  font-size: 12px;
+}
+.bridge-draft {
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  display: grid;
+  gap: 15px;
+}
+.bridge-draft label {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+}
+.bridge-success {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: var(--green);
+}
+.advantage-connect {
+  display: flex;
+  gap: 20px;
+}
+.advantage-connect > svg {
+  color: var(--orange);
+  flex-shrink: 0;
+}
+.connection-hub .hub-empty p {
+  max-width: 550px;
+  margin: 0 auto 18px;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.connection-hub .hub-empty .text-link {
+  justify-content: center;
+}
+@media (max-width: 760px) {
+  .connection-status {
+    flex-wrap: wrap;
+  }
+  .connection-status p {
+    flex-basis: 100%;
+    order: 2;
+  }
+  .connection-status > button {
+    margin-left: auto;
+  }
+  .bridge-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .bridge-row {
+    flex-wrap: wrap;
+  }
+  .bridge-toolbar .filter-tabs button {
+    flex: 1;
+  }
+  .bridge-draft {
+    padding: 14px;
+  }
+}

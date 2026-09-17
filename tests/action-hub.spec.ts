@@ -185,7 +185,7 @@ test("a project action, update, briefing, archive, and restore form one durable 
     const download = page.waitForEvent("download");
     await page.getByRole("button", { name: "Export summary" }).click();
     expect((await download).suggestedFilename()).toMatch(/^atlas-week-/);
-    await page.getByRole("button", { name: "Dashboard", exact: true }).click();
+    await page.getByRole("tab", { name: "Dashboard", exact: true }).click();
     await page
       .locator(".project-card")
       .filter({ hasText: "Action hub QA" })

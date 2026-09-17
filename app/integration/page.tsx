@@ -47,6 +47,24 @@ export default function Integration() {
           Read the master-app, roles, and Advantage contract ↗
         </a>
       </p>
+      <h2>Projects in both directions</h2>
+      <p>
+        Connections now includes an OS intake list and saved Atlas onboarding
+        drafts. When the SDK is connected, you will be able to create an Atlas
+        counterpart for an accessible OS project, or create an OS project from a
+        reviewed Atlas draft.
+      </p>
+      <p>
+        The SDK needs scoped project creation, stable instance/workspace/project
+        references, and durable idempotent operations. Live imports also require
+        per-project access checks across Atlas so importing a project never
+        expands who can see its OS data.
+      </p>
+      <p>
+        <a href="https://github.com/pallefar/flightdeck-atlas/blob/main/docs/PROJECT-BRIDGE-CONTRACT.md">
+          Read the project bridge contract and acceptance checks ↗
+        </a>
+      </p>
       <h2>What Atlas owns</h2>
       <p>
         Locations, descriptions, tasks, deadlines, and progress remain Atlas

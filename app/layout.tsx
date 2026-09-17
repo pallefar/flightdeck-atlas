@@ -3,6 +3,8 @@ import "./globals.css";
 import "./te-theme.css";
 import "./settings.css";
 import "./hub.css";
+import "./motion.css";
+import "./wellbeing.css";
 import ThemeProvider from "./theme-provider";
 
 export const metadata: Metadata = {

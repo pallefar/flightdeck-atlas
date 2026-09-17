@@ -6,6 +6,7 @@ export const dashboardSettingsSchema = z.object({
   sort: z.enum(["updated", "name", "due"]).catch("updated"),
   showMetrics: z.boolean().catch(true),
   showFocus: z.boolean().catch(true),
+  showWellbeing: z.boolean().catch(true),
 });
 export const globeSettingsSchema = z.object({
   mapStyle: z.enum(["satellite", "street"]).catch("satellite"),
@@ -16,6 +17,7 @@ export const globeSettingsSchema = z.object({
   motion: z.enum(["cinematic", "quick", "instant"]).catch("cinematic"),
 });
 export const settingsSchema = z.object({
+  viewAnimation: z.enum(["cinematic", "quick", "instant"]).catch("cinematic"),
   startView: z.enum(["dashboard", "globe"]).catch("dashboard"),
   dashboard: dashboardSettingsSchema.catch(dashboardSettingsSchema.parse({})),
   globe: globeSettingsSchema.catch(globeSettingsSchema.parse({})),

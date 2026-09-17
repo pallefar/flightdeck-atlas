@@ -1,0 +1,406 @@
+:root {
+  --atlas-sidebar: 224px;
+  --atlas-header: 83px;
+  --atlas-tabs: 64px;
+  --atlas-elevation: 0 4px 16px #233e4d09, 0 1px 3px #233e4d08;
+}
+[data-theme="dark"] {
+  --atlas-elevation: 0 8px 26px #00000025, 0 1px 2px #00000020;
+}
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+.view-tabs-bar {
+  height: var(--atlas-tabs);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 0 42px;
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: var(--atlas-header);
+  z-index: 35;
+}
+.view-tabs {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, 156px);
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: var(--atlas-elevation);
+}
+.view-tabs button {
+  position: relative;
+  z-index: 1;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border-radius: 8px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  font-weight: 600;
+  transition: color 0.25s;
+}
+.view-tabs button[aria-selected="true"] {
+  color: #713f00;
+}
+[data-theme="dark"] .view-tabs button[aria-selected="true"] {
+  color: #ffd19a;
+}
+.view-tabs button:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+}
+.view-tab-indicator {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  bottom: 4px;
+  width: 156px;
+  border-radius: 8px;
+  background: #fff0d9;
+  box-shadow: 0 2px 6px #b9731420;
+  transform: translateX(calc(var(--active-tab) * 100%));
+  transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-theme="dark"] .view-tab-indicator {
+  background: #493720;
+  box-shadow: 0 2px 8px #0004;
+}
+.view-tabs-caption {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--muted-foreground);
+}
+.globe-page {
+  height: calc(100dvh - var(--atlas-header) - var(--atlas-tabs));
+  min-height: 420px;
+}
+.project-card,
+.metrics,
+.connection-card,
+.hub-card {
+  box-shadow: var(--atlas-elevation);
+}
+.project-card {
+  transition:
+    transform 0.25s ease,
+    box-shadow 0.25s ease,
+    border-color 0.25s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .project-card:hover {
+    transform: translateY(-3px);
+    box-shadow:
+      0 12px 28px #243f5018,
+      0 2px 5px #243f500c;
+  }
+  [data-theme="dark"] .project-card:hover {
+    box-shadow: 0 14px 28px #0005;
+  }
+  .theme-toggle:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--atlas-elevation);
+  }
+}
+.theme-toggle,
+.add-button {
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s,
+    background 0.2s;
+}
+.add-button:active,
+.theme-toggle:active {
+  transform: scale(0.96);
+}
+.dashboard > .page-heading,
+.hub-header {
+  animation: atlas-arrive 0.5s ease both;
+}
+.project-grid > .project-card {
+  animation: atlas-arrive 0.45s ease backwards;
+}
+.project-grid > .project-card:nth-child(2) {
+  animation-delay: 0.045s;
+}
+.project-grid > .project-card:nth-child(3) {
+  animation-delay: 0.09s;
+}
+.project-grid > .project-card:nth-child(n + 4) {
+  animation-delay: 0.135s;
+}
+@keyframes atlas-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(9px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.view-flight {
+  position: fixed;
+  left: var(--atlas-sidebar);
+  top: calc(var(--atlas-header) + var(--atlas-tabs));
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  overflow: hidden;
+  background: var(--background);
+  isolation: isolate;
+}
+.view-flight-canvas,
+.view-flight-snapshot {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.view-flight-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.view-flight-snapshot {
+  background: var(--background);
+  pointer-events: none;
+  transform-origin: 0 0;
+  will-change: transform, opacity;
+}
+.view-flight-snapshot .project-card,
+.view-flight-snapshot .page-heading {
+  animation: none;
+}
+.view-flight-caption {
+  position: absolute;
+  left: 30px;
+  bottom: 26px;
+  color: white;
+  padding: 18px 22px;
+  background: #122733c9;
+  border: 1px solid #ffffff24;
+  border-radius: 14px;
+  box-shadow: 0 12px 32px #0003;
+  backdrop-filter: blur(16px);
+  display: grid;
+  gap: 7px;
+  pointer-events: none;
+}
+.view-flight-caption > span {
+  font-size: 9px;
+  letter-spacing: 0.17em;
+  color: #ffc679;
+}
+.view-flight-caption strong {
+  font-size: 18px;
+  font-weight: 500;
+}
+.view-flight-caption small {
+  font-size: 10px;
+  color: #c1d3de;
+}
+.view-flight-skip {
+  position: absolute;
+  top: 22px;
+  right: 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: white;
+  background: #142b39d9;
+  border: 1px solid #ffffff40;
+  border-radius: 30px;
+  padding: 11px 17px;
+  font-size: 12px;
+  box-shadow: 0 5px 20px #0002;
+}
+.view-flight-skip:hover {
+  background: #263f51;
+}
+@media (max-width: 1180px) {
+  :root {
+    --atlas-sidebar: 190px;
+  }
+  .view-tabs-bar {
+    padding: 0 27px;
+  }
+}
+@media (max-width: 960px) {
+  :root {
+    --atlas-sidebar: 76px;
+  }
+  .view-tabs-caption {
+    display: none;
+  }
+}
+@media (max-width: 540px) {
+  :root {
+    --atlas-sidebar: 58px;
+    --atlas-header: 72px;
+    --atlas-tabs: 60px;
+  }
+  .view-tabs-bar {
+    padding: 0 12px;
+  }
+  .view-tabs {
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .view-tab-indicator {
+    width: calc((100% - 8px) / 2);
+  }
+  .view-tabs button {
+    font-size: 12px;
+    gap: 6px;
+  }
+  .view-flight-caption {
+    left: 14px;
+    right: 14px;
+    bottom: 18px;
+    padding: 14px;
+  }
+  .view-flight-caption strong {
+    font-size: 15px;
+  }
+  .view-flight-skip {
+    right: 14px;
+    top: 14px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .project-grid > .project-card,
+  .dashboard > .page-heading,
+  .hub-header {
+    animation: none;
+  }
+  .view-tab-indicator,
+  .view-tabs button,
+  .project-card,
+  .theme-toggle,
+  .add-button {
+    transition: none;
+  }
+  .project-card:hover,
+  .theme-toggle:hover,
+  .add-button:active {
+    transform: none;
+  }
+}
+/* Every interactive surface has matching pointer and keyboard feedback. */
+:where(button, a, [role="button"]):focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 4px;
+}
+:where(button, a, [role="button"]):disabled {
+  cursor: not-allowed;
+}
+[data-slot="button"],
+.nav-item,
+.globe-link,
+.location-row,
+.globe-controls button,
+.filter-tabs button,
+.text-link,
+.bridge-project-name,
+.news-item,
+.opportunity-card,
+.project-symbol {
+  transition:
+    background-color 0.2s,
+    color 0.2s,
+    border-color 0.2s,
+    box-shadow 0.2s,
+    transform 0.2s;
+}
+@media (hover: hover) and (pointer: fine) {
+  [data-slot="button"]:not(:disabled):hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 14px #5c3a181c;
+    filter: brightness(1.06);
+  }
+  [data-theme="dark"] [data-slot="button"]:not(:disabled):hover {
+    box-shadow: 0 6px 16px #0004;
+  }
+  .nav-item:not(:disabled):hover {
+    box-shadow: inset 3px 0 var(--orange);
+  }
+  .view-tabs button:not(:disabled):hover {
+    color: var(--foreground);
+    background: #e9830012;
+  }
+  .filter-tabs button:not(:disabled):hover {
+    color: var(--foreground);
+    background: var(--accent);
+  }
+  .globe-link:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 22px #142d3b30;
+  }
+  .globe-link:hover .globe-link-icon {
+    transform: rotate(-8deg) scale(1.08);
+  }
+  .globe-link-icon {
+    transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .project-card:hover .project-symbol,
+  .location-row:hover .project-symbol {
+    transform: scale(1.08) rotate(-3deg);
+  }
+  .location-row:hover {
+    background: #ffffff0c;
+    box-shadow: inset 3px 0 var(--orange);
+  }
+  .globe-controls button:hover {
+    transform: translateY(-2px);
+    border-color: var(--orange);
+    box-shadow: 0 5px 15px #0004;
+  }
+  .text-link:not(:disabled):hover,
+  .bridge-project-name:hover {
+    color: var(--orange);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+  .news-item:hover,
+  .opportunity-card:hover {
+    border-color: var(--orange);
+    box-shadow: var(--atlas-elevation);
+  }
+  [data-slot="button"]:not(:disabled):active {
+    transform: translateY(0) scale(0.98);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="button"],
+  .nav-item,
+  .globe-link,
+  .globe-link-icon,
+  .location-row,
+  .globe-controls button,
+  .filter-tabs button,
+  .text-link,
+  .bridge-project-name,
+  .news-item,
+  .opportunity-card,
+  .project-symbol {
+    transition: none;
+  }
+  [data-slot="button"]:not(:disabled):hover,
+  [data-slot="button"]:not(:disabled):active,
+  .globe-link:hover,
+  .globe-link:hover .globe-link-icon,
+  .project-card:hover .project-symbol,
+  .location-row:hover .project-symbol,
+  .globe-controls button:hover {
+    transform: none;
+  }
+}

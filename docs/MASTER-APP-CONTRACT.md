@@ -44,3 +44,7 @@ Start with read/launch integration. Later write operations need explicit delegat
 4. Wrong, disabled or inaccessible context never falls back to another workspace/project.
 5. An Advantage detail link opens in the intended context even when the OS shell last had a different project selected.
 6. No source metrics, measurements, or success claims are fabricated to fill an empty portfolio panel.
+
+## Project onboarding in both directions
+
+See [PROJECT-BRIDGE-CONTRACT.md](PROJECT-BRIDGE-CONTRACT.md) for OS-to-Atlas import, Atlas-to-OS creation, instance-scoped references, durable idempotency, and the access controls required before enabling either flow. Draft preparation is available now; live discovery and creation await the SDK. This extends the initial read-only scope with separately authorized project creation.

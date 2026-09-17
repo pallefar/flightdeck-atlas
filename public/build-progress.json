@@ -1,9 +1,17 @@
 {
-  "updated": "Action hub, settings and access management verified",
+  "updated": "Personal hub, project bridge and animated views verified",
   "stages": [
     {
-      "name": "TE dashboard and God’s Eye globe",
+      "name": "TE dashboard and God\u2019s Eye globe",
       "status": "Implemented and reviewed"
+    },
+    {
+      "name": "Reversible dashboard-to-sky transition and hover effects",
+      "status": "Implemented; desktop and mobile visually reviewed"
+    },
+    {
+      "name": "Personal wellbeing, readiness and Pomodoro",
+      "status": "Implemented; persistence, timing and daily reset tested"
     },
     {
       "name": "Saved dashboard and globe settings",
@@ -28,6 +36,14 @@
     {
       "name": "FlightDeck master-app and TEOA Advantage contract",
       "status": "Prepared; waiting for deployed OS and SDK"
+    },
+    {
+      "name": "OS project intake and Atlas onboarding drafts",
+      "status": "Drafts work now; live bridge awaiting SDK"
+    },
+    {
+      "name": "Outlook email and calendar overview",
+      "status": "UI prepared; Microsoft 365 connection required"
     },
     {
       "name": "Updated source and private site",

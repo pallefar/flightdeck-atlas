@@ -1,0 +1,767 @@
+.wellbeing-dashboard {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 0.9fr;
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--atlas-elevation);
+  border-radius: 12px;
+  margin: -3px 0 32px;
+  overflow: hidden;
+}
+.wellbeing-dashboard > * {
+  padding: 20px 24px;
+  min-width: 0;
+  border-right: 1px solid var(--border);
+}
+.wellbeing-dashboard > :last-child {
+  border: 0;
+}
+.wellbeing-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.wellbeing-line .text-link {
+  font-size: 11px;
+}
+.wellbeing-kicker {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  color: var(--muted-foreground);
+}
+.wellbeing-kicker svg {
+  color: var(--orange);
+}
+.mood-control {
+  display: flex;
+  gap: 7px;
+  margin: 17px 0 13px;
+}
+.mood-control button {
+  flex: 1;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 7px 3px;
+  transition:
+    transform 0.22s,
+    background 0.22s,
+    border-color 0.22s;
+}
+.mood-control button > span {
+  display: block;
+  font-size: 25px;
+  filter: saturate(0.8);
+  transition: transform 0.25s;
+}
+.mood-control small {
+  display: block;
+  font-size: 10px;
+  margin-top: 5px;
+  color: var(--muted-foreground);
+}
+.mood-control button[aria-pressed="true"] {
+  border-color: var(--orange);
+  background: #e9830015;
+}
+.mood-control button[aria-pressed="true"] > span {
+  transform: scale(1.12);
+  filter: none;
+}
+.wellbeing-checkin-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.wellbeing-checkin-link strong {
+  font-weight: 500;
+  color: var(--foreground);
+  margin-left: 7px;
+}
+.wellbeing-checkin-link .text-link {
+  font-size: 11px;
+}
+.clock-body {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 22px;
+  margin: 22px 0;
+}
+.clock-body > div:last-child {
+  min-width: 0;
+}
+.clock-dial {
+  position: relative;
+  width: 112px;
+  height: 112px;
+  flex-shrink: 0;
+}
+.clock-dial svg:first-child {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.clock-dial > svg:last-child {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 29px;
+  height: 29px;
+  transform: translate(-50%, -50%);
+  color: var(--orange);
+}
+.clock-track,
+.clock-progress {
+  stroke-width: 5;
+  fill: none;
+}
+.clock-track {
+  stroke: var(--border);
+}
+.clock-progress {
+  stroke: var(--orange);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.75s linear;
+}
+.clock-time {
+  display: block;
+  font-size: 40px;
+  font-weight: 500;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -1.5px;
+}
+.clock-body small {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.clock-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: center;
+}
+.clock-actions .text-link {
+  font-size: 11px;
+}
+.wellbeing-icon-button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--muted-foreground);
+  transition:
+    color 0.2s,
+    background 0.2s,
+    transform 0.2s;
+}
+.focus-clock.compact .clock-body {
+  justify-content: flex-start;
+  gap: 14px;
+  margin: 0 0 13px;
+}
+.focus-clock.compact .clock-dial {
+  width: 62px;
+  height: 62px;
+}
+.focus-clock.compact .clock-dial > svg:last-child {
+  width: 20px;
+  height: 20px;
+}
+.focus-clock.compact .clock-time {
+  font-size: 29px;
+  letter-spacing: -1px;
+}
+.focus-clock.compact .clock-actions {
+  justify-content: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.focus-clock.compact [data-slot="button"] {
+  height: 31px;
+  font-size: 11px;
+  padding: 0 10px;
+}
+.break-clock .clock-progress {
+  stroke: var(--green);
+}
+.break-clock .clock-dial > svg:last-child {
+  color: var(--green);
+  animation: gentle-breathe 5s ease-in-out infinite;
+}
+@keyframes gentle-breathe {
+  50% {
+    transform: translate(-50%, -50%) scale(1.12);
+  }
+}
+.day-overview-link {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 7px;
+  text-align: left;
+  transition: background 0.2s;
+}
+.day-overview-link > span:first-child {
+  display: flex;
+  gap: 9px;
+  color: var(--orange);
+  margin-bottom: 3px;
+}
+.day-overview-link > strong {
+  font-size: 14px;
+  font-weight: 500;
+}
+.day-overview-link > small {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.day-overview-link .wellbeing-kicker {
+  margin-top: 6px;
+  font-size: 9px;
+}
+.wellbeing-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  align-items: start;
+}
+.wellbeing-grid > .hub-card {
+  margin: 0;
+}
+.readiness-checkin {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  margin: 24px 0;
+}
+.readiness-ring {
+  width: 100px;
+  height: 100px;
+  padding: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: conic-gradient(var(--orange) var(--readiness), var(--border) 0);
+  animation: atlas-arrive 0.4s ease;
+}
+.readiness-ring > span {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: var(--card);
+}
+.readiness-ring strong {
+  font-size: 31px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+.readiness-ring small {
+  font-size: 8px;
+  color: var(--muted-foreground);
+  letter-spacing: 0.08em;
+}
+.readiness-checkin h3 {
+  font-size: 17px;
+  margin-bottom: 6px;
+}
+.readiness-checkin p {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.65;
+  max-width: 300px;
+}
+.readiness-inputs {
+  display: grid;
+  gap: 14px;
+}
+.readiness-inputs fieldset {
+  min-width: 0;
+}
+.readiness-inputs legend {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-bottom: 7px;
+}
+.readiness-inputs legend span {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.readiness-inputs fieldset > div {
+  display: flex;
+  gap: 8px;
+}
+.readiness-inputs button {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  flex: 1;
+  padding: 7px;
+  font-size: 12px;
+  transition:
+    background 0.2s,
+    border-color 0.2s,
+    transform 0.2s;
+}
+.readiness-inputs button[aria-pressed="true"] {
+  background: #e983001a;
+  border-color: var(--orange);
+}
+.wellbeing-note {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.7;
+  margin: 17px 0 0;
+}
+.focus-card > .hub-muted {
+  text-align: center;
+  font-size: 12px;
+  margin: 20px 0;
+}
+.timer-modes {
+  display: flex;
+  justify-content: center;
+}
+.timer-settings {
+  border-top: 1px solid var(--border);
+  padding-top: 15px;
+  font-size: 12px;
+}
+.timer-settings summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  color: var(--muted-foreground);
+}
+.timer-settings > div {
+  display: grid;
+  gap: 13px;
+  margin-top: 15px;
+}
+.timer-settings label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.timer-settings select {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px;
+  background: var(--background);
+}
+.wellbeing-habits label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  cursor: pointer;
+}
+.wellbeing-habits input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--orange);
+}
+.wellbeing-habits label > svg {
+  margin-left: auto;
+  color: var(--green);
+  animation: atlas-arrive 0.25s ease;
+}
+.daily-thought {
+  margin-top: 24px;
+  background: linear-gradient(120deg, #e9830011, #a4d4e611);
+  border-left: 3px solid var(--orange);
+  padding: 20px 22px;
+  border-radius: 0 10px 10px 0;
+}
+.daily-thought > span {
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  color: var(--muted-foreground);
+}
+.daily-thought p {
+  font-size: 18px;
+  line-height: 1.65;
+  margin: 10px 0;
+}
+.daily-thought cite {
+  font-size: 10px;
+  color: var(--muted-foreground);
+  font-style: normal;
+}
+.personal-source {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--border);
+}
+.personal-source > svg {
+  color: var(--orange);
+  flex-shrink: 0;
+}
+.personal-source > div {
+  flex: 1;
+}
+.personal-source h3 {
+  font-size: 14px;
+  font-weight: 500;
+}
+.personal-source p {
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--muted-foreground);
+  margin-top: 4px;
+}
+.personal-source > span {
+  font-size: 9px;
+  color: var(--muted-foreground);
+  background: var(--background);
+  padding: 5px 7px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+.personal-overview > button {
+  margin-top: 20px;
+}
+.wellbeing-privacy {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  padding: 24px 0 0;
+}
+.wellbeing-privacy .text-link {
+  font-size: 11px;
+}
+.wellbeing-notice {
+  position: fixed;
+  z-index: 45;
+  bottom: 24px;
+  left: calc(var(--atlas-sidebar) + 24px);
+  right: 24px;
+  max-width: 930px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 20px;
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: 0 12px 50px #0003;
+  border: 1px solid var(--orange);
+  border-radius: 14px;
+  animation: atlas-arrive 0.3s ease;
+}
+.wellbeing-notice > svg {
+  color: var(--orange);
+  flex-shrink: 0;
+}
+.wellbeing-notice > div {
+  flex: 1;
+}
+.wellbeing-notice strong {
+  font-size: 14px;
+}
+.wellbeing-notice p {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  margin-top: 4px;
+  line-height: 1.6;
+}
+.focus-badge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.focus-badge > span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--orange);
+}
+.outlook-steps {
+  display: grid;
+  gap: 15px;
+  list-style: decimal;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--muted-foreground);
+}
+@media (hover: hover) and (pointer: fine) {
+  .mood-control button:hover {
+    background: var(--accent);
+    transform: translateY(-3px);
+  }
+  .readiness-inputs button:hover {
+    border-color: var(--orange);
+    transform: translateY(-2px);
+  }
+  .wellbeing-icon-button:hover {
+    background: var(--accent);
+    color: var(--foreground);
+    transform: rotate(-12deg);
+  }
+  .day-overview-link:hover {
+    background: var(--accent);
+  }
+  .focus-badge:hover {
+    border-color: var(--orange);
+  }
+}
+@media (max-width: 1180px) {
+  .wellbeing-dashboard {
+    grid-template-columns: 1fr 1fr;
+  }
+  .day-overview-link {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    border-top: 1px solid var(--border) !important;
+    padding: 14px 24px;
+    gap: 14px;
+  }
+  .day-overview-link > span:first-child,
+  .day-overview-link .wellbeing-kicker {
+    margin: 0;
+  }
+  .day-overview-link > small {
+    display: none;
+  }
+  .wellbeing-grid {
+    gap: 18px;
+  }
+}
+@media (max-width: 760px) {
+  .wellbeing-grid {
+    grid-template-columns: 1fr;
+  }
+  .wellbeing-dashboard > * {
+    padding: 17px;
+  }
+  .wellbeing-notice {
+    flex-wrap: wrap;
+    left: calc(var(--atlas-sidebar) + 12px);
+    right: 12px;
+    bottom: 12px;
+    padding: 15px;
+    gap: 12px;
+  }
+  .wellbeing-notice > div {
+    min-width: 70%;
+  }
+  .wellbeing-notice > button:last-child {
+    margin-left: auto;
+  }
+}
+@media (max-width: 540px) {
+  .wellbeing-dashboard {
+    grid-template-columns: 1fr;
+  }
+  .wellbeing-dashboard > * {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .day-overview-link {
+    grid-column: auto;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    border-top: 0 !important;
+  }
+  .day-overview-link .wellbeing-kicker {
+    margin-left: auto;
+  }
+  .focus-clock.compact {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .focus-clock.compact .clock-body {
+    margin: 0;
+    flex: 1;
+  }
+  .focus-clock.compact .clock-actions {
+    gap: 6px;
+  }
+  .focus-clock.compact .clock-actions .text-link {
+    flex-basis: 100%;
+    justify-content: center;
+    margin-top: 4px;
+  }
+  .focus-clock.compact .clock-dial {
+    width: 44px;
+    height: 44px;
+  }
+  .focus-clock.compact .clock-body {
+    gap: 9px;
+  }
+  .focus-clock.compact .clock-time {
+    font-size: 26px;
+  }
+  .readiness-checkin {
+    gap: 14px;
+  }
+  .readiness-ring {
+    width: 80px;
+    height: 80px;
+  }
+  .personal-source {
+    flex-wrap: wrap;
+  }
+  .personal-source > span {
+    margin-left: 34px;
+  }
+  .clock-dial {
+    width: 90px;
+    height: 90px;
+  }
+  .clock-time {
+    font-size: 34px;
+  }
+  .focus-badge {
+    padding: 5px;
+    gap: 4px;
+  }
+  .topbar-right:has(.focus-badge) {
+    gap: 7px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mood-control button,
+  .mood-control button > span,
+  .readiness-inputs button,
+  .clock-progress,
+  .day-overview-link,
+  .wellbeing-icon-button {
+    transition: none;
+  }
+  .break-clock .clock-dial > svg:last-child,
+  .readiness-ring,
+  .wellbeing-habits label > svg,
+  .wellbeing-notice {
+    animation: none;
+  }
+  .mood-control button:hover,
+  .mood-control button[aria-pressed="true"] > span,
+  .readiness-inputs button:hover,
+  .wellbeing-icon-button:hover {
+    transform: none;
+  }
+}
+@property --readiness {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 0%;
+}
+.readiness-ring {
+  transition: --readiness 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .readiness-ring {
+    transition: none;
+  }
+}
+.personal-rail {
+  min-width: 0;
+}
+.personal-rail .focus-panel {
+  padding-left: 0;
+  border-left: 0;
+}
+.personal-rail .wellbeing-dashboard {
+  grid-template-columns: 1fr;
+  margin: 0 0 28px;
+}
+.personal-rail .wellbeing-dashboard > * {
+  padding: 15px;
+  border-right: 0;
+  border-bottom: 1px solid var(--border);
+}
+.personal-rail .wellbeing-dashboard > :last-child {
+  border-bottom: 0;
+}
+.personal-rail .wellbeing-line {
+  gap: 7px;
+}
+.personal-rail .wellbeing-kicker {
+  font-size: 8px;
+}
+.personal-rail .mood-control {
+  gap: 2px;
+  margin: 10px 0;
+}
+.personal-rail .mood-control button {
+  padding: 5px 1px;
+}
+.personal-rail .mood-control button > span {
+  font-size: 22px;
+}
+.personal-rail .mood-control small {
+  font-size: 9px;
+}
+.personal-rail .day-overview-link {
+  grid-column: auto;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  border-top: 0 !important;
+}
+.personal-rail .day-overview-link > span:first-child {
+  display: none;
+}
+.personal-rail .day-overview-link > strong {
+  font-size: 12px;
+}
+.personal-rail .day-overview-link > small {
+  display: block;
+}
+.personal-rail .day-overview-link .wellbeing-kicker {
+  margin: 0;
+}
+.personal-rail .focus-clock.compact {
+  display: block;
+}
+.personal-rail .focus-clock.compact .clock-body {
+  margin: 0 0 12px;
+  gap: 12px;
+}
+.personal-rail .focus-clock.compact .clock-dial {
+  width: 50px;
+  height: 50px;
+}
+.personal-rail .clock-body small {
+  white-space: nowrap;
+  font-size: 10px;
+}
+@media (max-width: 760px) {
+  .personal-rail .wellbeing-dashboard {
+    max-width: 460px;
+  }
+}
