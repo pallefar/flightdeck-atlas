@@ -1,0 +1,33 @@
+{
+  "updated": "Atlas build verified; SDK connection pending",
+  "stages": [
+    {
+      "name": "Dashboard and project workspaces",
+      "status": "Implemented and reviewed"
+    },
+    {
+      "name": "Durable project and task storage",
+      "status": "Implemented and reviewed"
+    },
+    {
+      "name": "God’s Eye globe",
+      "status": "Implemented and reviewed"
+    },
+    {
+      "name": "Building → room → laptop journey",
+      "status": "Implemented and reviewed"
+    },
+    {
+      "name": "TE theme, logo and light/dark modes",
+      "status": "Implemented and reviewed"
+    },
+    {
+      "name": "FlightDeck SDK adapter and requirements",
+      "status": "Prepared; waiting for SDK"
+    },
+    {
+      "name": "GitHub source and private preview",
+      "status": "Ready for publication"
+    }
+  ]
+}
