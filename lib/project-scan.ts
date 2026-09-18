@@ -1,4 +1,4 @@
-import type { Project } from "./projects";
+import { taskBlocked, type Project } from "./projects";
 import { localDay } from "./wellbeing";
 export type ScanFilter = "all" | "attention" | "high" | "completed";
 export const scanFilters: { value: ScanFilter; label: string }[] = [
@@ -25,7 +25,7 @@ export function projectSignals(project: Project, today = localDay()) {
     late,
     blocked:
       !!project.blocker?.trim() ||
-      project.tasks.some((t) => !t.done && t.workflow === "blocked"),
+      project.tasks.some((t) => taskBlocked(t, project)),
     located: project.latitude !== null && project.longitude !== null,
   };
 }

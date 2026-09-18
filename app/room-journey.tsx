@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
+import { studioLight, woodTexture } from "@/lib/scene-lighting";
+import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import type { Project } from "@/lib/projects";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,7 +40,7 @@ export default function RoomJourney({
     }
     renderer.setPixelRatio(Math.min(devicePixelRatio, 1.8));
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFShadowMap;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.2;
@@ -48,6 +50,9 @@ export default function RoomJourney({
     scene.fog = new THREE.FogExp2("#18202a", 0.028);
     const camera = new THREE.PerspectiveCamera(52, 1, 0.02, 120);
     const resources: { dispose: () => void }[] = [];
+    const lighting = studioLight(renderer, scene),
+      woodMap = woodTexture();
+    resources.push(lighting, woodMap);
     const material = (color: string, roughness = 0.8, metalness = 0) => {
       const m = new THREE.MeshStandardMaterial({ color, roughness, metalness });
       resources.push(m);
@@ -59,6 +64,8 @@ export default function RoomJourney({
       dark = material("#252d36"),
       metal = material("#89919c", 0.3, 0.8),
       leaf = material("#426756");
+    wood.map = woodMap;
+    wood.roughness = 0.48;
     function box(
       w: number,
       h: number,
@@ -68,7 +75,7 @@ export default function RoomJourney({
       z: number,
       m: THREE.Material,
     ) {
-      const g = new THREE.BoxGeometry(w, h, d);
+      const g = new RoundedBoxGeometry(w, h, d, 2, Math.min(w, h, d) * 0.12);
       resources.push(g);
       const mesh = new THREE.Mesh(g, m);
       mesh.position.set(x, y, z);
@@ -81,7 +88,10 @@ export default function RoomJourney({
     const sun = new THREE.DirectionalLight(0xffd6aa, 5);
     sun.position.set(-5, 8, 5);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.normalBias = 0.035;
+    sun.shadow.bias = -0.0002;
+    sun.shadow.radius = 3;
     sun.shadow.camera.left = -10;
     sun.shadow.camera.right = 10;
     sun.shadow.camera.top = 10;
@@ -215,6 +225,11 @@ export default function RoomJourney({
       positionC = new THREE.Vector3(0.3, 2.15, 0.7),
       positionD = new THREE.Vector3(0, 1.96, -0.9);
     const look = new THREE.Vector3(0, 1.8, -1.2);
+    const path = new THREE.CatmullRomCurve3(
+      [positionA, positionB, positionC, positionD],
+      false,
+      "centripetal",
+    );
     const ease = (t: number) => t * t * (3 - 2 * t);
     const resize = () => {
       if (disposed) return;
@@ -232,18 +247,14 @@ export default function RoomJourney({
       if (disposed) return;
       const t =
         (performance.now() - start) / (1000 * Math.max(0.1, durationScale));
-      if (t < 3) {
-        camera.position.lerpVectors(positionA, positionB, ease(t / 3));
-      } else if (t < 6) {
-        camera.position.lerpVectors(positionB, positionC, ease((t - 3) / 3));
-      } else {
-        camera.position.lerpVectors(
-          positionC,
-          positionD,
-          ease(Math.min(1, (t - 6) / 2.5)),
-        );
-      }
-      camera.lookAt(look);
+      const u = Math.min(1, t / 8.5),
+        smooth = u * u * u * (u * (u * 6 - 15) + 10);
+      camera.position.copy(path.getPoint(smooth));
+      const aim = look.clone().lerp(new THREE.Vector3(0, 1.96, -1.25), smooth);
+      camera.lookAt(aim);
+      camera.rotateZ(Math.sin(u * Math.PI) * 0.018);
+      camera.fov = 52 - 10 * smooth;
+      camera.updateProjectionMatrix();
       const p =
         t < 3
           ? "ENTERING THE ROOM"

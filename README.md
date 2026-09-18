@@ -85,3 +85,11 @@ Today & advisor combines quick capture, planned work dates, a prioritized action
 God’s Eye adds circular flight targeting, smooth zoom controls, project orbit and risk marker colors; manual control and Escape stop motion. Reduced motion and the circular-lens setting are respected.
 
 FlightDeck is the chosen future AI provider. Live AI, OS strategy/KPI feeds, TEOA and Outlook remain disconnected. See [research and selected roadmap](docs/PRODUCTIVITY-RESEARCH.md) and [strategy/AI SDK contract](docs/STRATEGY-AI-CONTRACT.md).
+
+## Collaboration, apps, presentations and expanded globe
+
+The Apps launcher and Super Admin catalog now support icons, links, audiences, favourites and recent apps. New projects are private, with explicit people/team sharing; older projects retain their previous visibility. Project collaboration adds discussions, mentions, meeting actions, decisions, reviews, benefits and private attachments. Teams, in-app notifications, capacity planning and onboarding playbooks are available. Tasks support permitted-member assignment, dependencies and completion-driven recurrence.
+
+Presentation Studio provides five TE templates, saved/editable slides, notes, presentation mode and editable PowerPoint export. Globe settings now include seven simulated visual looks, HUD/scope, bloom/sharpening, camera controls, private scenes/annotations, and reported USGS earthquakes. Workspace animations use improved real-time 3D lighting and camera paths.
+
+Apply migration 0002 and enable logical R2 binding BUCKET for attachments. No external service keys are included. Shared SSO, live FlightDeck AI/data, Microsoft 365 and additional globe feeds remain pending their service integrations. See [collaboration/app contract](docs/COLLABORATION-AND-APPS.md) and [God’s Eye audit](docs/GODS-EYE-FEATURE-AUDIT.md).

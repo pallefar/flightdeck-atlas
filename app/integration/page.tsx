@@ -83,6 +83,24 @@ export default function Integration() {
           Read the strategy, KPI and AI handoff ↗
         </a>
       </p>
+      <h2>Teams, apps and presentation creation</h2>
+      <p>
+        Atlas now has private project sharing, teams, discussions, review
+        requests, attachments, recurring tasks, capacity planning and a TE
+        presentation studio with PowerPoint export. The Apps launcher and Super
+        Admin registry are ready for your other applications.
+      </p>
+      <p>
+        Shared sign-in needs registered app origins and delegated sessions. The
+        SDK must also define team membership, source ownership, revocation
+        events and authorized collaboration writes. FlightDeck AI will supply
+        draft recommendations and narratives once connected.
+      </p>
+      <p>
+        <a href="https://github.com/pallefar/flightdeck-atlas/blob/main/docs/COLLABORATION-AND-APPS.md">
+          Read the collaboration and app ecosystem handoff ↗
+        </a>
+      </p>
       <h2>What Atlas owns</h2>
       <p>
         Locations, descriptions, tasks, deadlines, and progress remain Atlas

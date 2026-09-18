@@ -34,3 +34,17 @@ Esri World Imagery, OpenStreetMap, Re:Earth terrain, Re:Earth Buildings and Over
 ## TE Connectivity
 
 TE Connectivity logo reused from the existing FlightDeck OS brand asset, whose provenance records the official TE website. The mark belongs to TE Connectivity. Brand color reference: https://www.te.com/content/dam/te-com/documents/about-te/marketing/global/brand-resources/te-brand-guidelines.pdf
+
+## Presentation export
+
+PptxGenJS 4.x is used under the MIT license. Copyright (c) 2015-2022 Brent Ely. Its license is preserved in the dependency distribution. https://github.com/gitbrent/PptxGenJS
+
+## 3D workspace animation
+
+Three.js and its RoomEnvironment and RoundedBoxGeometry examples are used under the MIT license. Copyright © 2010–2026 three.js authors. https://github.com/mrdoob/three.js
+
+## Earthquake observations
+
+USGS Earthquake Hazards Program GeoJSON feed, last 24 hours. Source links and event timestamps are shown in the globe. https://earthquake.usgs.gov/earthquakes/feed/
+
+The MIT license text reproduced above also applies to PptxGenJS and Three.js under their respective copyright notices.

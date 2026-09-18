@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
+import { studioLight, woodTexture } from "@/lib/scene-lighting";
+import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { ArrowRight } from "lucide-react";
 import type { Project } from "@/lib/projects";
 import { progress } from "@/lib/projects";
@@ -76,7 +78,7 @@ export default function ViewFlight({
     }
     renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFShadowMap;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.25;
@@ -87,7 +89,10 @@ export default function ViewFlight({
     scene.fog = new THREE.FogExp2(sky, 0.00009);
     const camera = new THREE.PerspectiveCamera(50, 1, 0.025, 16000);
     const resources: { dispose: () => void }[] = [];
-    const cube = new THREE.BoxGeometry(1, 1, 1);
+    const lighting = studioLight(renderer, scene),
+      woodMap = woodTexture();
+    resources.push(lighting, woodMap);
+    const cube = new RoundedBoxGeometry(1, 1, 1, 2, 0.025);
     resources.push(cube);
     const material = (color: string, roughness = 0.75, metalness = 0) => {
       const m = new THREE.MeshStandardMaterial({ color, roughness, metalness });
@@ -99,6 +104,8 @@ export default function ViewFlight({
       metal = material("#3c4856", 0.35, 0.65),
       orange = material("#e98300"),
       floor = material(dark ? "#566168" : "#b5b8b1");
+    wood.map = woodMap;
+    wood.roughness = 0.48;
     function box(
       w: number,
       h: number,
@@ -128,7 +135,10 @@ export default function ViewFlight({
     const sun = new THREE.DirectionalLight(dark ? 0xc7dcff : 0xffdfb0, 3.5);
     sun.position.set(-50, 100, 65);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.normalBias = 0.035;
+    sun.shadow.bias = -0.0002;
+    sun.shadow.radius = 3;
     Object.assign(sun.shadow.camera, {
       left: -35,
       right: 35,
@@ -347,6 +357,16 @@ export default function ViewFlight({
         camera.updateProjectionMatrix();
       }
       camera.lookAt(looks.getPoint(eased));
+      camera.rotateZ(
+        Math.sin(eased * Math.PI) *
+          0.025 *
+          (target.current === "globe" ? 1 : -1),
+      );
+      const desiredFov = 50 + Math.sin(eased * Math.PI) * 7;
+      if (Math.abs(camera.fov - desiredFov) > 0.05) {
+        camera.fov = desiredFov;
+        camera.updateProjectionMatrix();
+      }
       for (const cloud of clouds) cloud.quaternion.copy(camera.quaternion);
       const fade =
         goal === 1 ? Math.min(1, (1 - t) / 0.12) : Math.min(1, t / 0.1);

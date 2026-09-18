@@ -36,3 +36,7 @@ See [PROJECT-BRIDGE-CONTRACT.md](PROJECT-BRIDGE-CONTRACT.md) for OS-to-Atlas imp
 ## Strategy, KPI and AI reviews
 
 See [STRATEGY-AI-CONTRACT.md](STRATEGY-AI-CONTRACT.md). The user selected FlightDeck OS’s AI service. Atlas now stores manual goals, KPIs, task detail and separate plan dates; model reviews and source-owned metrics await permission-scoped SDK reads and an evidence-linked review contract.
+
+## Collaboration, apps and presentations
+
+See [COLLABORATION-AND-APPS.md](COLLABORATION-AND-APPS.md) for the implemented collaboration model, app registry, current presentation generation and required identity, membership, collaboration transport, AI and Microsoft 365 contracts.

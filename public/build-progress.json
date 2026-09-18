@@ -1,6 +1,34 @@
 {
-  "updated": "Productivity workspace, Today advisor and circular globe flights implemented",
+  "updated": "Team collaboration, presentation studio and expanded God’s Eye settings implemented",
   "stages": [
+    {
+      "name": "Apps launcher and Super Admin app registry",
+      "status": "Implemented; FlightDeck shared login awaits SDK"
+    },
+    {
+      "name": "Private projects, teams, comments, reviews and attachments",
+      "status": "Implemented; permissions, revisions and file access tested"
+    },
+    {
+      "name": "Task dependencies, recurring tasks and team capacity",
+      "status": "Implemented; recurrence and blocked-task watch-outs tested"
+    },
+    {
+      "name": "TE presentation studio and editable PowerPoint export",
+      "status": "Implemented; saved decks and actual export tested"
+    },
+    {
+      "name": "Seven globe looks, scene bookmarks and map annotations",
+      "status": "Implemented; desktop and mobile reviewed"
+    },
+    {
+      "name": "USGS earthquake layer and reference source catalog",
+      "status": "USGS connected; other external feeds require provider configuration"
+    },
+    {
+      "name": "Real-time 3D camera motion, lighting and shadows",
+      "status": "Implemented; interactive scene transitions and reduced motion supported"
+    },
     {
       "name": "Today, quick capture, focus budget and rule-based advisor",
       "status": "Implemented; planning and persistence tested"
@@ -22,11 +50,11 @@
       "status": "Contract prepared; awaiting FlightDeck OS service and SDK"
     },
     {
-      "name": "TE dashboard and God\u2019s Eye globe",
+      "name": "TE dashboard and God’s Eye globe",
       "status": "Implemented and reviewed"
     },
     {
-      "name": "Top navigation, full-width God\u2019s Eye and visible map settings",
+      "name": "Top navigation, full-width God’s Eye and visible map settings",
       "status": "Implemented and tested"
     },
     {

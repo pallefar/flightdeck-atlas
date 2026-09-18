@@ -1,6 +1,6 @@
 import { localDate } from "./briefing";
 import { projectSignals } from "./project-scan";
-import type { Project } from "./projects";
+import { taskBlocked, type Project } from "./projects";
 export type Watchout = {
   id: string;
   projectId: string;
@@ -29,13 +29,13 @@ export function portfolioAdvice(projects: Project[], today = localDate()) {
         evidence,
         action,
       });
-    const blocked = p.tasks.filter((t) => !t.done && t.workflow === "blocked");
+    const blocked = p.tasks.filter((t) => taskBlocked(t, p));
     if (s.blocked)
       add(
         "blocked",
         "Clear the blocker",
         p.blocker ||
-          `${blocked.length} tasks marked Blocked: ${blocked
+          `${blocked.length} tasks blocked or waiting on prerequisites: ${blocked
             .map((t) => t.title)
             .slice(0, 3)
             .join(", ")}`,
@@ -92,7 +92,7 @@ export function portfolioAdvice(projects: Project[], today = localDate()) {
       .map((t) => ({
         p,
         t,
-        blocked: t.workflow === "blocked" || !!p.blocker?.trim(),
+        blocked: taskBlocked(t, p) || !!p.blocker?.trim(),
         reason:
           t.dueDate && t.dueDate < today
             ? `Overdue since ${t.dueDate}`

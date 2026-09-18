@@ -25,6 +25,9 @@ import {
   ShieldCheck,
   Heart,
   ListTodo,
+  Users,
+  Presentation,
+  Grid3X3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +45,8 @@ import {
   type Project,
   type ProjectFields,
 } from "@/lib/projects";
+import { AppLauncher, AppAdministration, TeamHub } from "./workspace-tools";
+import PresentationStudio from "./presentation-studio";
 import Today from "./today";
 import PortfolioPlan from "./portfolio-plan";
 import ProjectBoard from "./project-board";
@@ -72,6 +77,9 @@ import {
   type AtlasSettings,
 } from "@/lib/settings";
 type View =
+  | "apps"
+  | "team"
+  | "presentations"
   | "today"
   | "dashboard"
   | "globe"
@@ -133,6 +141,9 @@ export default function Atlas() {
     [filter, setFilter] = useState("All projects"),
     [error, setError] = useState(""),
     [selected, setSelected] = useState<Project | null>(null),
+    [presentationProject, setPresentationProject] = useState<string | null>(
+      null,
+    ),
     [editing, setEditing] = useState<Project | null>(null),
     [creating, setCreating] = useState(false),
     [saving, setSaving] = useState(false),
@@ -148,6 +159,18 @@ export default function Atlas() {
       if (!r.ok) throw Error(body.error || "Projects could not be loaded.");
       setAccess(body.access || null);
       setProjects(body.projects);
+      setSelected((prev) =>
+        prev ? body.projects.find((p) => p.id === prev.id) || null : null,
+      );
+      const requested = new URLSearchParams(location.search).get("project");
+      if (requested) {
+        const cleanUrl = new URL(location.href);
+        cleanUrl.searchParams.delete("project");
+        history.replaceState(null, "", cleanUrl);
+        const found = body.projects.find((p) => p.id === requested);
+        if (found) setSelected(found);
+        else setError("That project is unavailable or you do not have access.");
+      }
       setDemo(body.projects.length === 0);
     } catch (e) {
       setError((e as Error).message);
@@ -158,6 +181,14 @@ export default function Atlas() {
   useEffect(() => {
     void load();
     const restored = readSettings();
+    const look = new URLSearchParams(location.search).get("look");
+    if (
+      look &&
+      ["normal", "crt", "nvg", "thermal", "anime", "noir", "snow"].includes(
+        look,
+      )
+    )
+      restored.globe.look = look as AtlasSettings["globe"]["look"];
     setSettings(restored);
     const v = new URLSearchParams(location.search).get("view");
     if (v === "globe" || v === "dashboard") lastPortfolioView.current = v;
@@ -170,10 +201,24 @@ export default function Atlas() {
         v === "ideas" ||
         v === "wellbeing" ||
         v === "today" ||
+        v === "apps" ||
+        v === "team" ||
+        v === "presentations" ||
         v === "access"
         ? v
         : restored.startView,
     );
+  }, [load]);
+  useEffect(() => {
+    const reload = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    window.addEventListener("focus", reload);
+    const interval = window.setInterval(reload, 60000);
+    return () => {
+      window.removeEventListener("focus", reload);
+      clearInterval(interval);
+    };
   }, [load]);
   function finishFlight(destination: PortfolioView) {
     const wasSkipping = !!document.activeElement?.closest(".view-flight");
@@ -327,11 +372,13 @@ export default function Atlas() {
     setSelected(p);
     setError("");
   }
-  const date = new Intl.DateTimeFormat("en", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  }).format(new Date());
+  const date = loaded
+    ? new Intl.DateTimeFormat("en", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      }).format(new Date())
+    : "";
   return (
     <WellbeingProvider
       key={access?.userId || "loading"}
@@ -413,6 +460,22 @@ export default function Atlas() {
               <Heart />
               Wellbeing<span className="nav-shortcut">04</span>
             </button>
+            <button
+              className={view === "team" ? "nav-item active" : "nav-item"}
+              onClick={() => navigate("team")}
+            >
+              <Users />
+              Team workspace
+            </button>
+            <button
+              className={
+                view === "presentations" ? "nav-item active" : "nav-item"
+              }
+              onClick={() => navigate("presentations")}
+            >
+              <Presentation />
+              Presentations
+            </button>
           </nav>
           <div className="sidebar-divider" />
           <div className="workspace-label">CONNECTED WORKSPACES</div>
@@ -431,6 +494,15 @@ export default function Atlas() {
               onClick={() => navigate("access")}
             >
               <ShieldCheck /> People & access
+            </button>
+          )}
+          {access?.superAdmin && (
+            <button
+              className={view === "apps" ? "nav-item active" : "nav-item"}
+              onClick={() => navigate("apps")}
+            >
+              <Grid3X3 />
+              Apps & connections
             </button>
           )}
           <div className="sidebar-bottom">
@@ -512,6 +584,11 @@ export default function Atlas() {
               </div>
             </div>
             <div className="topbar-right">
+              <AppLauncher
+                access={access}
+                onAdmin={() => navigate("apps")}
+                onInbox={() => navigate("team")}
+              />
               <FocusBadge onOpen={() => navigate("wellbeing")} />
               <CommandMenu
                 projects={allData}
@@ -520,6 +597,25 @@ export default function Atlas() {
                   !loaded || !!flight || !!selected || creating || settingsOpen
                 }
                 commands={[
+                  {
+                    id: "team",
+                    label: "Team workspace, notifications & capacity",
+                    run: () => navigate("team"),
+                  },
+                  {
+                    id: "presentations",
+                    label: "Presentation studio",
+                    run: () => navigate("presentations"),
+                  },
+                  ...(access?.superAdmin
+                    ? [
+                        {
+                          id: "apps",
+                          label: "Manage apps",
+                          run: () => navigate("apps"),
+                        },
+                      ]
+                    : []),
                   {
                     id: "today",
                     label: "Today, quick capture & advisor",
@@ -640,7 +736,28 @@ export default function Atlas() {
                 </button>
               </div>
             )}
-            {view === "today" ? (
+            {view === "apps" ? (
+              access?.superAdmin ? (
+                <AppAdministration />
+              ) : (
+                <main className="hub-page">
+                  <h1>Super Admin access required</h1>
+                </main>
+              )
+            ) : view === "team" ? (
+              <TeamHub
+                access={access}
+                projects={projects}
+                onOpen={openProject}
+                onCreate={save}
+              />
+            ) : view === "presentations" ? (
+              <PresentationStudio
+                projects={projects}
+                demo={demo}
+                initialProjectId={presentationProject}
+              />
+            ) : view === "today" ? (
               <Today
                 projects={allData}
                 demo={demo}
@@ -799,7 +916,7 @@ export default function Atlas() {
                     />
                   </section>
                 )}
-                {settings.dashboard.showPlanner && (
+                {settings.dashboard.showPlanner && loaded && (
                   <PortfolioPlan projects={allData} onOpen={openProject} />
                 )}
                 <div
@@ -1085,6 +1202,12 @@ export default function Atlas() {
         />
         {selected && (
           <ProjectWorkspace
+            onReload={() => void load()}
+            onPresent={() => {
+              setPresentationProject(selected.id);
+              setSelected(null);
+              navigate("presentations");
+            }}
             key={selected.id}
             project={selected}
             demo={demo}

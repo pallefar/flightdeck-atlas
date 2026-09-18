@@ -15,6 +15,13 @@
       "when": 1789641574319,
       "tag": "0001_past_blue_shield",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789699647615,
+      "tag": "0002_lowly_thing",
+      "breakpoints": true
     }
   ]
 }

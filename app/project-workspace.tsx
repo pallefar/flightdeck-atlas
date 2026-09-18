@@ -1,4 +1,6 @@
 "use client";
+import ProjectCollaboration from "./project-collaboration";
+import { freshProject } from "@/lib/fresh-export";
 import TaskWorkbench from "./task-workbench";
 import ProjectStrategy from "./project-strategy";
 import { taskState } from "@/lib/projects";
@@ -24,6 +26,8 @@ export default function ProjectWorkspace({
   onSave,
   onEdit,
   onGlobe,
+  onReload,
+  onPresent,
 }: {
   project: Project;
   demo: boolean;
@@ -37,11 +41,13 @@ export default function ProjectWorkspace({
   ) => Promise<Project | null>;
   onEdit: () => void;
   onGlobe: () => void;
+  onReload: () => void;
+  onPresent: () => void;
 }) {
   const readOnly = demo || project.canEdit === false;
-  const [tab, setTab] = useState<"overview" | "tasks" | "strategy" | "updates">(
-    "tasks",
-  );
+  const [tab, setTab] = useState<
+    "overview" | "tasks" | "strategy" | "updates" | "collaboration"
+  >("tasks");
   const [note, setNote] = useState("");
   return (
     <Dialog
@@ -131,7 +137,15 @@ export default function ProjectWorkspace({
           className="workspace-tabs filter-tabs"
           aria-label="Project sections"
         >
-          {(["overview", "tasks", "strategy", "updates"] as const).map((t) => (
+          {(
+            [
+              "overview",
+              "tasks",
+              "strategy",
+              "collaboration",
+              "updates",
+            ] as const
+          ).map((t) => (
             <button
               key={t}
               className={tab === t ? "chosen" : ""}
@@ -144,7 +158,9 @@ export default function ProjectWorkspace({
                   ? `Tasks · ${project.tasks.length}`
                   : t === "strategy"
                     ? "Strategy & KPIs"
-                    : `Updates · ${project.activity?.length || 0}`}
+                    : t === "collaboration"
+                      ? "Collaborate & share"
+                      : `Updates · ${project.activity?.length || 0}`}
             </button>
           ))}
         </div>
@@ -254,12 +270,25 @@ export default function ProjectWorkspace({
             onSave={onSave}
           />
         </div>
+        {tab === "collaboration" && (
+          <ProjectCollaboration
+            project={project}
+            demo={demo}
+            onSave={onSave}
+            onReload={onReload}
+          />
+        )}
         {error && (
           <p role="alert" className="form-error">
             {error}
           </p>
         )}
         <div className="detail-actions">
+          {!demo && (
+            <Button variant="outline" onClick={onPresent}>
+              Create presentation
+            </Button>
+          )}
           {project.latitude !== null && (
             <Button variant="outline" onClick={onGlobe}>
               <Globe2 size={16} /> Find on globe
@@ -270,12 +299,17 @@ export default function ProjectWorkspace({
               <Button onClick={onEdit}>Edit project</Button>
               <Button
                 variant="outline"
-                onClick={() =>
-                  downloadText(
-                    `flightdeck-onboarding-${project.name.replace(/[^a-z0-9]+/gi, "-")}.md`,
-                    onboardingPack(project),
-                  )
-                }
+                onClick={async () => {
+                  try {
+                    const latest = await freshProject(project.id);
+                    downloadText(
+                      `flightdeck-onboarding-${latest.name.replace(/[^a-z0-9]+/gi, "-")}.md`,
+                      onboardingPack(latest),
+                    );
+                  } catch (e) {
+                    alert((e as Error).message);
+                  }
+                }}
               >
                 <Download size={15} /> Onboarding pack
               </Button>

@@ -1,4 +1,5 @@
 "use client";
+import { freshProjects } from "@/lib/fresh-export";
 import { useState } from "react";
 import {
   ArrowUpRight,
@@ -54,12 +55,17 @@ export default function Briefing({
         </div>
         <Button
           variant="outline"
-          onClick={() =>
-            downloadText(
-              `atlas-${period}-${b.today}.md`,
-              briefingMarkdown(projects, period),
-            )
-          }
+          onClick={async () => {
+            try {
+              const current = demo ? projects : await freshProjects();
+              downloadText(
+                `atlas-${period}-${b.today}.md`,
+                briefingMarkdown(current, period),
+              );
+            } catch (e) {
+              alert((e as Error).message);
+            }
+          }}
         >
           <Download size={16} /> Export summary
         </Button>

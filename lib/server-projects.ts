@@ -149,6 +149,9 @@ export function recordChanges(
           "dueDate",
           "priority",
           "assignee",
+          "assigneeEmail",
+          "dependsOn",
+          "recurrence",
           "workflow",
           "description",
           "estimateMinutes",
@@ -178,6 +181,45 @@ export function recordChanges(
         : null,
     };
   });
+  for (const task of [...tasks]) {
+    const old = previous?.tasks.find((t) => t.id === task.id);
+    if (
+      task.done &&
+      !old?.done &&
+      task.recurrence &&
+      task.recurrence !== "none" &&
+      !tasks.some((t) => t.recurrenceSource === task.id)
+    ) {
+      const today = at.slice(0, 10),
+        base = task.dueDate && task.dueDate > today ? task.dueDate : today;
+      const next = new Date(`${base}T12:00:00Z`);
+      if (task.recurrence === "monthly") {
+        const day = next.getUTCDate();
+        next.setUTCDate(1);
+        next.setUTCMonth(next.getUTCMonth() + 1);
+        const last = new Date(
+          Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0),
+        ).getUTCDate();
+        next.setUTCDate(Math.min(day, last));
+      } else
+        next.setUTCDate(
+          next.getUTCDate() + (task.recurrence === "weekly" ? 7 : 1),
+        );
+      tasks.push({
+        ...task,
+        id: crypto.randomUUID(),
+        done: false,
+        completedAt: null,
+        workflow: "todo",
+        dueDate: next.toISOString().slice(0, 10),
+        plannedDate: "",
+        dependsOn: [],
+        recurrenceSource: task.id,
+        checklist: task.checklist?.map((c) => ({ ...c, done: false })),
+      });
+      add("task-added", `Next ${task.recurrence} occurrence: ${task.title}`);
+    }
+  }
   if (note) add("note", note);
   return { ...fields, tasks, activity: activity.slice(-200) };
 }

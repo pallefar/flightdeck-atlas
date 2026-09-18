@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pencil, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +31,24 @@ export default function TaskWorkbench({
     existing?: Project,
   ) => Promise<Project | null>;
 }) {
+  const [members, setMembers] = useState<{ email: string }[]>([]),
+    [myEmail, setMyEmail] = useState("");
+  useEffect(() => {
+    if (project.id.startsWith("demo-")) return;
+    fetch(`/api/projects/${project.id}/collaboration`)
+      .then(async (r) =>
+        r.ok
+          ? ((await r.json()) as { people: { email: string }[]; email: string })
+          : null,
+      )
+      .then((b) => {
+        if (b) {
+          setMembers(b.people);
+          setMyEmail(b.email);
+        }
+      })
+      .catch(() => {});
+  }, [project.id]);
   const [layout, setLayout] = useState<"list" | "board">("list"),
     [filter, setFilter] = useState("all"),
     [query, setQuery] = useState("");
@@ -46,6 +64,7 @@ export default function TaskWorkbench({
         .toLowerCase()
         .includes(query.toLowerCase()) &&
       (filter === "all" ||
+        (filter === "mine" && t.assigneeEmail === myEmail && !t.done) ||
         (filter === "open" && !t.done) ||
         (filter === "overdue" &&
           !t.done &&
@@ -117,6 +136,21 @@ export default function TaskWorkbench({
             checklist steps
           </small>
         )}
+        {!!t.dependsOn?.length && (
+          <small>
+            Depends on {t.dependsOn.length} task
+            {t.dependsOn.length > 1 ? "s" : ""} ·{" "}
+            {
+              t.dependsOn.filter(
+                (id) => !project.tasks.find((x) => x.id === id)?.done,
+              ).length
+            }{" "}
+            unfinished
+          </small>
+        )}
+        {t.recurrence && t.recurrence !== "none" && (
+          <small>Repeats {t.recurrence}</small>
+        )}
         {!!t.estimateMinutes && <small>{t.estimateMinutes} min estimate</small>}
         <select
           aria-label={`Workflow for ${t.title}`}
@@ -148,6 +182,7 @@ export default function TaskWorkbench({
           onChange={(e) => setFilter(e.target.value)}
         >
           <option value="all">All tasks</option>
+          <option value="mine">Assigned to me</option>
           <option value="open">Open tasks</option>
           <option value="overdue">Overdue</option>
           <option value="high">High priority</option>
@@ -199,6 +234,65 @@ export default function TaskWorkbench({
             }
           />
           <div className="task-detail-grid">
+            <label>
+              Assigned member
+              <select
+                value={editing.assigneeEmail || ""}
+                onChange={(e) =>
+                  setEditing({
+                    ...editing,
+                    assigneeEmail: e.target.value,
+                    assignee: e.target.value || editing.assignee,
+                  })
+                }
+              >
+                <option value="">Unassigned / manual owner</option>
+                {members.map((m) => (
+                  <option key={m.email}>{m.email}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Repeat after completion
+              <select
+                value={editing.recurrence || "none"}
+                onChange={(e) =>
+                  setEditing({
+                    ...editing,
+                    recurrence: e.target.value as Task["recurrence"],
+                  })
+                }
+              >
+                <option value="none">Does not repeat</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </label>
+            <label>
+              Depends on tasks
+              <select
+                multiple
+                value={editing.dependsOn || []}
+                onChange={(e) =>
+                  setEditing({
+                    ...editing,
+                    dependsOn: Array.from(
+                      e.target.selectedOptions,
+                      (x) => x.value,
+                    ),
+                  })
+                }
+              >
+                {project.tasks
+                  .filter((t) => t.id !== editing.id)
+                  .map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.title}
+                    </option>
+                  ))}
+              </select>
+            </label>
             <label>
               Due date
               <Input
@@ -348,7 +442,14 @@ export default function TaskWorkbench({
                 void onSave(
                   {
                     ...project,
-                    tasks: project.tasks.filter((t) => t.id !== editing.id),
+                    tasks: project.tasks
+                      .filter((t) => t.id !== editing.id)
+                      .map((t) => ({
+                        ...t,
+                        dependsOn: t.dependsOn?.filter(
+                          (id) => id !== editing.id,
+                        ),
+                      })),
                   },
                   project,
                 ).then((r) => {

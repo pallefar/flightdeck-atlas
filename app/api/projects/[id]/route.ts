@@ -1,14 +1,12 @@
 import { authorize } from "@/lib/access";
-import { canChangeProject } from "@/lib/access-policy";
 import {
   database,
-  owner,
   json,
   sameOrigin,
   readFields,
-  fromRow,
   recordChanges,
 } from "@/lib/server-projects";
+import { projectFor, activeProjectPeople } from "@/lib/project-access";
 export const dynamic = "force-dynamic";
 export async function DELETE(
   request: Request,
@@ -60,20 +58,30 @@ export async function PUT(
   }
   try {
     const db = database();
-    const previousRow = await db
-      .prepare("SELECT * FROM atlas_projects WHERE id = ?")
-      .bind(id)
-      .first();
-    if (!previousRow) return json({ error: "Project not found." }, 404);
-    const previous = fromRow(previousRow);
+    const authorized = await projectFor(auth.access, id);
+    if (!authorized) return json({ error: "Project not found." }, 404);
+    const previous = authorized.project;
     if (
-      !canChangeProject(auth.access, previousRow.owner_id as string) ||
-      (!!fields.archived !== !!previous.archived &&
-        !canChangeProject(auth.access, previousRow.owner_id as string, true))
+      !authorized.rights.edit ||
+      (!!fields.archived !== !!previous.archived && !authorized.rights.archive)
     )
       return json(
         { error: "You do not have permission to change this project." },
         403,
+      );
+    const eligible = await activeProjectPeople(auth.access, id);
+    if (
+      fields.tasks.some(
+        (t) =>
+          t.assigneeEmail &&
+          previous.tasks.find((x) => x.id === t.id)?.assigneeEmail !==
+            t.assigneeEmail &&
+          !eligible.some((m) => m.email === t.assigneeEmail),
+      )
+    )
+      return json(
+        { error: "Choose an active member with access to this project." },
+        400,
       );
     if (previous.revision !== revision)
       return json(
@@ -85,47 +93,73 @@ export async function PUT(
       );
     const updatedAt = new Date().toISOString();
     const recorded = recordChanges(fields, previous, updateNote, updatedAt);
-    const result = await db
-      .prepare(
-        "UPDATE atlas_projects SET data = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND revision = ?",
-      )
-      .bind(JSON.stringify(recorded), updatedAt, id, revision)
-      .run();
-    if (!result.meta.changes) {
-      const row = await db
-        .prepare("SELECT id FROM atlas_projects WHERE id = ?")
-        .bind(id)
-        .first();
+    if (recorded.tasks.length > 200)
       return json(
         {
-          error: row
-            ? "This project changed in another session. Reload before editing."
-            : "Project not found.",
+          error:
+            "This project has reached its 200-task limit. Remove completed tasks before adding another recurring task.",
         },
-        row ? 409 : 404,
+        400,
       );
+    const statements = [
+      db
+        .prepare(
+          "UPDATE atlas_projects SET data = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND revision = ?",
+        )
+        .bind(JSON.stringify(recorded), updatedAt, id, revision),
+    ];
+    for (const t of fields.tasks) {
+      const old = previous.tasks.find((x) => x.id === t.id);
+      if (
+        t.assigneeEmail &&
+        t.assigneeEmail !== auth.access.email &&
+        old?.assigneeEmail !== t.assigneeEmail
+      )
+        statements.push(
+          db
+            .prepare(
+              "INSERT INTO atlas_notifications (id,recipient,project_id,text,created_at,read) SELECT ?,?,?,?,?,0 WHERE changes()>0",
+            )
+            .bind(
+              crypto.randomUUID(),
+              t.assigneeEmail,
+              id,
+              `Assigned to you: ${t.title}`,
+              updatedAt,
+            ),
+        );
     }
-    const row = await db
-      .prepare("SELECT * FROM atlas_projects WHERE id = ?")
-      .bind(id)
-      .first();
-    return json({
-      project: {
-        ...fromRow(row!),
-        canEdit: canChangeProject(auth.access, row!.owner_id as string),
-        canArchive: canChangeProject(
-          auth.access,
-          row!.owner_id as string,
-          true,
-        ),
-        ownedByMe: row!.owner_id === auth.access.userId,
-      },
-    });
+    const [result] = await db.batch(statements);
+    if (!result.meta.changes)
+      return json(
+        {
+          error:
+            "This project changed in another session. Reload before editing.",
+        },
+        409,
+      );
+    return json({ project: (await projectFor(auth.access, id))!.project });
   } catch {
     console.error("Atlas project update unavailable");
     return json(
       { error: "Your changes could not be saved. Please try again." },
       503,
     );
+  }
+}
+
+export async function GET(
+  _: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const a = await authorize("projects.read");
+  if (a.error) return a.error;
+  try {
+    const p = await projectFor(a.access, (await params).id);
+    return p
+      ? json({ project: p.project })
+      : json({ error: "Project not found or access changed." }, 404);
+  } catch {
+    return json({ error: "Project could not be loaded." }, 503);
   }
 }

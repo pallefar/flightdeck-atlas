@@ -1,4 +1,4 @@
-import { authorize } from "@/lib/access";
+import { authorize, superAdminEmail } from "@/lib/access";
 import { canChangeProject } from "@/lib/access-policy";
 import {
   database,
@@ -9,22 +9,15 @@ import {
   fromRow,
   newProject,
 } from "@/lib/server-projects";
+import { visibleProjects } from "@/lib/project-access";
 export const dynamic = "force-dynamic";
 export async function GET() {
   const auth = await authorize("projects.read");
   if (auth.error) return auth.error;
   try {
-    const result = await database()
-      .prepare("SELECT * FROM atlas_projects ORDER BY updated_at DESC")
-      .all();
     return json({
       access: auth.access,
-      projects: result.results.map((row) => ({
-        ...fromRow(row),
-        canEdit: canChangeProject(auth.access, row.owner_id as string),
-        canArchive: canChangeProject(auth.access, row.owner_id as string, true),
-        ownedByMe: row.owner_id === auth.access.userId,
-      })),
+      projects: await visibleProjects(auth.access),
     });
   } catch {
     console.error("Atlas project list unavailable");
@@ -47,28 +40,59 @@ export async function POST(request: Request) {
     return json({ error: (e as Error).message }, 400);
   }
   try {
+    if (
+      fields.tasks.some(
+        (t) =>
+          t.assigneeEmail &&
+          ![auth.access.email, superAdminEmail()].includes(t.assigneeEmail),
+      )
+    )
+      return json(
+        {
+          error:
+            "Create the private project, share it with a member, then assign their tasks.",
+        },
+        400,
+      );
     const project = newProject(fields);
-    await database()
-      .prepare(
-        "INSERT INTO atlas_projects (id, owner_id, data, source, updated_at, revision) VALUES (?, ?, ?, ?, ?, ?)",
-      )
-      .bind(
-        project.id,
-        user,
-        JSON.stringify({
-          ...fields,
-          tasks: project.tasks,
-          activity: project.activity,
-        }),
-        project.source,
-        project.updatedAt,
-        project.revision,
-      )
-      .run();
+    if (project.tasks.length > 200)
+      return json(
+        { error: "Recurring tasks would exceed the 200-task project limit." },
+        400,
+      );
+    const db = database();
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO atlas_projects (id, owner_id, data, source, updated_at, revision) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(
+          project.id,
+          user,
+          JSON.stringify({
+            ...fields,
+            tasks: project.tasks,
+            activity: project.activity,
+          }),
+          project.source,
+          project.updatedAt,
+          1,
+        ),
+      db
+        .prepare(
+          "INSERT INTO atlas_project_shares (project_id,data,revision) VALUES (?,?,1)",
+        )
+        .bind(
+          project.id,
+          JSON.stringify({ visibility: "private", grants: [] }),
+        ),
+    ]);
     return json(
       {
         project: {
           ...project,
+          canShare: true,
+          canComment: true,
           canEdit: canChangeProject(auth.access, user),
           canArchive: canChangeProject(auth.access, user, true),
           ownedByMe: true,

@@ -60,6 +60,13 @@ export default function GlobeWorkspace({
     [tourIndex, setTourIndex] = useState(0),
     [panelOpen, setPanelOpen] = useState(true);
   const input = useRef<HTMLInputElement>(null);
+  const tourTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (tourTimer.current) clearTimeout(tourTimer.current);
+    },
+    [],
+  );
   const panel = useRef<HTMLElement>(null),
     summary = useRef<HTMLDivElement>(null);
   const matches = useMemo(
@@ -125,11 +132,6 @@ export default function GlobeWorkspace({
   useEffect(() => {
     if (!tour || !mapped.length) return;
     setLocalTarget({ ...mapped[tourIndex % mapped.length] });
-    const id = window.setTimeout(
-      () => setTourIndex((i) => (i + 1) % mapped.length),
-      6500,
-    );
-    return () => clearTimeout(id);
   }, [tour, tourIndex, mapped]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -156,6 +158,7 @@ export default function GlobeWorkspace({
     return () => window.removeEventListener("keydown", onKey);
   });
   function stopTour() {
+    if (tourTimer.current) clearTimeout(tourTimer.current);
     setTour(false);
     setStopCommand((c) => c + 1);
   }
@@ -221,7 +224,7 @@ export default function GlobeWorkspace({
   const stage = Math.min(4, Math.floor(scanProgress / 22));
   return (
     <div
-      className={`globe-page globe-workspace ${scanMode ? "scan-mode" : ""} ${scanning ? "is-scanning" : ""} ${panelOpen ? "panel-open" : "panel-closed"}`}
+      className={`globe-page globe-workspace ${scanMode ? "scan-mode" : ""} ${scanning ? "is-scanning" : ""} ${panelOpen ? "panel-open" : "panel-closed"} ${settings.cleanUI ? "clean-globe" : ""}`}
       role="tabpanel"
       id="globe-panel"
       aria-labelledby="globe-tab"
@@ -240,7 +243,24 @@ export default function GlobeWorkspace({
             setPanelOpen(false);
         }}
         onSelectionChange={setLocalTarget}
+        onFlightComplete={() => {
+          if (tour && mapped.length) {
+            if (tourTimer.current) clearTimeout(tourTimer.current);
+            tourTimer.current = setTimeout(
+              () => setTourIndex((i) => (i + 1) % mapped.length),
+              settings.tourDwell * 1000,
+            );
+          }
+        }}
       />
+      {settings.cleanUI && (
+        <button
+          className="exit-clean-globe"
+          onClick={() => onSettingsChange({ cleanUI: false })}
+        >
+          Exit clean view
+        </button>
+      )}
       <div className="globe-command-bar">
         <div className="globe-title">
           <span className="eyebrow">ATLAS / WORLDSPACE</span>

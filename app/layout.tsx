@@ -7,6 +7,7 @@ import "./motion.css";
 import "./wellbeing.css";
 import "./globe-command.css";
 import "./productivity.css";
+import "./suite.css";
 import ThemeProvider from "./theme-provider";
 
 export const metadata: Metadata = {

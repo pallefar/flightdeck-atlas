@@ -6,6 +6,9 @@ import { Button } from "@/components/ui/button";
 import type { Project } from "@/lib/projects";
 import { motionScale, type GlobeSettings } from "@/lib/settings";
 import { projectSignals } from "@/lib/project-scan";
+import { sensorShader, looks } from "@/lib/globe-effects";
+import { useWorkspace } from "./workspace-tools";
+import { sceneSchema } from "@/lib/collaboration";
 import RoomJourney from "./room-journey";
 type CesiumModule = typeof CesiumType;
 declare global {
@@ -43,6 +46,7 @@ export default function Globe({
   stopCommand = 0,
   onInteract,
   onSelectionChange,
+  onFlightComplete,
 }: {
   projects: Project[];
   target: Project | null;
@@ -52,6 +56,7 @@ export default function Globe({
   stopCommand?: number;
   onInteract?: () => void;
   onSelectionChange?: (project: Project | null) => void;
+  onFlightComplete?: () => void;
 }) {
   const container = useRef<HTMLDivElement>(null),
     viewer = useRef<CesiumType.Viewer | null>(null),
@@ -75,6 +80,43 @@ export default function Globe({
     x: number;
     y: number;
   } | null>(null);
+  const workspace = useWorkspace();
+  const [director, setDirector] = useState(false),
+    [sceneName, setSceneName] = useState(""),
+    [drawType, setDrawType] = useState<"pin" | "line" | "area" | null>(null),
+    [drawPoints, setDrawPoints] = useState<[number, number][]>([]),
+    [annotationName, setAnnotationName] = useState(""),
+    [annotationColor, setAnnotationColor] = useState<
+      "orange" | "blue" | "green" | "white" | "red"
+    >("orange"),
+    [sceneMessage, setSceneMessage] = useState("");
+  const drawRef = useRef(drawType);
+  drawRef.current = drawType;
+  const [sourceStatus, setSourceStatus] = useState({
+      terrain: "Loading",
+      buildings: "Loading",
+      imagery: "Loading",
+    }),
+    [retry, setRetry] = useState(0);
+  const [telemetry, setTelemetry] = useState({
+    longitude: 0,
+    latitude: 0,
+    altitude: 0,
+    heading: 0,
+  });
+  const [brackets, setBrackets] = useState<
+    { id: string; name: string; x: number; y: number }[]
+  >([]);
+  const [quakeStatus, setQuakeStatus] = useState("Off"),
+    [quakeDetail, setQuakeDetail] = useState<{
+      magnitude: number;
+      place: string;
+      time: number;
+      url: string | null;
+    } | null>(null);
+  const flyTicket = useRef(0),
+    flightComplete = useRef(onFlightComplete);
+  flightComplete.current = onFlightComplete;
   const [orbit, setOrbit] = useState(false);
   const orbitCleanup = useRef<(() => void) | null>(null);
   const [flightLens, setFlightLens] = useState<{
@@ -89,6 +131,7 @@ export default function Globe({
     setOrbit(false);
   }
   function takeControl() {
+    flyTicket.current++;
     stopOrbit();
     viewer.current?.camera.cancelFlight();
     interaction.current?.();
@@ -101,7 +144,7 @@ export default function Globe({
   selectionChange.current = onSelectionChange;
   currentProjects.current = projects;
   currentSettings.current = settings;
-  function fly(p: Project, close = false, complete?: () => void) {
+  async function fly(p: Project, close = false, complete?: () => void) {
     const C = cesiumRef.current,
       v = viewer.current;
     if (
@@ -113,6 +156,23 @@ export default function Globe({
     )
       return;
     v.camera.cancelFlight();
+    const ticket = ++flyTicket.current;
+    const coordinates = C.Cartographic.fromDegrees(p.longitude, p.latitude);
+    let ground = v.scene.globe.getHeight(coordinates) || 0;
+    if (currentSettings.current.terrain && terrainProvider.current) {
+      try {
+        const sampled = await Promise.race([
+          C.sampleTerrainMostDetailed(terrainProvider.current, [coordinates]),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 1200)),
+        ]);
+        if (sampled && Number.isFinite(sampled[0].height))
+          ground = sampled[0].height;
+      } catch {
+        /* Use currently loaded terrain height. */
+      }
+    }
+    if (ticket !== flyTicket.current || !active.current || v.isDestroyed())
+      return;
     const duration =
       (close ? 2.5 : 4.5) * motionScale(currentSettings.current.motion);
     setCameraHeight(Math.max(0, v.camera.positionCartographic.height));
@@ -122,7 +182,11 @@ export default function Globe({
         duration,
         started: performance.now(),
       });
-    const point = C.Cartesian3.fromDegrees(p.longitude, p.latitude, 35);
+    const point = C.Cartesian3.fromDegrees(
+      p.longitude,
+      p.latitude,
+      ground + 35,
+    );
     v.camera.flyToBoundingSphere(new C.BoundingSphere(point, 0), {
       offset: new C.HeadingPitchRange(
         C.Math.toRadians(25),
@@ -141,6 +205,7 @@ export default function Globe({
         if (active.current) {
           setFlightLens(null);
           complete?.();
+          flightComplete.current?.();
         }
       },
     });
@@ -148,6 +213,7 @@ export default function Globe({
   function choose(p: Project) {
     stopOrbit();
     generation.current++;
+    flyTicket.current++;
     setJourney(false);
     setEntering(false);
     setSelected(p);
@@ -157,6 +223,13 @@ export default function Globe({
   useEffect(() => {
     let disposed = false;
     active.current = true;
+    setReady(false);
+    setError("");
+    setSourceStatus({
+      terrain: "Loading",
+      buildings: "Loading",
+      imagery: "Loading",
+    });
     let handler: CesiumType.ScreenSpaceEventHandler | undefined;
     let removeOcclusion: (() => void) | undefined;
     let removeMouseLeave: (() => void) | undefined;
@@ -193,7 +266,25 @@ export default function Globe({
         v.camera.setView({
           destination: C.Cartesian3.fromDegrees(18, 30, 15_500_000),
         });
+        const cameraLink = new URLSearchParams(location.search).get("camera");
+        if (cameraLink) {
+          const n = cameraLink.split(",").map(Number);
+          if (
+            n.length === 5 &&
+            n.every(Number.isFinite) &&
+            Math.abs(n[0]) <= 180 &&
+            Math.abs(n[1]) <= 90 &&
+            n[2] >= 40 &&
+            n[2] <= 50000000 &&
+            Math.abs(n[4]) <= 1.58
+          )
+            v.camera.setView({
+              destination: C.Cartesian3.fromDegrees(n[0], n[1], n[2]),
+              orientation: { heading: n[3], pitch: n[4], roll: 0 },
+            });
+        }
         setReady(true);
+        let lastTelemetry = 0;
         const occluder = new C.Occluder(
           new C.BoundingSphere(
             C.Cartesian3.ZERO,
@@ -214,12 +305,79 @@ export default function Globe({
               }
             }
           }
+          if (performance.now() - lastTelemetry > 200) {
+            lastTelemetry = performance.now();
+            const c = v.camera.positionCartographic;
+            setTelemetry({
+              longitude: C.Math.toDegrees(c.longitude),
+              latitude: C.Math.toDegrees(c.latitude),
+              altitude: c.height,
+              heading: C.Math.toDegrees(v.camera.heading),
+            });
+            if (currentSettings.current.detection) {
+              const visible = [];
+              for (const p of currentProjects.current) {
+                const entity = v.entities.getById(p.id),
+                  point = entity?.position?.getValue(v.clock.currentTime);
+                if (!point || !entity?.show) continue;
+                const screen = C.SceneTransforms.worldToWindowCoordinates(
+                  v.scene,
+                  point,
+                );
+                if (
+                  screen &&
+                  screen.x > 10 &&
+                  screen.y > 10 &&
+                  screen.x < v.scene.canvas.clientWidth - 100 &&
+                  screen.y < v.scene.canvas.clientHeight - 50
+                )
+                  visible.push({
+                    id: p.id,
+                    name: p.name,
+                    x: screen.x,
+                    y: screen.y,
+                  });
+              }
+              setBrackets(
+                visible.slice(
+                  0,
+                  Math.max(
+                    1,
+                    Math.ceil(
+                      visible.length * currentSettings.current.detectionDensity,
+                    ),
+                  ),
+                ),
+              );
+            }
+          }
           if (changed) v.scene.requestRender();
         });
         handler = new C.ScreenSpaceEventHandler(v.scene.canvas);
         handler.setInputAction(
           (movement: { position: CesiumType.Cartesian2 }) => {
+            if (drawRef.current) {
+              const ray = v.camera.getPickRay(movement.position),
+                point = ray ? v.scene.globe.pick(ray, v.scene) : undefined;
+              if (point) {
+                const cart = C.Cartographic.fromCartesian(point);
+                setDrawPoints((prev) =>
+                  [
+                    ...prev,
+                    [
+                      C.Math.toDegrees(cart.longitude),
+                      C.Math.toDegrees(cart.latitude),
+                    ] as [number, number],
+                  ].slice(-100),
+                );
+              }
+              return;
+            }
             const hit = v.scene.pick(movement.position);
+            if (hit?.id?.properties?.quake) {
+              setQuakeDetail(hit.id.properties.quake.getValue());
+              return;
+            }
             const id = hit?.id?.id;
             const p = currentProjects.current.find((x) => x.id === id);
             if (p) {
@@ -316,11 +474,16 @@ export default function Globe({
             );
             if (!disposed) {
               terrainProvider.current = terrain;
+              setSourceStatus((s) => ({ ...s, terrain: "Ready" }));
               if (currentSettings.current.terrain) v.terrainProvider = terrain;
               v.scene.requestRender();
             }
           } catch {
-            /* Ellipsoid remains a supported fallback. */
+            if (!disposed)
+              setSourceStatus((s) => ({
+                ...s,
+                terrain: "Unavailable · flat globe fallback",
+              }));
           }
         })();
         void (async () => {
@@ -340,6 +503,14 @@ export default function Globe({
             buildingTiles.current = buildings;
             v.scene.primitives.add(buildings);
             setBuildingsReady(true);
+            setSourceStatus((s) => ({ ...s, buildings: "Ready" }));
+            buildings.tileFailed.addEventListener(() => {
+              if (!disposed)
+                setSourceStatus((s) => ({
+                  ...s,
+                  buildings: "Degraded · some tiles unavailable",
+                }));
+            });
             v.cesiumWidget.creditDisplay.addStaticCredit(
               new C.Credit(
                 'Buildings: <a href="https://buildings.reearth.land/">Re:Earth</a> · © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> · <a href="https://docs.overturemaps.org/attribution/">Overture Maps</a>',
@@ -348,7 +519,11 @@ export default function Globe({
             );
             v.scene.requestRender();
           } catch {
-            /* Satellite-only view remains usable without community tiles. */
+            if (!disposed)
+              setSourceStatus((s) => ({
+                ...s,
+                buildings: "Unavailable · imagery only",
+              }));
           }
         })();
       } catch (e) {
@@ -360,6 +535,7 @@ export default function Globe({
       active.current = false;
       orbitCleanup.current?.();
       generation.current++;
+      flyTicket.current++;
       handler?.destroy();
       removeMouseLeave?.();
       removeOcclusion?.();
@@ -369,7 +545,7 @@ export default function Globe({
       buildingTiles.current = null;
       terrainProvider.current = null;
     };
-  }, []);
+  }, [retry]);
   useEffect(() => {
     const C = cesiumRef.current,
       v = viewer.current;
@@ -403,6 +579,19 @@ export default function Globe({
       const layer = v.imageryLayers.addImageryProvider(provider);
       layer.brightness = caption === "Satellite imagery" ? 0.87 : 1;
       layer.saturation = caption === "Satellite imagery" ? 0.72 : 1;
+      provider.errorEvent.addEventListener(() => {
+        if (!disposed)
+          setSourceStatus((s) => ({
+            ...s,
+            imagery: "Degraded · image tiles unavailable",
+          }));
+      });
+      setSourceStatus((s) => ({
+        ...s,
+        imagery: caption.includes("unavailable")
+          ? "Fallback · street map"
+          : "Ready",
+      }));
       setMapMode(caption);
       setImageryReady(true);
       v.scene.requestRender();
@@ -478,7 +667,9 @@ export default function Globe({
     const center = C.Cartesian3.fromDegrees(
       selected.longitude!,
       selected.latitude!,
-      35,
+      (v.scene.globe.getHeight(
+        C.Cartographic.fromDegrees(selected.longitude!, selected.latitude!),
+      ) || 0) + 35,
     );
     const cleanup = () => {
       if (disposed) return;
@@ -496,7 +687,14 @@ export default function Globe({
       const tick = (now: number) => {
         if (disposed) return;
         if (!last) last = now;
-        heading += Math.min(now - last, 50) * 0.00007;
+        heading +=
+          (C.Math.toRadians(
+            { slow: 2, normal: 6, fast: 15 }[
+              currentSettings.current.orbitSpeed
+            ],
+          ) *
+            Math.min(now - last, 50)) /
+          1000;
         last = now;
         v.camera.lookAt(
           center,
@@ -511,7 +709,7 @@ export default function Globe({
       cleanup();
       if (orbitCleanup.current === cleanup) orbitCleanup.current = null;
     };
-  }, [orbit, selected?.id, ready, settings.motion]);
+  }, [orbit, selected?.id, ready, settings.motion, settings.orbitSpeed]);
   useEffect(() => {
     const stop = (e: KeyboardEvent) => {
       if (e.key === "Escape") control.current();
@@ -599,10 +797,294 @@ export default function Globe({
       previous ? projects.find((p) => p.id === previous.id) || null : null,
     );
   }, [projects]);
+  useEffect(() => {
+    const C = cesiumRef.current,
+      v = viewer.current;
+    if (!ready || !C || !v) return;
+    const stage = new C.PostProcessStage({
+      fragmentShader: sensorShader,
+      uniforms: {
+        mode: () => looks.indexOf(currentSettings.current.look),
+        gain: () => currentSettings.current.gain,
+        pixelation: () => currentSettings.current.pixelation,
+        scanlines: () => currentSettings.current.scanlines,
+        grain: () => currentSettings.current.grain,
+        contrast: () => currentSettings.current.contrast,
+        saturation: () => currentSettings.current.saturation,
+        vignette: () => currentSettings.current.vignette,
+        distortion: () => currentSettings.current.distortion,
+        instability: () => currentSettings.current.instability,
+        sensitivity: () => currentSettings.current.sensitivity,
+        palette: () =>
+          ["ironbow", "white", "black"].indexOf(
+            currentSettings.current.thermalPalette,
+          ),
+        snowDensity: () => currentSettings.current.snowDensity,
+        wind: () => currentSettings.current.wind,
+        clockTime: () =>
+          motionScale(currentSettings.current.motion)
+            ? performance.now() / 1000
+            : 0,
+        sharpen: () => currentSettings.current.sharpen,
+      },
+    });
+    v.scene.postProcessStages.add(stage);
+    v.scene.requestRender();
+    return () => {
+      if (!v.isDestroyed()) v.scene.postProcessStages.remove(stage);
+    };
+  }, [ready, retry]);
+  useEffect(() => {
+    const v = viewer.current,
+      C = cesiumRef.current;
+    if (!ready || !v || !C) return;
+    if (v.scene.skyAtmosphere) v.scene.skyAtmosphere.show = settings.atmosphere;
+    v.scene.fog.enabled = settings.fog;
+    v.resolutionScale = {
+      performance: 0.75,
+      balanced: 1,
+      high: Math.min(window.devicePixelRatio, 1.8),
+    }[settings.quality];
+    const bloom = v.scene.postProcessStages.bloom;
+    bloom.enabled = settings.bloom;
+    bloom.uniforms.glowOnly = false;
+    bloom.uniforms.contrast = 128;
+    bloom.uniforms.brightness = settings.bloomIntensity * 0.3 - 0.3;
+    bloom.uniforms.sigma = 2;
+    bloom.uniforms.stepSize = 1;
+    const date = new Date();
+    if (settings.sun !== "live") {
+      const lon = selected?.longitude ?? telemetry.longitude;
+      date.setUTCHours(
+        { noon: 12, golden: 17, night: 0 }[settings.sun] - Math.round(lon / 15),
+        0,
+        0,
+        0,
+      );
+    }
+    v.clock.currentTime = C.JulianDate.fromDate(date);
+    v.scene.requestRender();
+    if (
+      motionScale(settings.motion) &&
+      ["crt", "nvg", "noir", "snow"].includes(settings.look)
+    ) {
+      const timer = setInterval(() => {
+        if (!document.hidden && !v.isDestroyed()) v.scene.requestRender();
+      }, 40);
+      return () => clearInterval(timer);
+    }
+  }, [ready, settings, selected?.id]);
+  useEffect(() => {
+    const v = viewer.current,
+      C = cesiumRef.current;
+    if (!ready || !v || !C) return;
+    const source = new C.CustomDataSource("earthquakes");
+    void v.dataSources.add(source);
+    let disposed = false;
+    const refresh = async () => {
+      if (!settings.earthquakes) {
+        setQuakeStatus("Off");
+        return;
+      }
+      setQuakeStatus("Loading");
+      try {
+        const r = await fetch("/api/globe/earthquakes"),
+          b = (await r.json()) as {
+            error: string;
+            updatedAt: string;
+            events: {
+              id: string;
+              longitude: number;
+              latitude: number;
+              magnitude: number;
+              place: string;
+              time: number;
+              url: string | null;
+            }[];
+          };
+        if (!r.ok) throw Error(b.error);
+        if (disposed) return;
+        source.entities.removeAll();
+        for (const q of b.events)
+          source.entities.add({
+            id: `quake:${q.id}`,
+            position: C.Cartesian3.fromDegrees(q.longitude, q.latitude),
+            properties: { quake: q },
+            point: {
+              pixelSize: Math.max(5, Math.min(22, q.magnitude * 3)),
+              color: C.Color.fromCssColorString("#ffb04f"),
+              outlineColor: C.Color.fromCssColorString("#8f4800"),
+              outlineWidth: 1,
+              heightReference: C.HeightReference.CLAMP_TO_GROUND,
+            },
+          });
+        setQuakeStatus(
+          `${b.events.length} events · refreshed ${new Date(b.updatedAt).toLocaleTimeString()}`,
+        );
+        v.scene.requestRender();
+      } catch {
+        if (!disposed) {
+          source.entities.removeAll();
+          setQuakeStatus("Unavailable · no current data");
+        }
+      }
+    };
+    void refresh();
+    const timer = setInterval(() => {
+      if (!document.hidden) void refresh();
+    }, 300000);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+      if (!v.isDestroyed()) v.dataSources.remove(source, true);
+    };
+  }, [ready, settings.earthquakes, retry]);
+  useEffect(() => {
+    const v = viewer.current,
+      C = cesiumRef.current;
+    if (!ready || !v || !C) return;
+    const source = new C.CustomDataSource("personal annotations");
+    void v.dataSources.add(source);
+    const colors = {
+      orange: "#ff9c3b",
+      blue: "#66b4ff",
+      green: "#75d4a1",
+      white: "#ffffff",
+      red: "#ff6474",
+    };
+    for (const a of workspace.data?.preferences.annotations || []) {
+      const positions = a.points.map(([lon, lat]) =>
+        C.Cartesian3.fromDegrees(lon, lat),
+      );
+      const color = C.Color.fromCssColorString(colors[a.color]);
+      source.entities.add({
+        id: a.id,
+        position: positions[0],
+        label: {
+          text: a.name,
+          font: "14px sans-serif",
+          fillColor: color,
+          heightReference: C.HeightReference.CLAMP_TO_GROUND,
+          pixelOffset: new C.Cartesian2(0, -18),
+        },
+        ...(a.type === "pin"
+          ? {
+              point: {
+                pixelSize: 12,
+                color,
+                heightReference: C.HeightReference.CLAMP_TO_GROUND,
+              },
+            }
+          : a.type === "area" && positions.length > 2
+            ? {
+                polygon: {
+                  hierarchy: new C.PolygonHierarchy(positions),
+                  material: color.withAlpha(0.25),
+                  outline: true,
+                  outlineColor: color,
+                },
+              }
+            : {
+                polyline: {
+                  positions,
+                  clampToGround: true,
+                  width: 3,
+                  material: color,
+                },
+              }),
+      });
+    }
+    if (drawPoints.length)
+      source.entities.add({
+        polyline: {
+          positions: drawPoints.map(([lon, lat]) =>
+            C.Cartesian3.fromDegrees(lon, lat),
+          ),
+          clampToGround: true,
+          width: 3,
+          material: C.Color.ORANGE,
+        },
+      });
+    v.scene.requestRender();
+    return () => {
+      if (!v.isDestroyed()) v.dataSources.remove(source, true);
+    };
+  }, [ready, workspace.data?.preferences.annotations, drawPoints]);
+  function orient(north: boolean) {
+    const C = cesiumRef.current,
+      v = viewer.current;
+    if (!C || !v) return;
+    takeControl();
+    const point = v.scene.globe.pick(
+      v.camera.getPickRay(
+        new C.Cartesian2(
+          v.scene.canvas.clientWidth / 2,
+          v.scene.canvas.clientHeight / 2,
+        ),
+      )!,
+      v.scene,
+    );
+    if (!point) return;
+    const range = C.Cartesian3.distance(v.camera.positionWC, point);
+    v.camera.flyToBoundingSphere(new C.BoundingSphere(point, 0), {
+      duration: 1.3 * motionScale(settings.motion),
+      offset: new C.HeadingPitchRange(
+        north ? 0 : v.camera.heading,
+        north
+          ? v.camera.pitch
+          : v.camera.pitch < -0.9
+            ? C.Math.toRadians(-35)
+            : C.Math.toRadians(-89),
+        range,
+      ),
+    });
+  }
+  async function saveScene() {
+    const v = viewer.current,
+      C = cesiumRef.current,
+      w = workspace.data;
+    if (!v || !C || !w || !sceneName.trim()) return;
+    const p = v.camera.positionCartographic;
+    const scene = sceneSchema.parse({
+      id: crypto.randomUUID(),
+      name: sceneName.trim(),
+      longitude: C.Math.toDegrees(p.longitude),
+      latitude: C.Math.toDegrees(p.latitude),
+      height: p.height,
+      heading: v.camera.heading,
+      pitch: v.camera.pitch,
+    });
+    if (
+      await workspace.mutate({
+        action: "preferences",
+        revision: w.preferenceRevision,
+        data: { ...w.preferences, scenes: [...w.preferences.scenes, scene] },
+      })
+    )
+      setSceneName("");
+  }
+  function recallScene(s: {
+    longitude: number;
+    latitude: number;
+    height: number;
+    heading: number;
+    pitch: number;
+  }) {
+    const v = viewer.current,
+      C = cesiumRef.current;
+    if (!v || !C) return;
+    takeControl();
+    v.camera.flyTo({
+      destination: C.Cartesian3.fromDegrees(s.longitude, s.latitude, s.height),
+      orientation: { heading: s.heading, pitch: s.pitch, roll: 0 },
+      duration: 3.5 * motionScale(settings.motion),
+    });
+  }
   function reset() {
     stopOrbit();
     setFlightLens(null);
     generation.current++;
+    flyTicket.current++;
     setJourney(false);
     setEntering(false);
     setSelected(null);
@@ -684,6 +1166,21 @@ export default function Globe({
       {ready && (
         <>
           <div className="globe-controls">
+            <button onClick={() => orient(true)} aria-label="North up">
+              N↑
+            </button>
+            <button
+              onClick={() => orient(false)}
+              aria-label="Toggle top-down view"
+            >
+              Tilt
+            </button>
+            <button
+              onClick={() => setDirector(!director)}
+              aria-label="Scene director"
+            >
+              Scenes
+            </button>
             <button
               onClick={() => {
                 interaction.current?.();
@@ -707,6 +1204,344 @@ export default function Globe({
             Drag to orbit · Scroll to zoom
           </div>
         </>
+      )}
+      {settings.scope && (
+        <div
+          className="globe-persistent-scope"
+          style={
+            {
+              "--scope-feather": `${settings.scopeFeather * 25 + 5}%`,
+            } as React.CSSProperties
+          }
+          aria-hidden="true"
+        />
+      )}
+      {settings.detection && (
+        <div className="project-detection" aria-hidden="true">
+          {brackets.map((b) => (
+            <div key={b.id} style={{ left: b.x, top: b.y }}>
+              <span>{b.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {settings.hud !== "off" && (
+        <div className={`globe-telemetry hud-${settings.hud}`}>
+          <span>ATLAS / {settings.look.toUpperCase()}</span>
+          <strong>
+            {telemetry.latitude.toFixed(3)}° · {telemetry.longitude.toFixed(3)}°
+          </strong>
+          <small>
+            ALT {(telemetry.altitude / 1000).toFixed(2)} km · HDG{" "}
+            {telemetry.heading.toFixed(0)}°
+          </small>
+          {settings.hud !== "minimal" && (
+            <>
+              <small>{projects.length} authorised project records</small>
+              <small>Imagery: {sourceStatus.imagery}</small>
+              <small>
+                Terrain: {settings.terrain ? sourceStatus.terrain : "Off"}
+              </small>
+              <small>
+                Buildings: {settings.buildings ? sourceStatus.buildings : "Off"}
+              </small>
+            </>
+          )}
+          {settings.look !== "normal" && (
+            <small>SIMULATED DISPLAY EFFECT</small>
+          )}
+        </div>
+      )}
+      {settings.earthquakes && (
+        <div className="quake-source">USGS · {quakeStatus}</div>
+      )}
+      {quakeDetail && (
+        <div className="quake-detail">
+          <button
+            aria-label="Close earthquake"
+            onClick={() => setQuakeDetail(null)}
+          >
+            ×
+          </button>
+          <strong>
+            M {quakeDetail.magnitude} · {quakeDetail.place}
+          </strong>
+          <small>{new Date(quakeDetail.time).toLocaleString()}</small>
+          {quakeDetail.url && (
+            <a href={quakeDetail.url} target="_blank" rel="noreferrer">
+              USGS event details
+            </a>
+          )}
+        </div>
+      )}
+      {director && (
+        <section className="scene-director">
+          <div className="suite-heading">
+            <h3>Scene director</h3>
+            <button
+              onClick={() => setDirector(false)}
+              aria-label="Close scene director"
+            >
+              ×
+            </button>
+          </div>
+          <p>Camera bookmarks and annotations are private to your account.</p>
+          <label>
+            View name
+            <input
+              maxLength={80}
+              value={sceneName}
+              onChange={(e) => setSceneName(e.target.value)}
+              placeholder="e.g. European portfolio"
+            />
+          </label>
+          <Button
+            disabled={
+              !sceneName.trim() ||
+              workspace.busy ||
+              (workspace.data?.preferences.scenes.length || 0) >= 30
+            }
+            onClick={() => void saveScene()}
+          >
+            Save current view
+          </Button>
+          {workspace.data?.preferences.scenes.map((s) => (
+            <div className="scene-bookmark" key={s.id}>
+              <button onClick={() => recallScene(s)}>{s.name}</button>
+              <button
+                aria-label={`Remove ${s.name}`}
+                disabled={workspace.busy}
+                onClick={() =>
+                  void workspace.mutate({
+                    action: "preferences",
+                    revision: workspace.data!.preferenceRevision,
+                    data: {
+                      ...workspace.data!.preferences,
+                      scenes: workspace.data!.preferences.scenes.filter(
+                        (x) => x.id !== s.id,
+                      ),
+                    },
+                  })
+                }
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          <div className="suite-actions">
+            <Button
+              variant="outline"
+              onClick={async () => {
+                const v = viewer.current,
+                  C = cesiumRef.current;
+                if (!v || !C) return;
+                const p = v.camera.positionCartographic;
+                const camera = [
+                  C.Math.toDegrees(p.longitude),
+                  C.Math.toDegrees(p.latitude),
+                  p.height,
+                  v.camera.heading,
+                  v.camera.pitch,
+                ].join(",");
+                try {
+                  await navigator.clipboard.writeText(
+                    `${location.origin}/?view=globe&camera=${encodeURIComponent(camera)}&look=${settings.look}`,
+                  );
+                  setSceneMessage(
+                    "View link copied. It grants no project access.",
+                  );
+                } catch {
+                  setSceneMessage("Clipboard unavailable.");
+                }
+              }}
+            >
+              Copy view link
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                const blob = new Blob(
+                    [
+                      JSON.stringify(
+                        workspace.data?.preferences.scenes || [],
+                        null,
+                        2,
+                      ),
+                    ],
+                    { type: "application/json" },
+                  ),
+                  url = URL.createObjectURL(blob),
+                  a = document.createElement("a");
+                a.href = url;
+                a.download = "atlas-scenes.json";
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              Export scenes
+            </Button>
+          </div>
+          <label>
+            Import scenes
+            <input
+              type="file"
+              accept="application/json,.json"
+              disabled={workspace.busy}
+              onChange={async (e) => {
+                const file = e.target.files?.[0],
+                  w = workspace.data;
+                if (!file || !w) return;
+                try {
+                  if (file.size > 100000) throw Error();
+                  const data = JSON.parse(await file.text());
+                  if (!Array.isArray(data)) throw Error();
+                  const scenes = data.map((x) => sceneSchema.parse(x));
+                  if (scenes.length > 30) throw Error();
+                  await workspace.mutate({
+                    action: "preferences",
+                    revision: w.preferenceRevision,
+                    data: { ...w.preferences, scenes },
+                  });
+                } catch {
+                  setSceneMessage(
+                    "Choose a valid Atlas scene file with up to 30 views.",
+                  );
+                }
+              }}
+            />
+          </label>
+          <hr />
+          <h3>Draw on the globe</h3>
+          <p>
+            {drawType
+              ? `${drawPoints.length} point(s). Click the map, then save.`
+              : "Pins, lines and areas are your annotations."}
+          </p>
+          <div className="suite-actions">
+            {(["pin", "line", "area"] as const).map((type) => (
+              <button
+                className={drawType === type ? "active" : ""}
+                key={type}
+                onClick={() => {
+                  setDrawType(type);
+                  setDrawPoints([]);
+                }}
+              >
+                {type}
+              </button>
+            ))}
+            <button
+              onClick={() => {
+                setDrawType(null);
+                setDrawPoints([]);
+              }}
+            >
+              Cancel draw
+            </button>
+          </div>
+          {drawType && (
+            <>
+              <label>
+                Label
+                <input
+                  maxLength={100}
+                  value={annotationName}
+                  onChange={(e) => setAnnotationName(e.target.value)}
+                />
+              </label>
+              <label>
+                Color
+                <select
+                  value={annotationColor}
+                  onChange={(e) =>
+                    setAnnotationColor(e.target.value as typeof annotationColor)
+                  }
+                >
+                  {["orange", "blue", "green", "white", "red"].map((c) => (
+                    <option key={c}>{c}</option>
+                  ))}
+                </select>
+              </label>
+              <Button
+                disabled={
+                  workspace.busy ||
+                  !annotationName.trim() ||
+                  drawPoints.length <
+                    (drawType === "pin" ? 1 : drawType === "line" ? 2 : 3)
+                }
+                onClick={async () => {
+                  const w = workspace.data;
+                  if (!w) return;
+                  if (
+                    await workspace.mutate({
+                      action: "preferences",
+                      revision: w.preferenceRevision,
+                      data: {
+                        ...w.preferences,
+                        annotations: [
+                          ...w.preferences.annotations,
+                          {
+                            id: crypto.randomUUID(),
+                            name: annotationName.trim(),
+                            type: drawType,
+                            color: annotationColor,
+                            points:
+                              drawType === "pin"
+                                ? drawPoints.slice(-1)
+                                : drawPoints,
+                          },
+                        ],
+                      },
+                    })
+                  ) {
+                    setDrawType(null);
+                    setDrawPoints([]);
+                    setAnnotationName("");
+                  }
+                }}
+              >
+                Save annotation
+              </Button>
+            </>
+          )}
+          {!!workspace.data?.preferences.annotations.length && (
+            <Button
+              variant="outline"
+              disabled={workspace.busy}
+              onClick={() => {
+                if (confirm("Clear your saved globe annotations?"))
+                  void workspace.mutate({
+                    action: "preferences",
+                    revision: workspace.data!.preferenceRevision,
+                    data: { ...workspace.data!.preferences, annotations: [] },
+                  });
+              }}
+            >
+              Clear my annotations
+            </Button>
+          )}
+          <hr />
+          <h3>Source status</h3>
+          <p>
+            Imagery: {sourceStatus.imagery}
+            <br />
+            Terrain: {settings.terrain ? sourceStatus.terrain : "Off"}
+            <br />
+            Buildings: {settings.buildings ? sourceStatus.buildings : "Off"}
+          </p>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setReady(false);
+              setRetry((r) => r + 1);
+            }}
+          >
+            Retry globe sources
+          </Button>
+          {(workspace.error || sceneMessage) && (
+            <p role="status">{workspace.error || sceneMessage}</p>
+          )}
+        </section>
       )}
       {settings.markerColor === "risk" && (
         <div className="globe-risk-legend">

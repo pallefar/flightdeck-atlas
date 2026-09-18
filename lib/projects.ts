@@ -9,6 +9,12 @@ export const taskSchema = z.object({
     .optional(),
   priority: z.enum(["High", "Normal", "Low"]).optional(),
   assignee: z.string().max(100).optional(),
+  assigneeEmail: z
+    .union([z.literal(""), z.string().email().max(254)])
+    .optional(),
+  dependsOn: z.array(z.string().max(80)).max(50).optional(),
+  recurrence: z.enum(["none", "daily", "weekly", "monthly"]).optional(),
+  recurrenceSource: z.string().max(80).optional(),
   plannedDate: z
     .string()
     .regex(/^$|^\d{4}-\d{2}-\d{2}$/)
@@ -68,6 +74,13 @@ export type Task = z.infer<typeof taskSchema>;
 export function taskState(t: Task) {
   return t.done ? "done" : t.workflow || "todo";
 }
+export function taskBlocked(t: Task, p: { tasks: Task[] }) {
+  return (
+    !t.done &&
+    (t.workflow === "blocked" ||
+      (t.dependsOn || []).some((id) => !p.tasks.find((x) => x.id === id)?.done))
+  );
+}
 export const projectSchema = z
   .object({
     name: z.string().trim().min(1).max(100),
@@ -117,6 +130,40 @@ export const projectSchema = z
           message: "Record IDs must be unique.",
         });
     }
+    const ids = new Set(p.tasks.map((t) => t.id));
+    const state = new Map<string, number>();
+    const visit = (id: string): boolean => {
+      if (state.get(id) === 1) return true;
+      if (state.get(id) === 2) return false;
+      state.set(id, 1);
+      if ((p.tasks.find((t) => t.id === id)?.dependsOn || []).some(visit))
+        return true;
+      state.set(id, 2);
+      return false;
+    };
+    if (
+      p.tasks.some(
+        (t) => (t.dependsOn || []).some((d) => !ids.has(d)) || visit(t.id),
+      )
+    )
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Dependencies must use existing tasks and cannot form a cycle.",
+      });
+    if (
+      p.tasks.some(
+        (t) =>
+          t.done &&
+          (t.dependsOn || []).some(
+            (d) => !p.tasks.find((x) => x.id === d)?.done,
+          ),
+      )
+    )
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Complete dependency tasks before completing this task.",
+      });
     if (
       p.kpis?.some(
         (k) =>
@@ -146,6 +193,8 @@ export type ProjectEvent = {
 export type Project = ProjectFields & {
   activity?: ProjectEvent[];
   canEdit?: boolean;
+  canShare?: boolean;
+  canComment?: boolean;
   canArchive?: boolean;
   ownedByMe?: boolean;
   id: string;

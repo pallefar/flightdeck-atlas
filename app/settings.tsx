@@ -1,4 +1,5 @@
 "use client";
+import { sourceCatalog, looks } from "@/lib/globe-effects";
 import { Globe2, LayoutDashboard, RotateCcw } from "lucide-react";
 import { useTheme } from "next-themes";
 import {
@@ -217,6 +218,244 @@ export default function Settings({
               </>
             ) : (
               <>
+                <details className="globe-settings-group" open>
+                  <summary>Display & sensor looks</summary>
+                  <SettingRow
+                    id="settings-look"
+                    title="Visual preset"
+                    description="Night vision and thermal are simulated display effects, not sensor measurements."
+                  >
+                    <select
+                      id="settings-look"
+                      value={globe.look}
+                      onChange={(e) =>
+                        setGlobe({ look: e.target.value as typeof globe.look })
+                      }
+                    >
+                      {looks.map((l) => (
+                        <option key={l} value={l}>
+                          {l === "nvg"
+                            ? "Night vision"
+                            : l === "crt"
+                              ? "CRT"
+                              : l[0].toUpperCase() + l.slice(1)}
+                        </option>
+                      ))}
+                    </select>
+                  </SettingRow>
+                  {(
+                    [
+                      ["gain", "Gain", 0.2, 2],
+                      ["contrast", "Contrast", 0.2, 2],
+                      ["saturation", "Saturation", 0, 2],
+                      ["pixelation", "Pixelation", 1, 10],
+                      ["scanlines", "Scanlines", 0, 1],
+                      ["grain", "Grain", 0, 1],
+                      ["vignette", "Vignette", 0, 1],
+                      ["distortion", "CRT distortion", 0, 1],
+                      ["instability", "CRT instability", 0, 1],
+                      ["sensitivity", "Thermal sensitivity", 0, 1],
+                      ["snowDensity", "Snow density", 0, 1],
+                      ["wind", "Snow wind", 0, 1],
+                      ["sharpen", "Sharpening", 0, 1],
+                      ["bloomIntensity", "Bloom intensity", 0, 2],
+                    ] as const
+                  ).map(([key, label, min, max]) => (
+                    <SettingRow key={key} id={`settings-${key}`} title={label}>
+                      <input
+                        id={`settings-${key}`}
+                        type="range"
+                        min={min}
+                        max={max}
+                        step={key === "pixelation" ? 1 : 0.05}
+                        value={globe[key]}
+                        onChange={(e) =>
+                          setGlobe({ [key]: Number(e.target.value) })
+                        }
+                      />
+                      <output>{globe[key]}</output>
+                    </SettingRow>
+                  ))}
+                  <SettingRow
+                    id="settings-thermal-palette"
+                    title="Thermal palette"
+                  >
+                    <select
+                      id="settings-thermal-palette"
+                      value={globe.thermalPalette}
+                      onChange={(e) =>
+                        setGlobe({
+                          thermalPalette: e.target
+                            .value as typeof globe.thermalPalette,
+                        })
+                      }
+                    >
+                      <option value="ironbow">Ironbow</option>
+                      <option value="white">White hot</option>
+                      <option value="black">Black hot</option>
+                    </select>
+                  </SettingRow>
+                  <SettingRow id="settings-bloom" title="Bloom">
+                    <Switch
+                      id="settings-bloom"
+                      checked={globe.bloom}
+                      onCheckedChange={(bloom) => setGlobe({ bloom })}
+                    />
+                  </SettingRow>
+                </details>
+                <details className="globe-settings-group">
+                  <summary>HUD, scope & quality</summary>
+                  <SettingRow id="settings-hud" title="HUD layout">
+                    <select
+                      id="settings-hud"
+                      value={globe.hud}
+                      onChange={(e) =>
+                        setGlobe({ hud: e.target.value as typeof globe.hud })
+                      }
+                    >
+                      {["off", "minimal", "operator", "tactical"].map((x) => (
+                        <option key={x}>{x}</option>
+                      ))}
+                    </select>
+                  </SettingRow>
+                  {(
+                    [
+                      ["detection", "Project detection brackets"],
+                      ["scope", "Circular scope"],
+                      ["cleanUI", "Clean presentation view"],
+                      ["atmosphere", "Atmosphere"],
+                      ["fog", "Distance haze"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <SettingRow key={key} id={`settings-${key}`} title={label}>
+                      <Switch
+                        id={`settings-${key}`}
+                        checked={globe[key]}
+                        onCheckedChange={(value) => setGlobe({ [key]: value })}
+                      />
+                    </SettingRow>
+                  ))}
+                  <p className="hub-muted">
+                    Detection brackets label saved project records. They do not
+                    recognise objects in imagery.
+                  </p>
+                  {(
+                    [
+                      ["detectionDensity", "Detection density"],
+                      ["scopeFeather", "Scope feather"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <SettingRow key={key} id={`settings-${key}`} title={label}>
+                      <input
+                        id={`settings-${key}`}
+                        type="range"
+                        min={key === "detectionDensity" ? 0.1 : 0}
+                        max={1}
+                        step={0.1}
+                        value={globe[key]}
+                        onChange={(e) =>
+                          setGlobe({ [key]: Number(e.target.value) })
+                        }
+                      />
+                    </SettingRow>
+                  ))}
+                  <SettingRow id="settings-quality" title="Render quality">
+                    <select
+                      id="settings-quality"
+                      value={globe.quality}
+                      onChange={(e) =>
+                        setGlobe({
+                          quality: e.target.value as typeof globe.quality,
+                        })
+                      }
+                    >
+                      <option value="performance">Performance</option>
+                      <option value="balanced">Balanced</option>
+                      <option value="high">High detail</option>
+                    </select>
+                  </SettingRow>
+                </details>
+                <details className="globe-settings-group">
+                  <summary>Camera & lighting</summary>
+                  <SettingRow id="settings-orbit-speed" title="Orbit speed">
+                    <select
+                      id="settings-orbit-speed"
+                      value={globe.orbitSpeed}
+                      onChange={(e) =>
+                        setGlobe({
+                          orbitSpeed: e.target.value as typeof globe.orbitSpeed,
+                        })
+                      }
+                    >
+                      <option value="slow">Slow · 2°/s</option>
+                      <option value="normal">Normal · 6°/s</option>
+                      <option value="fast">Fast · 15°/s</option>
+                    </select>
+                  </SettingRow>
+                  <SettingRow
+                    id="settings-tour-dwell"
+                    title="Tour pause at each project"
+                  >
+                    <input
+                      id="settings-tour-dwell"
+                      type="range"
+                      min={2}
+                      max={15}
+                      value={globe.tourDwell}
+                      onChange={(e) =>
+                        setGlobe({ tourDwell: Number(e.target.value) })
+                      }
+                    />
+                    <output>{globe.tourDwell}s</output>
+                  </SettingRow>
+                  <SettingRow
+                    id="settings-sun"
+                    title="Sun position"
+                    description="Lighting presets are for presentation; only Live uses the current UTC time."
+                  >
+                    <select
+                      id="settings-sun"
+                      value={globe.sun}
+                      onChange={(e) =>
+                        setGlobe({ sun: e.target.value as typeof globe.sun })
+                      }
+                    >
+                      <option value="live">Live sun position</option>
+                      <option value="noon">Midday at selected longitude</option>
+                      <option value="golden">
+                        Golden hour at selected longitude
+                      </option>
+                      <option value="night">Night at selected longitude</option>
+                    </select>
+                  </SettingRow>
+                </details>
+                <details className="globe-settings-group">
+                  <summary>Data layers & connections</summary>
+                  <SettingRow
+                    id="settings-earthquakes"
+                    title="Earthquakes · last 24 hours"
+                    description="USGS reported events. Refreshes every five minutes while visible."
+                  >
+                    <Switch
+                      id="settings-earthquakes"
+                      checked={globe.earthquakes}
+                      onCheckedChange={(earthquakes) =>
+                        setGlobe({ earthquakes })
+                      }
+                    />
+                  </SettingRow>
+                  <div className="globe-provider-list">
+                    {sourceCatalog.map((s) => (
+                      <div key={s.name}>
+                        <strong>{s.name}</strong>
+                        <span>
+                          {s.source} · {s.state}
+                        </span>
+                        <small>{s.detail}</small>
+                      </div>
+                    ))}
+                  </div>
+                </details>
                 <SettingRow id="settings-globe-mode" title="Globe experience">
                   <select
                     id="settings-globe-mode"

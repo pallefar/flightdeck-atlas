@@ -1,4 +1,4 @@
-import type { Project } from "./projects";
+import { taskBlocked, type Project } from "./projects";
 export function localDate(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
@@ -6,7 +6,7 @@ export function blockerSummary(p: Project) {
   return [
     p.blocker?.trim(),
     ...p.tasks
-      .filter((t) => !t.done && t.workflow === "blocked")
+      .filter((t) => taskBlocked(t, p))
       .map((t) => `Blocked task: ${t.title}`),
   ]
     .filter(Boolean)
@@ -76,8 +76,7 @@ export function briefing(
     deadlines,
     overdue: actions.filter((a) => a.overdue),
     blocked: live.filter(
-      (p) =>
-        p.blocker || p.tasks.some((t) => !t.done && t.workflow === "blocked"),
+      (p) => p.blocker || p.tasks.some((t) => taskBlocked(t, p)),
     ),
     needsNext: live.filter(
       (p) =>

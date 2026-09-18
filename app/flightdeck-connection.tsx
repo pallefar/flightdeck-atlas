@@ -1,4 +1,5 @@
 "use client";
+import { freshProject } from "@/lib/fresh-export";
 import { useEffect, useState } from "react";
 import {
   ArrowDownToLine,
@@ -408,23 +409,32 @@ export default function FlightDeckConnection({
                     <>
                       <Button
                         variant="outline"
-                        onClick={() =>
-                          downloadText(
-                            `flightdeck-draft-${p.id}.md`,
-                            [
-                              `# FlightDeck onboarding draft: ${p.flightdeckDraft!.label}`,
-                              `Atlas project: ${p.name}`,
-                              `Atlas ID: ${p.id}`,
-                              `Preferred workspace: ${p.flightdeckDraft!.workspaceHint || "To select"}`,
-                              `Description: ${p.description}`,
-                              `Function: ${p.functionArea || p.category}`,
-                              `Sponsor: ${p.sponsor || "To confirm"}`,
-                              `Success measure: ${p.benefit || "To define"}`,
-                              "",
-                              "Prepared in Atlas. Not submitted to FlightDeck. Workspace access and final project details must be reviewed before creation.",
-                            ].join("\n\n"),
-                          )
-                        }
+                        onClick={async () => {
+                          try {
+                            const current = await freshProject(p.id);
+                            if (!current.flightdeckDraft)
+                              throw Error(
+                                "This onboarding draft is no longer available.",
+                              );
+                            downloadText(
+                              `flightdeck-draft-${current.id}.md`,
+                              [
+                                `# FlightDeck onboarding draft: ${current.flightdeckDraft!.label}`,
+                                `Atlas project: ${current.name}`,
+                                `Atlas ID: ${current.id}`,
+                                `Preferred workspace: ${current.flightdeckDraft!.workspaceHint || "To select"}`,
+                                `Description: ${current.description}`,
+                                `Function: ${current.functionArea || current.category}`,
+                                `Sponsor: ${current.sponsor || "To confirm"}`,
+                                `Success measure: ${current.benefit || "To define"}`,
+                                "",
+                                "Prepared in Atlas. Not submitted to FlightDeck. Workspace access and final project details must be reviewed before creation.",
+                              ].join("\n\n"),
+                            );
+                          } catch (e) {
+                            setError((e as Error).message);
+                          }
+                        }}
                       >
                         <Download size={14} />
                         Export draft

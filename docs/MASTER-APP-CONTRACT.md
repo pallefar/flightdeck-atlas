@@ -7,7 +7,7 @@ Atlas is a portfolio and action hub with dashboard/globe views, daily and weekly
 ## Identity and authority
 
 - One configured Super Admin grants/revokes Atlas access and creates roles. The account is bound to a trusted hosting identity through the secret `ATLAS_SUPERADMIN_EMAIL`, not a public signup rule or client-provided role. There is no first-user-wins elevation.
-- Built-in **Admin** can view/create/edit/archive any Atlas project. **Owner** can view all projects and create/edit/archive their own. Neither can grant access or define roles.
+- Built-in **Admin** can create projects and edit/archive projects visible through project sharing. **Owner** can create projects and edit/archive their own, and can edit another project when explicitly granted its editor role. Project creators and the configured Super Admin manage project sharing; only the Super Admin grants Atlas admission or defines roles. New projects are private to their creator and the Super Admin. Existing projects retain their previous admitted-member visibility until changed.
 - Custom roles select granular project, briefing and idea permissions. Access administration cannot be delegated through this UI. Role names confer no authority by themselves.
 - Grants use sign-in email, bind to the authenticated subject on first use, and are checked on every API request. Revoked users are denied subsequent requests. Roles and audit events are stored in D1.
 - The private Sites audience is a separate gate. Granting an Atlas role does not invite a user, add Sites sharing, or create an OS account. No invitation email is sent.
@@ -39,7 +39,7 @@ Start with read/launch integration. Later write operations need explicit delegat
 ## Acceptance checks
 
 1. A grant to the verified user unlocks Atlas only after both host/site admission and Atlas authorization pass; revocation blocks subsequent API requests.
-2. Owner cannot edit another creator's project; Admin cannot call user/role administration; no custom role can grant Super Admin authority.
+2. An Owner without a project editor grant cannot edit another creator's project; Admin cannot read an unshared private project or call user/role administration; no custom role can grant Super Admin authority.
 3. OS project membership removal blocks its source records regardless of Atlas role.
 4. Wrong, disabled or inaccessible context never falls back to another workspace/project.
 5. An Advantage detail link opens in the intended context even when the OS shell last had a different project selected.
@@ -48,3 +48,7 @@ Start with read/launch integration. Later write operations need explicit delegat
 ## Project onboarding in both directions
 
 See [PROJECT-BRIDGE-CONTRACT.md](PROJECT-BRIDGE-CONTRACT.md) for OS-to-Atlas import, Atlas-to-OS creation, instance-scoped references, durable idempotency, and the access controls required before enabling either flow. Draft preparation is available now; live discovery and creation await the SDK. This extends the initial read-only scope with separately authorized project creation.
+
+## Collaboration and app ecosystem
+
+See [COLLABORATION-AND-APPS.md](COLLABORATION-AND-APPS.md) for project roles, teams, discussions, reviews, file access, presentation snapshots, app registration and cross-app sign-in requirements.

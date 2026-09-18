@@ -1,6 +1,7 @@
 import { authorize } from "@/lib/access";
 import { canChangeProject } from "@/lib/access-policy";
 import { json, sameOrigin, database } from "@/lib/server-projects";
+import { projectFor } from "@/lib/project-access";
 export const dynamic = "force-dynamic";
 export async function POST(
   request: Request,
@@ -12,12 +13,9 @@ export async function POST(
   if (auth.error) return auth.error;
   try {
     const { id } = await params;
-    const row = await database()
-      .prepare("SELECT owner_id FROM atlas_projects WHERE id = ?")
-      .bind(id)
-      .first();
-    if (!row) return json({ error: "Project not found." }, 404);
-    if (!canChangeProject(auth.access, row.owner_id as string))
+    const p = await projectFor(auth.access, id);
+    if (!p) return json({ error: "Project not found." }, 404);
+    if (!p.rights.edit)
       return json({ error: "You cannot onboard this project." }, 403);
     return json(
       {
