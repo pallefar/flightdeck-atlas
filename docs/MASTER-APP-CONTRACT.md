@@ -6,6 +6,8 @@ Atlas is a portfolio and action hub with dashboard/globe views, daily and weekly
 
 ## Identity and authority
 
+Target identity provider: the owner's existing self-hosted Supabase Auth installation, shared with FlightDeck OS. The current Sites identity described below remains active until an explicit migration. See [SUPABASE-IDENTITY-CONTRACT.md](SUPABASE-IDENTITY-CONTRACT.md); Supabase signup alone must never grant Atlas access.
+
 - One configured Super Admin grants/revokes Atlas access and creates roles. The account is bound to a trusted hosting identity through the secret `ATLAS_SUPERADMIN_EMAIL`, not a public signup rule or client-provided role. There is no first-user-wins elevation.
 - Built-in **Admin** can create projects and edit/archive projects visible through project sharing. **Owner** can create projects and edit/archive their own, and can edit another project when explicitly granted its editor role. Project creators and the configured Super Admin manage project sharing; only the Super Admin grants Atlas admission or defines roles. New projects are private to their creator and the Super Admin. Existing projects retain their previous admitted-member visibility until changed.
 - Custom roles select granular project, briefing and idea permissions. Access administration cannot be delegated through this UI. Role names confer no authority by themselves.

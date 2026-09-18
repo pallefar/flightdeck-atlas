@@ -21,7 +21,7 @@ Decks are private to their creator unless shared with members who have access to
 ## Required FlightDeck work
 
 1. Registered apps: stable IDs, approved origins/callbacks, icon metadata, app enablement, per-user entitlement and context-aware launch links.
-2. Common identity: delegated OIDC/code + PKCE or equivalent reviewed flow, stable subjects, expiry/revocation/logout/account-switch events. Atlas's Sites admission/sign-in gate must be addressed explicitly before claiming seamless SSO across hosts.
+2. Common identity: the owner's existing self-hosted Supabase Auth instance, with stable UUIDs and an agreed session/launch flow. See [SUPABASE-IDENTITY-CONTRACT.md](SUPABASE-IDENTITY-CONTRACT.md) for identity migration and delegated sign-in, expiry/revocation/logout/account-switch requirements. Atlas's Sites admission/sign-in gate must be addressed explicitly before claiming seamless SSO across hosts.
 3. Membership: workspace, team and project discovery, current effective roles and changed/revoked membership events. Atlas custom roles never widen OS permissions.
 4. Collaboration transport: agree ownership of tasks, comments, decisions and attachments before writeback. Stable IDs, scoped permissions, revisions, durable idempotency, audit actors and deletion events.
 5. AI: the selected FlightDeck service supplies evidence-linked review and slide-outline drafts. Current templates are deterministic. Proposal inbox remains an honest disconnected state; proposals cannot silently mutate projects or send messages.
