@@ -19,6 +19,7 @@ import {
   type ReviewHorizon,
 } from "@/lib/leadership";
 import { localDate, downloadText } from "@/lib/briefing";
+import FeatureHelp from "./feature-help";
 import { freshProject } from "@/lib/fresh-export";
 export default function LeadershipReview({
   project,
@@ -26,7 +27,11 @@ export default function LeadershipReview({
   busy,
   onSave,
   onSection,
+  initialRole = "CEO",
+  onRoleChange,
 }: {
+  initialRole?: LeadershipRole;
+  onRoleChange?: (role: LeadershipRole) => void;
   project: Project;
   readOnly: boolean;
   busy: boolean;
@@ -37,7 +42,7 @@ export default function LeadershipReview({
   ) => Promise<Project | null>;
   onSection: (tab: "tasks" | "strategy" | "delivery") => void;
 }) {
-  const [role, setRole] = useState<LeadershipRole>("CEO"),
+  const [role, setRole] = useState<LeadershipRole>(initialRole),
     [horizon, setHorizon] = useState<ReviewHorizon>("now"),
     [draft, setDraft] = useState<{
       id: string;
@@ -93,7 +98,15 @@ export default function LeadershipReview({
     <section className="leadership-review">
       <div className="leadership-intro">
         <span className="eyebrow">CHANGE YOUR VANTAGE POINT</span>
-        <h2>Think like a leader.</h2>
+        <div className="heading-with-help">
+          <h2>Think like a leader.</h2>
+          <FeatureHelp title="Leadership reviews">
+            Choose a perspective and review moment. Recommendations use this
+            project’s evidence and rules. Review an action before adding it to
+            tasks, or save a snapshot to compare decisions later. FlightDeck AI
+            is pending.
+          </FeatureHelp>
+        </div>
         <p>
           See the questions a CEO, VP or Director may bring to this project—and
           turn the useful ones into action.
@@ -110,6 +123,7 @@ export default function LeadershipReview({
             aria-pressed={role === r.name}
             onClick={() => {
               setRole(r.name);
+              onRoleChange?.(r.name);
               setDraft(null);
               setNotice("");
             }}

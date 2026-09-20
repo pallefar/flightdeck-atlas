@@ -17,6 +17,7 @@ import { TaskTable, TaskTimeline } from "./task-views";
 import { filteredTasks, loggedMinutes } from "@/lib/work-management";
 import type { TaskView } from "@/lib/work-model";
 import { localDate } from "@/lib/briefing";
+import FeatureHelp from "./feature-help";
 const states = [
   { id: "todo", label: "To do" },
   { id: "doing", label: "Doing" },
@@ -29,7 +30,11 @@ export default function TaskWorkbench({
   busy,
   onSave,
   onReload,
+  initialLayout = "list",
+  onLayoutChange,
 }: {
+  initialLayout?: TaskView["layout"];
+  onLayoutChange?: (layout: TaskView["layout"]) => void;
   project: Project;
   onReload?: () => void;
   readOnly: boolean;
@@ -57,9 +62,15 @@ export default function TaskWorkbench({
       })
       .catch(() => {});
   }, [project.id]);
-  const [layout, setLayout] = useState<TaskView["layout"]>("list"),
+  const [layout, setLayout] = useState<TaskView["layout"]>(initialLayout),
     [filter, setFilter] = useState("all"),
     [query, setQuery] = useState("");
+  useEffect(() => {
+    setLayout(initialLayout);
+  }, [initialLayout]);
+  const drag = useRef<{ task: Task; base: Project } | null>(null);
+  const [dropState, setDropState] = useState("");
+  const [moveNotice, setMoveNotice] = useState("");
   const [title, setTitle] = useState(""),
     [due, setDue] = useState(""),
     [priority, setPriority] = useState<Task["priority"]>("Normal"),
@@ -120,6 +131,7 @@ export default function TaskWorkbench({
   function applyView(v: TaskView) {
     setAdvanced(v.advanced || { mode: "all", groups: [] });
     setLayout(v.layout);
+    onLayoutChange?.(v.layout);
     setFilter(v.filter);
     setQuery(v.query);
     setGroup(v.group);
@@ -151,6 +163,16 @@ export default function TaskWorkbench({
       <article
         className={`workbench-task ${t.done ? "is-done" : ""}`}
         key={t.id}
+        draggable={layout === "board" && !readOnly && !busy && !editing}
+        onDragStart={(e) => {
+          drag.current = { task: t, base: project };
+          e.dataTransfer.setData("text/plain", t.id);
+          e.dataTransfer.effectAllowed = "move";
+        }}
+        onDragEnd={() => {
+          drag.current = null;
+          setDropState("");
+        }}
       >
         {t.parentId && (
           <small className="subtask-path">
@@ -312,7 +334,10 @@ export default function TaskWorkbench({
             <button
               key={l}
               aria-pressed={layout === l}
-              onClick={() => setLayout(l)}
+              onClick={() => {
+                setLayout(l);
+                onLayoutChange?.(l);
+              }}
             >
               {
                 {
@@ -325,6 +350,12 @@ export default function TaskWorkbench({
             </button>
           ))}
         </div>
+        <FeatureHelp title="Task views">
+          Use the list for subtasks, the board for workflow, the table for bulk
+          changes and the timeline for dates. Refine and save a view to return
+          to the same filters. On Kanban, drag cards or use each task’s status
+          menu.
+        </FeatureHelp>
       </div>
       <details className="task-view-controls">
         <summary>Refine & save this view</summary>
@@ -946,9 +977,55 @@ export default function TaskWorkbench({
               onSave={onSave}
             />
           ) : layout === "board" ? (
-            <div className="task-kanban">
+            <div className="task-kanban" aria-label="Task Kanban board">
               {states.map((s) => (
-                <section key={s.id}>
+                <section
+                  key={s.id}
+                  aria-label={`${s.label} tasks`}
+                  className={dropState === s.id ? "kanban-drop-target" : ""}
+                  onDragOver={(e) => {
+                    if (drag.current && !readOnly && !busy) {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      setDropState(s.id);
+                    }
+                  }}
+                  onDragLeave={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node))
+                      setDropState("");
+                  }}
+                  onDrop={async (e) => {
+                    e.preventDefault();
+                    const item = drag.current;
+                    drag.current = null;
+                    setDropState("");
+                    if (
+                      !item ||
+                      readOnly ||
+                      busy ||
+                      taskState(item.task) === s.id
+                    )
+                      return;
+                    const task = {
+                      ...item.task,
+                      done: s.id === "done",
+                      workflow: s.id === "done" ? ("todo" as const) : s.id,
+                    };
+                    const saved = await onSave(
+                      {
+                        ...item.base,
+                        tasks: item.base.tasks.map((t) =>
+                          t.id === task.id ? task : t,
+                        ),
+                      },
+                      item.base,
+                    );
+                    if (saved)
+                      setMoveNotice(
+                        `${task.title} saved in ${states.find((x) => x.id === taskState(saved.tasks.find((t) => t.id === task.id)!))?.label || s.label}.`,
+                      );
+                  }}
+                >
                   <h3>
                     {s.label}
                     <span>
@@ -970,6 +1047,11 @@ export default function TaskWorkbench({
               {project.tasks.length
                 ? "No tasks match these filters."
                 : "Add your first task to turn this project into a plan."}
+            </p>
+          )}
+          {moveNotice && (
+            <p role="status" className="kanban-save-notice">
+              {moveNotice}
             </p>
           )}
         </>

@@ -50,3 +50,14 @@ The new migration adds `atlas_work_records` for timers, reminders, forms, submis
 - [Time tracking](https://support.monday.com/hc/en-us/articles/360001143809-The-Time-Tracking-Column)
 - [WorkForms intake](https://support.monday.com/hc/en-us/articles/360000358700-Get-started-with-WorkForms)
 - [Workload](https://support.monday.com/hc/en-us/articles/360010699760-The-Workload-Widget)
+
+
+## Navigation and discoverability upgrade — September 20, 2026
+
+The main sidebar now groups Project management, Leadership, Work tools, Team & personal, and Connections & admin. Every management tool has a full-page destination, an accessible Help explanation and a searchable guide that opens it. The dashboard also links directly to Kanban, leadership and automations. Mobile uses a labelled, scrollable navigation dialog; Project Eye remains free of the sidebar.
+
+Project management includes all projects, project/task Kanban, task list and subtasks, bulk-edit table, timeline, scheduling, goals/KPIs and delivery/budget. Work tools exposes custom fields, automations, time/costs, intake, notes, resources, reporting and playbooks. CEO, VP and Director each open the corresponding evidence-based review; live AI remains dependent on FlightDeck OS.
+
+The selected working project, tool and Kanban scope survive sign-in and reload. Back/Forward traverses tool destinations. Task filters and editor state survive task-layout switches. Board drag-and-drop and status menus use the same authorized, revision-checked project writes, with read-only and archived projects protected. Drag operations retain their starting revision, and successful moves receive an accessible status announcement.
+
+Help supports keyword search, real destination links, a three-step introduction and contextual explanations that open on hover, focus or tap and dismiss with Escape.

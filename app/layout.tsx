@@ -10,6 +10,7 @@ import "./productivity.css";
 import "./suite.css";
 import "./work-management.css";
 import "./work-studio.css";
+import "./navigation.css";
 import ThemeProvider from "./theme-provider";
 
 export const metadata: Metadata = {

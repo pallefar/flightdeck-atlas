@@ -28,6 +28,8 @@ import {
   Users,
   Presentation,
   Grid3X3,
+  Menu,
+  CircleHelp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,6 +71,17 @@ import AccessManagement from "./access-management";
 import type { AccessProfile } from "@/lib/access-policy";
 import Ideas from "./ideas";
 import ProjectWorkspace from "./project-workspace";
+import AtlasNavigation from "./atlas-navigation";
+import ProjectManagement from "./project-management";
+import HelpCenter from "./help-center";
+import FeatureHelp from "./feature-help";
+import {
+  validViews,
+  workTools,
+  workTool,
+  type View,
+  type WorkTool,
+} from "@/lib/navigation";
 import { onboardingTasks, type Opportunity } from "@/lib/opportunities";
 import {
   motionScale,
@@ -77,18 +90,6 @@ import {
   SETTINGS_KEY,
   type AtlasSettings,
 } from "@/lib/settings";
-type View =
-  | "apps"
-  | "team"
-  | "presentations"
-  | "today"
-  | "dashboard"
-  | "globe"
-  | "connection"
-  | "briefing"
-  | "ideas"
-  | "access"
-  | "wellbeing";
 const blank: ProjectFields = {
   name: "",
   description: "",
@@ -134,6 +135,11 @@ export default function Atlas() {
       );
     }
   }
+  const [tool, setTool] = useState<WorkTool>("projects");
+  const [workspaceId, setWorkspaceId] = useState("");
+  const workspaceRef = useRef("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuTrigger = useRef<HTMLButtonElement>(null);
   const [view, setView] = useState<View>("dashboard"),
     [projects, setProjects] = useState<Project[]>([]),
     [loaded, setLoaded] = useState(false),
@@ -191,21 +197,28 @@ export default function Atlas() {
     const v = new URLSearchParams(location.search).get("view");
     if (v === "globe" || v === "dashboard") lastPortfolioView.current = v;
     else lastPortfolioView.current = restored.startView;
-    setView(
-      v === "globe" ||
-        v === "connection" ||
-        v === "dashboard" ||
-        v === "briefing" ||
-        v === "ideas" ||
-        v === "wellbeing" ||
-        v === "today" ||
-        v === "apps" ||
-        v === "team" ||
-        v === "presentations" ||
-        v === "access"
-        ? v
-        : restored.startView,
-    );
+    setView(validViews.includes(v as View) ? (v as View) : restored.startView);
+    setTool(workTool(new URLSearchParams(location.search).get("tool")));
+    const requestedWorkspace =
+      new URLSearchParams(location.search).get("workspace") || "";
+    workspaceRef.current = requestedWorkspace;
+    setWorkspaceId(requestedWorkspace);
+  }, [load]);
+  useEffect(() => {
+    function restoreNavigation() {
+      const params = new URLSearchParams(location.search);
+      const destination = params.get("view") as View;
+      setView(validViews.includes(destination) ? destination : "dashboard");
+      setTool(workTool(params.get("tool")));
+      workspaceRef.current = params.get("workspace") || "";
+      setWorkspaceId(workspaceRef.current);
+      setSelected(null);
+      setFlight(null);
+      setMenuOpen(false);
+      void load();
+    }
+    window.addEventListener("popstate", restoreNavigation);
+    return () => window.removeEventListener("popstate", restoreNavigation);
   }, [load]);
   useEffect(() => {
     const reload = () => {
@@ -226,8 +239,17 @@ export default function Atlas() {
     if (wasSkipping)
       requestAnimationFrame(() => tabRefs.current[destination]?.focus());
   }
-  function navigate(next: View) {
-    if (next === view && !flight) return;
+  function chooseWorkspace(id: string) {
+    workspaceRef.current = id;
+    setWorkspaceId(id);
+    const url = new URL(location.href);
+    url.searchParams.set("workspace", id);
+    history.replaceState(null, "", url);
+  }
+  function navigate(next: View, nextTool?: WorkTool) {
+    setMenuOpen(false);
+    setSelected(null);
+    if (next === view && !flight && (!nextTool || nextTool === tool)) return;
     const portfolio = (value: View): value is PortfolioView =>
       value === "dashboard" || value === "globe";
     if (portfolio(next)) lastPortfolioView.current = next;
@@ -257,7 +279,23 @@ export default function Atlas() {
       }
     } else setFlight(null);
     setView(next);
-    history.replaceState(null, "", `/?view=${next}`);
+    const params = new URLSearchParams({ view: next });
+    if (next === "manage") {
+      const destination = nextTool || tool;
+      setTool(destination);
+      params.set("tool", destination);
+      const id = workspaceRef.current || allData.find((p) => !p.archived)?.id;
+      if (id) {
+        params.set("workspace", id);
+        workspaceRef.current = id;
+        setWorkspaceId(id);
+      }
+      params.set(
+        "scope",
+        new URLSearchParams(location.search).get("scope") || "projects",
+      );
+    }
+    history.pushState(null, "", "/?" + params);
     setFlightTarget(null);
     window.scrollTo({
       top: next === "dashboard" && scale === 0 ? dashboardScroll.current : 0,
@@ -409,111 +447,13 @@ export default function Atlas() {
               ATLAS<span>Project workspace</span>
             </span>
           </a>
-          <div className="workspace-label">TE CONNECTIVITY</div>
-          <nav aria-label="Main navigation">
-            <button
-              aria-label="Today and advisor"
-              aria-current={view === "today" ? "page" : undefined}
-              disabled={!loaded}
-              className={view === "today" ? "nav-item active" : "nav-item"}
-              onClick={() => navigate("today")}
-            >
-              <ListTodo />
-              Today & advisor
-            </button>
-            <button
-              aria-label="Portfolio"
-              aria-current={
-                view === "dashboard" || view === "globe" ? "page" : undefined
-              }
-              disabled={!loaded}
-              className={
-                view === "dashboard" || view === "globe"
-                  ? "nav-item active"
-                  : "nav-item"
-              }
-              onClick={() => navigate(lastPortfolioView.current)}
-            >
-              <Layers3 /> Portfolio<span className="nav-shortcut">01</span>
-            </button>
-            {access?.permissions.includes("briefings.read") && (
-              <button
-                aria-label="Briefings"
-                aria-current={view === "briefing" ? "page" : undefined}
-                disabled={!loaded}
-                className={view === "briefing" ? "nav-item active" : "nav-item"}
-                onClick={() => navigate("briefing")}
-              >
-                <CalendarDays /> Briefings
-                <span className="nav-shortcut">02</span>
-              </button>
-            )}
-            {access?.permissions.includes("ideas.use") && (
-              <button
-                aria-label="Ideas and AI"
-                aria-current={view === "ideas" ? "page" : undefined}
-                disabled={!loaded}
-                className={view === "ideas" ? "nav-item active" : "nav-item"}
-                onClick={() => navigate("ideas")}
-              >
-                <Lightbulb /> Ideas & AI<span className="nav-shortcut">03</span>
-              </button>
-            )}
-            <button
-              aria-label="Wellbeing"
-              aria-current={view === "wellbeing" ? "page" : undefined}
-              disabled={!loaded}
-              className={view === "wellbeing" ? "nav-item active" : "nav-item"}
-              onClick={() => navigate("wellbeing")}
-            >
-              <Heart />
-              Wellbeing<span className="nav-shortcut">04</span>
-            </button>
-            <button
-              className={view === "team" ? "nav-item active" : "nav-item"}
-              onClick={() => navigate("team")}
-            >
-              <Users />
-              Team workspace
-            </button>
-            <button
-              className={
-                view === "presentations" ? "nav-item active" : "nav-item"
-              }
-              onClick={() => navigate("presentations")}
-            >
-              <Presentation />
-              Presentations
-            </button>
-          </nav>
-          <div className="sidebar-divider" />
-          <div className="workspace-label">CONNECTED WORKSPACES</div>
-          <button
-            className={view === "connection" ? "nav-item active" : "nav-item"}
-            onClick={() => navigate("connection")}
-          >
-            <Link2 />
-            FlightDeck OS
-            <span className="pending-dot" />
-          </button>
-          {access?.superAdmin && (
-            <button
-              aria-label="People and access"
-              className={view === "access" ? "nav-item active" : "nav-item"}
-              onClick={() => navigate("access")}
-            >
-              <ShieldCheck /> People & access
-            </button>
-          )}
-          {access?.superAdmin && (
-            <button
-              className={view === "apps" ? "nav-item active" : "nav-item"}
-              onClick={() => navigate("apps")}
-            >
-              <Grid3X3 />
-              Apps & connections
-            </button>
-          )}
+          <AtlasNavigation
+            view={view}
+            tool={tool}
+            loaded={loaded}
+            access={access}
+            navigate={navigate}
+          />
           <div className="sidebar-bottom">
             <div className="system-label">
               <span className="tiny-orbit" /> A WIDER PERSPECTIVE
@@ -532,6 +472,14 @@ export default function Atlas() {
         </aside>
         <div className="main-shell">
           <header className="topbar">
+            <button
+              ref={menuTrigger}
+              className="theme-toggle mobile-navigation-trigger"
+              aria-label="Open navigation"
+              onClick={() => setMenuOpen(true)}
+            >
+              <Menu size={20} />
+            </button>
             {view === "globe" && (
               <a
                 className="globe-top-brand"
@@ -591,8 +539,22 @@ export default function Atlas() {
                   <span>Project Eye</span>
                 </button>
               </div>
+              <FeatureHelp title="Dashboard & Project Eye">
+                Dashboard brings your projects and next actions together.
+                Project Eye shows projects with map coordinates. Switch with
+                these tabs; use the settings icon for each view’s layout, layers
+                and animation controls.
+              </FeatureHelp>
             </div>
             <div className="topbar-right">
+              <button
+                className="theme-toggle global-help"
+                aria-label="Open help"
+                title="Help & getting started"
+                onClick={() => navigate("help")}
+              >
+                <CircleHelp size={18} />
+              </button>
               <AppLauncher
                 access={access}
                 onAdmin={() => navigate("apps")}
@@ -606,6 +568,16 @@ export default function Atlas() {
                   !loaded || !!flight || !!selected || creating || settingsOpen
                 }
                 commands={[
+                  ...workTools.map((t) => ({
+                    id: "work-" + t.id,
+                    label: t.group + ": " + t.title,
+                    run: () => navigate("manage", t.id),
+                  })),
+                  {
+                    id: "help",
+                    label: "Help & getting started",
+                    run: () => navigate("help"),
+                  },
                   {
                     id: "team",
                     label: "Team workspace, notifications & capacity",
@@ -748,7 +720,28 @@ export default function Atlas() {
                 </button>
               </div>
             )}
-            {view === "apps" ? (
+            {view === "manage" ? (
+              <ProjectManagement
+                projects={allData}
+                projectId={workspaceId}
+                tool={tool}
+                demo={demo}
+                loaded={loaded}
+                busy={saving}
+                canCreate={!!access?.permissions.includes("projects.create")}
+                onProject={chooseWorkspace}
+                onTool={(t) => navigate("manage", t)}
+                onOpen={openProject}
+                onNew={() => {
+                  setError("");
+                  setCreating(true);
+                }}
+                onSave={save}
+                onReload={load}
+              />
+            ) : view === "help" ? (
+              <HelpCenter navigate={navigate} />
+            ) : view === "apps" ? (
               access?.superAdmin ? (
                 <AppAdministration />
               ) : (
@@ -898,6 +891,35 @@ export default function Atlas() {
                     </button>
                   </div>
                 )}
+                <div
+                  className="workspace-shortcuts"
+                  aria-label="Work management shortcuts"
+                >
+                  <button onClick={() => navigate("manage", "kanban")}>
+                    <Layers3 size={20} />
+                    <span>
+                      <strong>Kanban board</strong>
+                      <small>Projects & tasks in motion</small>
+                    </span>
+                    <ArrowUpRight size={16} />
+                  </button>
+                  <button onClick={() => navigate("manage", "CEO")}>
+                    <Target size={20} />
+                    <span>
+                      <strong>Think like a leader</strong>
+                      <small>CEO · VP · Director</small>
+                    </span>
+                    <ArrowUpRight size={16} />
+                  </button>
+                  <button onClick={() => navigate("manage", "rules")}>
+                    <Settings2 size={20} />
+                    <span>
+                      <strong>Work tools</strong>
+                      <small>Automations, reports & more</small>
+                    </span>
+                    <ArrowUpRight size={16} />
+                  </button>
+                </div>
                 {settings.dashboard.showMetrics && (
                   <section className="metrics" aria-label="Project overview">
                     <Metric
@@ -1271,6 +1293,27 @@ export default function Atlas() {
         )}
         <WellbeingNotice />
       </div>
+      <Dialog open={menuOpen} onOpenChange={setMenuOpen}>
+        <DialogContent
+          className="mobile-navigation-dialog"
+          onCloseAutoFocus={(e) => {
+            e.preventDefault();
+            menuTrigger.current?.focus();
+          }}
+        >
+          <DialogTitle>Atlas navigation</DialogTitle>
+          <DialogDescription>
+            Choose a workspace or expand a section.
+          </DialogDescription>
+          <AtlasNavigation
+            view={view}
+            tool={tool}
+            loaded={loaded}
+            access={access}
+            navigate={navigate}
+          />
+        </DialogContent>
+      </Dialog>
     </WellbeingProvider>
   );
 }

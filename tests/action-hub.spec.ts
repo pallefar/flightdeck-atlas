@@ -171,6 +171,9 @@ test("a project action, update, briefing, archive, and restore form one durable 
       }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Team & personal", exact: true })
+      .click();
     await page.getByRole("button", { name: "Briefings", exact: true }).click();
     await expect(
       page.getByRole("heading", { name: "Daily briefing" }),
@@ -203,6 +206,7 @@ test("a project action, update, briefing, archive, and restore form one durable 
       .getByRole("button", { name: "Restore project", exact: true })
       .click();
     await page
+      .getByRole("tabpanel", { name: "Dashboard", exact: true })
       .getByRole("button", { name: "All projects", exact: true })
       .click();
     await page.reload();

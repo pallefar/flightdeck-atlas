@@ -11,6 +11,8 @@ export default async function Home({
   const view =
     typeof params.view === "string" &&
     [
+      "manage",
+      "help",
       "dashboard",
       "globe",
       "connection",
@@ -27,7 +29,15 @@ export default async function Home({
       : null;
   const returnParams = new URLSearchParams();
   if (view) returnParams.set("view", view);
-  for (const key of ["project", "work", "form", "look"]) {
+  for (const key of [
+    "project",
+    "work",
+    "form",
+    "look",
+    "tool",
+    "workspace",
+    "scope",
+  ]) {
     const value = params[key];
     if (typeof value === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(value))
       returnParams.set(key, value);

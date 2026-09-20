@@ -210,18 +210,31 @@ const tabs = [
   { id: "reports", label: "Reports", icon: ChartNoAxesCombined },
   { id: "templates", label: "Playbooks", icon: Plus },
 ] as const;
-export default function WorkStudio(props: Props) {
-  const [tab, setTab] = useState<string>(() =>
-      typeof window !== "undefined" &&
-      tabs.some(
-        (t) => t.id === new URLSearchParams(window.location.search).get("work"),
-      )
-        ? new URLSearchParams(window.location.search).get("work")!
-        : "fields",
+export default function WorkStudio(
+  props: Props & {
+    initialTool?: string;
+    standalone?: boolean;
+    onToolChange?: (id: string) => void;
+  },
+) {
+  const [tab, setTab] = useState<string>(
+      () =>
+        props.initialTool ||
+        (typeof window !== "undefined" &&
+        tabs.some(
+          (t) =>
+            t.id === new URLSearchParams(window.location.search).get("work"),
+        )
+          ? new URLSearchParams(window.location.search).get("work")!
+          : "fields"),
     ),
     w = useWork(props.project, props.onReload);
   function selectTool(id: string) {
     setTab(id);
+    if (props.onToolChange) {
+      props.onToolChange(id);
+      return;
+    }
     const url = new URL(location.href);
     url.searchParams.set("project", props.project.id);
     url.searchParams.set("work", id);
@@ -229,7 +242,11 @@ export default function WorkStudio(props: Props) {
     history.replaceState(null, "", url);
   }
   return (
-    <section className="work-studio">
+    <section
+      className={
+        props.standalone ? "work-studio standalone-studio" : "work-studio"
+      }
+    >
       <div className="work-studio-heading">
         <div>
           <span className="eyebrow">WORK STUDIO</span>

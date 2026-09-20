@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import FrogPlan from "./frog-plan";
+import FeatureHelp from "./feature-help";
 import type { WorkspaceData } from "./workspace-tools";
 import {
   ArrowUpRight,
@@ -115,7 +116,15 @@ export default function Today({
       <header className="hub-heading">
         <div>
           <span className="eyebrow">MAKE SPACE FOR WHAT MATTERS</span>
-          <h1>Today, with intention.</h1>
+          <div className="heading-with-help">
+            <h1>Today, with intention.</h1>
+            <FeatureHelp title="Plan your day">
+              Choose one important, difficult task as today’s frog. Reserve
+              focus time, capture your next actions and review watch-outs.
+              Suggestions use your project data; you choose which actions to
+              take.
+            </FeatureHelp>
+          </div>
           <p>
             {new Date().toLocaleDateString(undefined, {
               weekday: "long",
