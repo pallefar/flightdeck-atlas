@@ -140,6 +140,14 @@ export function recordChanges(
       JSON.stringify(fields.kpis || []) !== JSON.stringify(previous.kpis || [])
     )
       add("project", "KPI measurements updated");
+    for (const [key, label] of [
+      ["budget", "Budget"],
+      ["taskViews", "Saved task views"],
+      ["automations", "Automation recipes"],
+      ["leadershipReviews", "Leadership review snapshots"],
+    ] as const)
+      if (JSON.stringify(fields[key]) !== JSON.stringify(previous[key]))
+        add("project", `${label} updated`);
     for (const task of fields.tasks) {
       const old = previous.tasks.find((t) => t.id === task.id);
       if (
@@ -157,6 +165,10 @@ export function recordChanges(
           "estimateMinutes",
           "plannedDate",
           "checklist",
+          "startDate",
+          "milestone",
+          "group",
+          "timeEntries",
         ].some(
           (key) =>
             JSON.stringify(task[key as keyof typeof task]) !==
@@ -213,6 +225,8 @@ export function recordChanges(
         workflow: "todo",
         dueDate: next.toISOString().slice(0, 10),
         plannedDate: "",
+        startDate: "",
+        timeEntries: [],
         dependsOn: [],
         recurrenceSource: task.id,
         checklist: task.checklist?.map((c) => ({ ...c, done: false })),

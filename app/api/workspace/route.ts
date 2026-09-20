@@ -1,4 +1,5 @@
 import { authorize } from "@/lib/access";
+import { taskBlocked } from "@/lib/projects";
 import { database, json, sameOrigin } from "@/lib/server-projects";
 import { directory, teamList, projectFor } from "@/lib/project-access";
 import {
@@ -120,6 +121,39 @@ export async function POST(req: Request) {
     }
     if (b.action === "preferences") {
       const data = preferenceSchema.parse(b.data);
+      const before = await db
+        .prepare("SELECT data FROM atlas_preferences WHERE user_id=?")
+        .bind(a.access.userId)
+        .first();
+      const previousFrog = before
+        ? JSON.parse(before.data as string).frog
+        : null;
+      if (
+        data.frog &&
+        JSON.stringify(data.frog) !== JSON.stringify(previousFrog)
+      ) {
+        const target = await projectFor(a.access, data.frog.projectId);
+        const task = target?.project.tasks.find(
+          (t) => t.id === data.frog!.taskId,
+        );
+        if (
+          !target ||
+          !task ||
+          task.done ||
+          target.project.archived ||
+          target.project.status === "Completed" ||
+          target.project.status === "On hold" ||
+          taskBlocked(task, target.project) ||
+          target.project.blocker?.trim()
+        )
+          return json(
+            {
+              error:
+                "Choose an accessible, active task with no unresolved blockers.",
+            },
+            400,
+          );
+      }
       const revision = Number(b.revision);
       const r =
         revision === 0

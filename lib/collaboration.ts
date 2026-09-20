@@ -133,6 +133,17 @@ export const annotationSchema = z.object({
     .max(100),
 });
 export const preferenceSchema = z.object({
+  frog: z
+    .object({
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      projectId: z.string().min(1).max(80),
+      taskId: z.string().min(1).max(80),
+      start: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+      minutes: z.number().int().min(5).max(90),
+      firstStep: z.string().trim().min(1).max(300),
+    })
+    .nullable()
+    .default(null),
   scenes: z.array(sceneSchema).max(30).default([]),
   annotations: z.array(annotationSchema).max(40).default([]),
   shareCapacity: z.boolean().default(false),
@@ -143,6 +154,7 @@ export const preferenceSchema = z.object({
   digest: z.enum(["all", "daily", "weekly"]),
 });
 export const defaultPreferences = {
+  frog: null as z.infer<typeof preferenceSchema>["frog"],
   shareCapacity: false,
   scenes: [] as z.infer<typeof sceneSchema>[],
   annotations: [] as z.infer<typeof annotationSchema>[],

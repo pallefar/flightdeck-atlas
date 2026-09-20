@@ -26,12 +26,12 @@ test("dashboard settings apply, persist, and reset without changing project data
   );
   await page.reload();
   await expect(
-    page.getByRole("button", { name: /Open (God’s Eye )?settings/ }),
+    page.getByRole("button", { name: /Open (Project Eye )?settings/ }),
   ).toBeEnabled();
   await expect(page.locator(".project-grid")).toHaveClass(/project-list/);
   await expect(page.locator(".metrics")).toHaveCount(0);
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await page.getByRole("button", { name: /Open (God’s Eye )?settings/ }).click();
+  await page.getByRole("button", { name: /Open (Project Eye )?settings/ }).click();
   await dialog
     .getByRole("button", { name: "Reset dashboard", exact: true })
     .click();
@@ -49,10 +49,10 @@ test("globe settings change the map and instant journey, persist, and honor expl
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/?view=globe");
-  await page.getByRole("button", { name: /Open (God’s Eye )?settings/ }).click();
+  await page.getByRole("button", { name: /Open (Project Eye )?settings/ }).click();
   const dialog = page.getByRole("dialog", { name: "Workspace settings" });
   await expect(
-    dialog.getByRole("button", { name: "God’s Eye", exact: true }),
+    dialog.getByRole("button", { name: "Project Eye", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
   await dialog.getByLabel("Map style", { exact: true }).selectOption("street");
   await dialog
@@ -73,9 +73,9 @@ test("globe settings change the map and instant journey, persist, and honor expl
   await expect(page.locator(".globe-hint")).not.toContainText("3D buildings");
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "God’s Eye", exact: true }),
+    page.getByRole("heading", { name: "Project Eye", exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: /Open (God’s Eye )?settings/ }).click();
+  await page.getByRole("button", { name: /Open (Project Eye )?settings/ }).click();
   await expect(
     dialog.getByRole("switch", { name: "Project labels" }),
   ).not.toBeChecked();
@@ -113,12 +113,12 @@ test("settings recover from invalid storage and fit a small mobile screen", asyn
   );
   await page.setViewportSize({ width: 375, height: 667 });
   await page.goto("/");
-  await page.getByRole("button", { name: /Open (God’s Eye )?settings/ }).click();
+  await page.getByRole("button", { name: /Open (Project Eye )?settings/ }).click();
   const dialog = page.getByRole("dialog", { name: "Workspace settings" });
   await expect(
     dialog.getByLabel("Project layout", { exact: true }),
   ).toHaveValue("cards");
-  await dialog.getByRole("button", { name: "God’s Eye", exact: true }).click();
+  await dialog.getByRole("button", { name: "Project Eye", exact: true }).click();
   await dialog
     .getByLabel("Camera & workspace journey", { exact: true })
     .selectOption("quick");
@@ -132,6 +132,6 @@ test("settings recover from invalid storage and fit a small mobile screen", asyn
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: /Open (God’s Eye )?settings/ }),
+    page.getByRole("button", { name: /Open (Project Eye )?settings/ }),
   ).toBeFocused();
 });

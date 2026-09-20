@@ -27,6 +27,20 @@ export default function BuildProgress() {
       <a href="/">← Back to Atlas</a>
       <h1>Atlas build progress</h1>
       <p>This page refreshes while the app takes shape.</p>
+      <p>
+        The current comparison uses monday.com’s published work-management
+        workflows. Atlas now covers the selected planning and leadership
+        workflows; it does not claim full monday.com parity.
+      </p>
+      <p>
+        <a
+          href="https://github.com/pallefar/flightdeck-atlas/blob/main/docs/MONDAY-WORK-MANAGEMENT-AUDIT.md"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Feature comparison and remaining gaps ↗
+        </a>
+      </p>
       {data?.stages.map((s) => (
         <div className="progress-stage" key={s.name}>
           <span>{s.name}</span>

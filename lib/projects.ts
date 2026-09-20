@@ -1,12 +1,22 @@
 import { z } from "zod";
+import {
+  budgetSchema,
+  savedViewSchema,
+  reviewSnapshotSchema,
+  automationSchema,
+} from "./work-model";
+export const validDate = (s: string) =>
+  /^\d{4}-\d{2}-\d{2}$/.test(s) &&
+  Number.isFinite(Date.parse(`${s}T12:00:00Z`)) &&
+  new Date(`${s}T12:00:00Z`).toISOString().slice(0, 10) === s;
+const dateField = z
+  .string()
+  .refine((s) => s === "" || validDate(s), "Choose a valid calendar date.");
 export const taskSchema = z.object({
   id: z.string().max(80),
   title: z.string().trim().min(1).max(200),
   done: z.boolean(),
-  dueDate: z
-    .string()
-    .regex(/^$|^\d{4}-\d{2}-\d{2}$/)
-    .optional(),
+  dueDate: dateField.optional(),
   priority: z.enum(["High", "Normal", "Low"]).optional(),
   assignee: z.string().max(100).optional(),
   assigneeEmail: z
@@ -15,13 +25,25 @@ export const taskSchema = z.object({
   dependsOn: z.array(z.string().max(80)).max(50).optional(),
   recurrence: z.enum(["none", "daily", "weekly", "monthly"]).optional(),
   recurrenceSource: z.string().max(80).optional(),
-  plannedDate: z
-    .string()
-    .regex(/^$|^\d{4}-\d{2}-\d{2}$/)
-    .optional(),
+  plannedDate: dateField.optional(),
   workflow: z.enum(["todo", "doing", "blocked"]).optional(),
   description: z.string().max(2000).optional(),
   estimateMinutes: z.number().int().min(0).max(100000).optional(),
+  startDate: dateField.optional(),
+  milestone: z.boolean().optional(),
+  group: z.string().trim().max(60).optional(),
+  timeEntries: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(80),
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        minutes: z.number().int().min(1).max(1440),
+        note: z.string().trim().max(300),
+        author: z.string().max(254).optional(),
+      }),
+    )
+    .max(100)
+    .optional(),
   checklist: z
     .array(
       z.object({
@@ -39,10 +61,7 @@ export const objectiveSchema = z.object({
   title: z.string().trim().min(1).max(200),
   description: z.string().max(1000).default(""),
   owner: z.string().max(100).default(""),
-  dueDate: z
-    .string()
-    .regex(/^$|^\d{4}-\d{2}-\d{2}$/)
-    .default(""),
+  dueDate: dateField.default(""),
   status: z.enum(["Planned", "In progress", "Achieved"]).default("Planned"),
 });
 export const kpiSchema = z
@@ -90,11 +109,15 @@ export const projectSchema = z
     location: z.string().max(100),
     latitude: z.number().min(-90).max(90).nullable(),
     longitude: z.number().min(-180).max(180).nullable(),
-    dueDate: z.string().regex(/^$|^\d{4}-\d{2}-\d{2}$/),
+    dueDate: dateField,
     color: z.enum(["orange", "blue", "green", "violet"]),
     tasks: z.array(taskSchema).max(200),
     objectives: z.array(objectiveSchema).max(30).optional(),
     kpis: z.array(kpiSchema).max(40).optional(),
+    budget: budgetSchema.optional(),
+    taskViews: z.array(savedViewSchema).max(12).optional(),
+    automations: automationSchema.optional(),
+    leadershipReviews: z.array(reviewSnapshotSchema).max(20).optional(),
     functionArea: z.string().max(80).optional(),
     priority: z.enum(["High", "Normal", "Low"]).optional(),
     sponsor: z.string().max(100).optional(),
@@ -122,7 +145,10 @@ export const projectSchema = z
       p.tasks,
       p.objectives || [],
       p.kpis || [],
+      p.taskViews || [],
+      p.leadershipReviews || [],
       ...p.tasks.map((t) => t.checklist || []),
+      ...p.tasks.map((t) => t.timeEntries || []),
     ]) {
       if (new Set(items.map((x) => x.id)).size !== items.length)
         ctx.addIssue({
@@ -131,6 +157,13 @@ export const projectSchema = z
         });
     }
     const ids = new Set(p.tasks.map((t) => t.id));
+    if (
+      p.tasks.some((t) => t.startDate && t.dueDate && t.startDate > t.dueDate)
+    )
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Task start must be on or before its due date.",
+      });
     const state = new Map<string, number>();
     const visit = (id: string): boolean => {
       if (state.get(id) === 1) return true;

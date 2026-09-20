@@ -567,7 +567,7 @@ export default function Atlas() {
                 <button
                   id="globe-tab"
                   role="tab"
-                  aria-label="God’s Eye"
+                  aria-label="Project Eye"
                   aria-selected={view === "globe"}
                   aria-controls="globe-panel"
                   tabIndex={view === "globe" ? 0 : -1}
@@ -579,7 +579,7 @@ export default function Atlas() {
                   onClick={() => navigate("globe")}
                 >
                   <Globe2 size={17} />
-                  <span>God’s Eye</span>
+                  <span>Project Eye</span>
                 </button>
               </div>
             </div>
@@ -628,7 +628,7 @@ export default function Atlas() {
                   },
                   {
                     id: "globe",
-                    label: "God’s Eye",
+                    label: "Project Eye",
                     run: () => navigate("globe"),
                   },
                   {
@@ -686,7 +686,7 @@ export default function Atlas() {
                 className={`theme-toggle ${view === "globe" ? "globe-settings-trigger" : ""}`}
                 ref={settingsTrigger}
                 aria-label={
-                  view === "globe" ? "Open God’s Eye settings" : "Open settings"
+                  view === "globe" ? "Open Project Eye settings" : "Open settings"
                 }
                 title="Settings"
                 disabled={!loaded}
@@ -696,7 +696,7 @@ export default function Atlas() {
                 }}
               >
                 <Settings2 size={18} />
-                {view === "globe" && <span>God’s Eye settings</span>}
+                {view === "globe" && <span>Project Eye settings</span>}
               </button>
               <button
                 className="theme-toggle"
@@ -863,7 +863,7 @@ export default function Atlas() {
                     <span>
                       Explore your world
                       <small>
-                        Open God’s Eye <ArrowUpRight size={13} />
+                        Open Project Eye <ArrowUpRight size={13} />
                       </small>
                     </span>
                   </button>

@@ -210,10 +210,10 @@ test("command menu and dashboard board work on mobile without overflow", async (
   await page.getByRole("button", { name: "Board", exact: true }).click();
   await expect(page.getByLabel("Project status board")).toBeVisible();
   await page.getByLabel("Open search and commands").click();
-  await page.getByLabel("Search Atlas", { exact: true }).fill("God’s Eye");
+  await page.getByLabel("Search Atlas", { exact: true }).fill("Project Eye");
   await page
     .getByRole("dialog")
-    .getByRole("button", { name: "God’s Eye", exact: true })
+    .getByRole("button", { name: "Project Eye", exact: true })
     .click();
   await expect(page.locator(".sidebar")).toBeHidden();
   await page.getByLabel("Open search and commands").click();
@@ -240,7 +240,7 @@ test("circular zoom can be stopped and respects instant motion", async ({
   await expect(page.getByLabel("Camera flight")).toBeVisible();
   await page.getByRole("button", { name: "Stop flight", exact: true }).click();
   await expect(page.getByLabel("Camera flight")).toHaveCount(0);
-  await page.getByLabel("Open God’s Eye settings").click();
+  await page.getByLabel("Open Project Eye settings").click();
   await page
     .getByLabel("Camera & workspace journey", { exact: true })
     .selectOption("instant");

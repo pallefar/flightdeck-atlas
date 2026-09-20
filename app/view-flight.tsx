@@ -470,7 +470,7 @@ export default function ViewFlight({
         className="view-flight-skip"
         onClick={() => finish.current(target.current)}
       >
-        Skip to {to === "globe" ? "God’s Eye" : "Dashboard"}
+        Skip to {to === "globe" ? "Project Eye" : "Dashboard"}
         <ArrowRight size={15} />
       </button>
     </div>

@@ -8,6 +8,7 @@ import "./wellbeing.css";
 import "./globe-command.css";
 import "./productivity.css";
 import "./suite.css";
+import "./work-management.css";
 import ThemeProvider from "./theme-provider";
 
 export const metadata: Metadata = {

@@ -7,6 +7,8 @@ import {
   recordChanges,
 } from "@/lib/server-projects";
 import { projectFor, activeProjectPeople } from "@/lib/project-access";
+import { applyWorkRules, stampTimeEntries } from "@/lib/work-management";
+import { projectSchema } from "@/lib/projects";
 export const dynamic = "force-dynamic";
 export async function DELETE(
   request: Request,
@@ -92,7 +94,24 @@ export async function PUT(
         409,
       );
     const updatedAt = new Date().toISOString();
-    const recorded = recordChanges(fields, previous, updateNote, updatedAt);
+    try {
+      fields = stampTimeEntries(fields, previous, auth.access.email);
+    } catch (e) {
+      return json({ error: (e as Error).message }, 400);
+    }
+    const automated = applyWorkRules(fields, previous);
+    const valid = projectSchema.safeParse(automated.fields);
+    if (!valid.success)
+      return json({ error: valid.error.issues[0].message }, 400);
+    const recorded = recordChanges(valid.data, previous, updateNote, updatedAt);
+    for (const text of automated.applied)
+      recorded.activity.push({
+        id: crypto.randomUUID(),
+        at: updatedAt,
+        kind: "project",
+        text: `Automation: ${text}`,
+      });
+    recorded.activity = recorded.activity.slice(-200);
     if (recorded.tasks.length > 200)
       return json(
         {

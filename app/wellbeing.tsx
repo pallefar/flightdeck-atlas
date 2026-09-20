@@ -144,7 +144,7 @@ export function WellbeingProvider({
     </WellnessContext.Provider>
   );
 }
-function useWellbeing() {
+export function useWellbeing() {
   return useContext(WellnessContext)!;
 }
 const modeNames = { focus: "Focus", short: "Short break", long: "Long break" };

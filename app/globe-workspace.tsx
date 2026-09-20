@@ -264,7 +264,7 @@ export default function GlobeWorkspace({
       <div className="globe-command-bar">
         <div className="globe-title">
           <span className="eyebrow">ATLAS / WORLDSPACE</span>
-          <h1>God’s Eye</h1>
+          <h1>Project Eye</h1>
           <span className="globe-source">
             {demo ? "Demo projects" : "Atlas project data"}
           </span>

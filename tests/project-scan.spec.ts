@@ -52,13 +52,13 @@ test("top navigation, immersive layout, visible globe settings and scanner work 
   await page.goto("/?view=globe");
   const nav = page.locator(".topbar");
   await expect(
-    nav.getByRole("tab", { name: "God’s Eye", exact: true }),
+    nav.getByRole("tab", { name: "Project Eye", exact: true }),
   ).toBeVisible();
   await expect(page.locator(".sidebar")).toBeHidden();
-  await page.getByRole("button", { name: "Open God’s Eye settings" }).click();
+  await page.getByRole("button", { name: "Open Project Eye settings" }).click();
   const dialog = page.getByRole("dialog", { name: "Workspace settings" });
   await expect(
-    dialog.getByRole("button", { name: "God’s Eye", exact: true }),
+    dialog.getByRole("button", { name: "Project Eye", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
   await dialog.getByRole("switch", { name: "Sunlight & shadows" }).click();
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
@@ -137,7 +137,7 @@ test("cinematic scan animates, can cancel, respects mobile width and saved scan 
   await expect(
     page.getByRole("button", { name: "Cinematic scan", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Open God’s Eye settings" }).click();
+  await page.getByRole("button", { name: "Open Project Eye settings" }).click();
   const box = await page.getByRole("dialog").boundingBox();
   expect(box!.x).toBeGreaterThanOrEqual(0);
   expect(box!.y + box!.height).toBeLessThanOrEqual(667);

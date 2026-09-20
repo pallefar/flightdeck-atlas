@@ -1,15 +1,19 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Pencil, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   taskState,
+  taskBlocked,
   type Task,
   type Project,
   type ProjectFields,
 } from "@/lib/projects";
+import { TaskTable, TaskTimeline } from "./task-views";
+import { filteredTasks, loggedMinutes } from "@/lib/work-management";
+import type { TaskView } from "@/lib/work-model";
 import { localDate } from "@/lib/briefing";
 const states = [
   { id: "todo", label: "To do" },
@@ -49,36 +53,68 @@ export default function TaskWorkbench({
       })
       .catch(() => {});
   }, [project.id]);
-  const [layout, setLayout] = useState<"list" | "board">("list"),
+  const [layout, setLayout] = useState<TaskView["layout"]>("list"),
     [filter, setFilter] = useState("all"),
     [query, setQuery] = useState("");
   const [title, setTitle] = useState(""),
     [due, setDue] = useState(""),
     [priority, setPriority] = useState<Task["priority"]>("Normal"),
     [owner, setOwner] = useState("");
+  const [member, setMember] = useState("");
   const [editing, setEditing] = useState<Task | null>(null),
     [step, setStep] = useState("");
-  const visible = project.tasks.filter(
-    (t) =>
-      `${t.title} ${t.assignee || ""} ${t.description || ""}`
-        .toLowerCase()
-        .includes(query.toLowerCase()) &&
-      (filter === "all" ||
-        (filter === "mine" && t.assigneeEmail === myEmail && !t.done) ||
-        (filter === "open" && !t.done) ||
-        (filter === "overdue" &&
-          !t.done &&
-          !!t.dueDate &&
-          t.dueDate < localDate()) ||
-        (filter === "high" && t.priority === "High" && !t.done)),
-  );
+  const [draftBase, setDraftBase] = useState<Project | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null),
+    wasEditing = useRef(false);
+  useEffect(() => {
+    if (wasEditing.current && !editing) searchRef.current?.focus();
+    wasEditing.current = !!editing;
+  }, [editing]);
+  const [group, setGroup] = useState(""),
+    [sort, setSort] = useState<TaskView["sort"]>("manual"),
+    [filterOwner, setFilterOwner] = useState(""),
+    [filterPriority, setFilterPriority] = useState<TaskView["priority"]>(""),
+    [filterState, setFilterState] = useState<TaskView["state"]>(""),
+    [viewName, setViewName] = useState("");
+  const [entryDate, setEntryDate] = useState(localDate),
+    [entryMinutes, setEntryMinutes] = useState(25),
+    [entryNote, setEntryNote] = useState(""),
+    [entryEdit, setEntryEdit] = useState<string | null>(null);
+  const view = {
+    layout,
+    filter: filter as TaskView["filter"],
+    query,
+    group,
+    sort,
+    owner: filterOwner,
+    priority: filterPriority,
+    state: filterState,
+  };
+  const visible = filteredTasks(project, view, localDate(), myEmail);
+  function openTask(t: Task) {
+    setDraftBase(project);
+    setEditing({ ...t, checklist: [...(t.checklist || [])] });
+    setStep("");
+    setEntryEdit(null);
+  }
+  function applyView(v: TaskView) {
+    setLayout(v.layout);
+    setFilter(v.filter);
+    setQuery(v.query);
+    setGroup(v.group);
+    setSort(v.sort);
+    setFilterOwner(v.owner || "");
+    setFilterPriority(v.priority || "");
+    setFilterState(v.state || "");
+  }
   async function saveTask(task: Task) {
+    const base = editing?.id === task.id && draftBase ? draftBase : project;
     const result = await onSave(
       {
-        ...project,
-        tasks: project.tasks.map((t) => (t.id === task.id ? task : t)),
+        ...base,
+        tasks: base.tasks.map((t) => (t.id === task.id ? task : t)),
       },
-      project,
+      base,
     );
     if (result) setEditing(null);
   }
@@ -106,18 +142,17 @@ export default function TaskWorkbench({
             />
             <strong>{t.title}</strong>
           </label>
-          {!readOnly && (
+          {
             <button
-              aria-label={`Edit ${t.title}`}
+              aria-label={`${readOnly ? "View" : "Edit"} ${t.title}`}
               disabled={busy}
               onClick={() => {
-                setEditing({ ...t, checklist: [...(t.checklist || [])] });
-                setStep("");
+                openTask(t);
               }}
             >
               <Pencil size={15} />
             </button>
-          )}
+          }
         </div>
         <p>
           {t.assignee || "Unassigned"} ·{" "}
@@ -151,7 +186,13 @@ export default function TaskWorkbench({
         {t.recurrence && t.recurrence !== "none" && (
           <small>Repeats {t.recurrence}</small>
         )}
+        {taskBlocked(t, project) && (
+          <small className="attention">Waiting / blocked</small>
+        )}
         {!!t.estimateMinutes && <small>{t.estimateMinutes} min estimate</small>}
+        {!!loggedMinutes(t) && <small>{loggedMinutes(t)} min recorded</small>}
+        {t.milestone && <small>◆ Milestone</small>}
+        {t.group && <small>{t.group}</small>}
         <select
           aria-label={`Workflow for ${t.title}`}
           value={taskState(t)}
@@ -171,6 +212,7 @@ export default function TaskWorkbench({
     <fieldset className="task-workbench" disabled={busy}>
       <div className="task-workbench-toolbar">
         <Input
+          ref={searchRef}
           aria-label="Search tasks"
           placeholder="Find a task or owner…"
           value={query}
@@ -188,17 +230,176 @@ export default function TaskWorkbench({
           <option value="high">High priority</option>
         </select>
         <div className="project-layout-switch">
-          {(["list", "board"] as const).map((l) => (
+          {(["list", "board", "table", "timeline"] as const).map((l) => (
             <button
               key={l}
               aria-pressed={layout === l}
               onClick={() => setLayout(l)}
             >
-              {l === "list" ? "Task list" : "Task board"}
+              {
+                {
+                  list: "Task list",
+                  board: "Task board",
+                  table: "Task table",
+                  timeline: "Timeline",
+                }[l]
+              }
             </button>
           ))}
         </div>
       </div>
+      <details className="task-view-controls">
+        <summary>Refine & save this view</summary>
+        <div className="work-form-grid">
+          <label>
+            Group
+            <select value={group} onChange={(e) => setGroup(e.target.value)}>
+              <option value="">All groups</option>
+              {[
+                ...new Set(project.tasks.map((t) => t.group).filter(Boolean)),
+              ].map((g) => (
+                <option key={g}>{g}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Owner filter
+            <select
+              value={filterOwner}
+              onChange={(e) => setFilterOwner(e.target.value)}
+            >
+              <option value="">All owners</option>
+              {[
+                ...new Set(
+                  project.tasks
+                    .map((t) => t.assigneeEmail || t.assignee)
+                    .filter(Boolean),
+                ),
+              ].map((o) => (
+                <option key={o}>{o}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Priority filter
+            <select
+              value={filterPriority}
+              onChange={(e) =>
+                setFilterPriority(e.target.value as TaskView["priority"])
+              }
+            >
+              <option value="">All priorities</option>
+              <option>High</option>
+              <option>Normal</option>
+              <option>Low</option>
+            </select>
+          </label>
+          <label>
+            Workflow filter
+            <select
+              value={filterState}
+              onChange={(e) =>
+                setFilterState(e.target.value as TaskView["state"])
+              }
+            >
+              <option value="">All workflows</option>
+              {states.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Sort tasks
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as TaskView["sort"])}
+            >
+              <option value="manual">Original order</option>
+              <option value="due">Due date</option>
+              <option value="priority">Priority</option>
+              <option value="owner">Owner</option>
+            </select>
+          </label>
+        </div>
+        <div className="saved-task-views">
+          {project.taskViews?.map((v) => (
+            <div key={v.id}>
+              <button onClick={() => applyView(v)}>{v.name}</button>
+              {!readOnly && (
+                <button
+                  aria-label={`Delete view ${v.name}`}
+                  onClick={() =>
+                    void onSave(
+                      {
+                        ...project,
+                        taskViews: project.taskViews?.filter(
+                          (x) => x.id !== v.id,
+                        ),
+                      },
+                      project,
+                    )
+                  }
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+        {!readOnly && (
+          <div className="work-inline-actions">
+            <Input
+              aria-label="View name"
+              maxLength={60}
+              placeholder="Name this shared project view…"
+              value={viewName}
+              onChange={(e) => setViewName(e.target.value)}
+            />
+            <Button
+              variant="outline"
+              disabled={
+                !viewName.trim() || (project.taskViews?.length || 0) >= 12
+              }
+              onClick={async () => {
+                if (
+                  await onSave(
+                    {
+                      ...project,
+                      taskViews: [
+                        ...(project.taskViews || []),
+                        {
+                          ...view,
+                          id: crypto.randomUUID(),
+                          name: viewName.trim(),
+                        },
+                      ],
+                    },
+                    project,
+                  )
+                )
+                  setViewName("");
+              }}
+            >
+              Save view
+            </Button>
+          </div>
+        )}
+        <button
+          className="text-link"
+          onClick={() => {
+            setFilter("all");
+            setQuery("");
+            setGroup("");
+            setFilterOwner("");
+            setFilterPriority("");
+            setFilterState("");
+          }}
+        >
+          Clear filters
+        </button>
+      </details>
       {editing ? (
         <form
           className="task-detail-editor"
@@ -207,263 +408,448 @@ export default function TaskWorkbench({
             void saveTask(editing);
           }}
         >
-          <div className="section-heading">
-            <h3>Task details</h3>
-            <button
-              type="button"
-              aria-label="Close task details"
-              onClick={() => setEditing(null)}
-            >
-              <X size={18} />
-            </button>
-          </div>
-          <Input
-            aria-label="Task title"
-            required
-            maxLength={200}
-            value={editing.title}
-            onChange={(e) => setEditing({ ...editing, title: e.target.value })}
-          />
-          <Textarea
-            aria-label="Task description"
-            placeholder="Definition of done, context, or useful links…"
-            maxLength={2000}
-            value={editing.description || ""}
-            onChange={(e) =>
-              setEditing({ ...editing, description: e.target.value })
-            }
-          />
-          <div className="task-detail-grid">
-            <label>
-              Assigned member
-              <select
-                value={editing.assigneeEmail || ""}
-                onChange={(e) =>
-                  setEditing({
-                    ...editing,
-                    assigneeEmail: e.target.value,
-                    assignee: e.target.value || editing.assignee,
-                  })
-                }
+          <fieldset disabled={readOnly}>
+            {draftBase && draftBase.revision !== project.revision && (
+              <p className="form-error" role="status">
+                This project changed while you were editing. Your draft is
+                preserved. Cancel and reopen the task to review the latest
+                version before saving.
+              </p>
+            )}
+            <div className="section-heading">
+              <h3>Task details</h3>
+              <button
+                type="button"
+                aria-label="Close task details"
+                onClick={() => setEditing(null)}
               >
-                <option value="">Unassigned / manual owner</option>
-                {members.map((m) => (
-                  <option key={m.email}>{m.email}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Repeat after completion
-              <select
-                value={editing.recurrence || "none"}
-                onChange={(e) =>
-                  setEditing({
-                    ...editing,
-                    recurrence: e.target.value as Task["recurrence"],
-                  })
-                }
-              >
-                <option value="none">Does not repeat</option>
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-              </select>
-            </label>
-            <label>
-              Depends on tasks
-              <select
-                multiple
-                value={editing.dependsOn || []}
-                onChange={(e) =>
-                  setEditing({
-                    ...editing,
-                    dependsOn: Array.from(
-                      e.target.selectedOptions,
-                      (x) => x.value,
-                    ),
-                  })
-                }
-              >
-                {project.tasks
-                  .filter((t) => t.id !== editing.id)
-                  .map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.title}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label>
-              Due date
-              <Input
-                type="date"
-                value={editing.dueDate || ""}
-                onChange={(e) =>
-                  setEditing({ ...editing, dueDate: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              Priority
-              <select
-                value={editing.priority || "Normal"}
-                onChange={(e) =>
-                  setEditing({
-                    ...editing,
-                    priority: e.target.value as Task["priority"],
-                  })
-                }
-              >
-                <option>Normal</option>
-                <option>High</option>
-                <option>Low</option>
-              </select>
-            </label>
-            <label>
-              Task owner
-              <Input
-                maxLength={100}
-                value={editing.assignee || ""}
-                onChange={(e) =>
-                  setEditing({ ...editing, assignee: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              Planned for
-              <Input
-                type="date"
-                value={editing.plannedDate || ""}
-                onChange={(e) =>
-                  setEditing({ ...editing, plannedDate: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              Estimate (minutes)
-              <Input
-                type="number"
-                min={0}
-                max={100000}
-                value={editing.estimateMinutes || ""}
-                onChange={(e) =>
-                  setEditing({
-                    ...editing,
-                    estimateMinutes: e.target.value
-                      ? Number(e.target.value)
-                      : undefined,
-                  })
-                }
-              />
-            </label>
-          </div>
-          <h4>Checklist</h4>
-          <div className="task-checklist">
-            {(editing.checklist || []).map((c) => (
-              <div key={c.id}>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={c.done}
-                    onChange={() =>
-                      setEditing({
-                        ...editing,
-                        checklist: editing.checklist?.map((x) =>
-                          x.id === c.id ? { ...x, done: !x.done } : x,
-                        ),
-                      })
-                    }
-                  />
-                  {c.title}
-                </label>
-                <button
-                  type="button"
-                  aria-label={`Remove step ${c.title}`}
-                  onClick={() =>
+                <X size={18} />
+              </button>
+            </div>
+            <Input
+              aria-label="Task title"
+              autoFocus
+              required
+              maxLength={200}
+              value={editing.title}
+              onChange={(e) =>
+                setEditing({ ...editing, title: e.target.value })
+              }
+            />
+            <Textarea
+              aria-label="Task description"
+              placeholder="Definition of done, context, or useful links…"
+              maxLength={2000}
+              value={editing.description || ""}
+              onChange={(e) =>
+                setEditing({ ...editing, description: e.target.value })
+              }
+            />
+            <div className="task-detail-grid">
+              <label>
+                Assigned member
+                <select
+                  value={editing.assigneeEmail || ""}
+                  onChange={(e) =>
                     setEditing({
                       ...editing,
-                      checklist: editing.checklist?.filter(
-                        (x) => x.id !== c.id,
+                      assigneeEmail: e.target.value,
+                      assignee: e.target.value || editing.assignee,
+                    })
+                  }
+                >
+                  <option value="">Unassigned / manual owner</option>
+                  {members.map((m) => (
+                    <option key={m.email}>{m.email}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Repeat after completion
+                <select
+                  value={editing.recurrence || "none"}
+                  onChange={(e) =>
+                    setEditing({
+                      ...editing,
+                      recurrence: e.target.value as Task["recurrence"],
+                    })
+                  }
+                >
+                  <option value="none">Does not repeat</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+              </label>
+              <label>
+                Depends on tasks
+                <select
+                  multiple
+                  value={editing.dependsOn || []}
+                  onChange={(e) =>
+                    setEditing({
+                      ...editing,
+                      dependsOn: Array.from(
+                        e.target.selectedOptions,
+                        (x) => x.value,
                       ),
                     })
                   }
                 >
-                  <X size={14} />
-                </button>
+                  {project.tasks
+                    .filter((t) => t.id !== editing.id)
+                    .map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.title}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label>
+                Due date
+                <Input
+                  type="date"
+                  value={editing.dueDate || ""}
+                  onChange={(e) =>
+                    setEditing({ ...editing, dueDate: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Priority
+                <select
+                  value={editing.priority || "Normal"}
+                  onChange={(e) =>
+                    setEditing({
+                      ...editing,
+                      priority: e.target.value as Task["priority"],
+                    })
+                  }
+                >
+                  <option>Normal</option>
+                  <option>High</option>
+                  <option>Low</option>
+                </select>
+              </label>
+              <label>
+                Task owner
+                <Input
+                  maxLength={100}
+                  value={editing.assignee || ""}
+                  onChange={(e) =>
+                    setEditing({ ...editing, assignee: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Planned for
+                <Input
+                  type="date"
+                  value={editing.plannedDate || ""}
+                  onChange={(e) =>
+                    setEditing({ ...editing, plannedDate: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Estimate (minutes)
+                <Input
+                  type="number"
+                  min={0}
+                  max={100000}
+                  value={editing.estimateMinutes || ""}
+                  onChange={(e) =>
+                    setEditing({
+                      ...editing,
+                      estimateMinutes: e.target.value
+                        ? Number(e.target.value)
+                        : undefined,
+                    })
+                  }
+                />
+              </label>
+            </div>
+            <div className="work-form-grid">
+              <label>
+                Start date
+                <Input
+                  type="date"
+                  value={editing.startDate || ""}
+                  onChange={(e) =>
+                    setEditing({ ...editing, startDate: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Task group
+                <Input
+                  maxLength={60}
+                  placeholder="For example: Discovery"
+                  value={editing.group || ""}
+                  onChange={(e) =>
+                    setEditing({ ...editing, group: e.target.value })
+                  }
+                />
+              </label>
+              <label className="milestone-toggle">
+                <input
+                  type="checkbox"
+                  checked={!!editing.milestone}
+                  onChange={(e) =>
+                    setEditing({ ...editing, milestone: e.target.checked })
+                  }
+                />
+                Mark as a milestone
+              </label>
+            </div>
+            <section className="task-time-log">
+              <h4>Time log · {loggedMinutes(editing)} min</h4>
+              <p>
+                Record actual work separately from the estimate. Entries are
+                saved with the task.
+              </p>
+              {editing.timeEntries?.map((entry) => (
+                <div className="time-log-row" key={entry.id}>
+                  <span>
+                    {entry.date} · {entry.minutes} min ·{" "}
+                    {entry.note || "Work session"}
+                    {entry.author ? ` · ${entry.author}` : ""}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`Correct time entry ${entry.id}`}
+                    onClick={() => {
+                      setEntryDate(entry.date);
+                      setEntryMinutes(entry.minutes);
+                      setEntryNote(entry.note);
+                      setEntryEdit(entry.id);
+                    }}
+                  >
+                    Correct
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Remove time entry ${entry.id}`}
+                    onClick={() =>
+                      setEditing({
+                        ...editing,
+                        timeEntries: editing.timeEntries?.filter(
+                          (x) => x.id !== entry.id,
+                        ),
+                      })
+                    }
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <div className="work-form-grid">
+                <label>
+                  Work date
+                  <Input
+                    type="date"
+                    max={localDate()}
+                    value={entryDate}
+                    onChange={(e) => setEntryDate(e.target.value)}
+                  />
+                </label>
+                <label>
+                  Minutes worked
+                  <Input
+                    type="number"
+                    min={1}
+                    max={1440}
+                    value={entryMinutes}
+                    onChange={(e) => setEntryMinutes(Number(e.target.value))}
+                  />
+                </label>
+                <label>
+                  Session note
+                  <Input
+                    maxLength={300}
+                    value={entryNote}
+                    onChange={(e) => setEntryNote(e.target.value)}
+                  />
+                </label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={
+                    !entryDate ||
+                    entryDate > localDate() ||
+                    !Number.isInteger(entryMinutes) ||
+                    entryMinutes < 1 ||
+                    entryMinutes > 1440 ||
+                    (!entryEdit && (editing.timeEntries?.length || 0) >= 100)
+                  }
+                  onClick={() => {
+                    const entry = {
+                      id: entryEdit || crypto.randomUUID(),
+                      date: entryDate,
+                      minutes: entryMinutes,
+                      note: entryNote.trim(),
+                    };
+                    setEditing({
+                      ...editing,
+                      timeEntries: entryEdit
+                        ? (editing.timeEntries || []).map((x) =>
+                            x.id === entryEdit ? entry : x,
+                          )
+                        : [...(editing.timeEntries || []), entry],
+                    });
+                    setEntryNote("");
+                    setEntryEdit(null);
+                  }}
+                >
+                  {entryEdit
+                    ? "Apply time correction"
+                    : "Add time entry to draft"}
+                </Button>
+                {entryEdit && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setEntryEdit(null);
+                      setEntryNote("");
+                    }}
+                  >
+                    Cancel time correction
+                  </Button>
+                )}
               </div>
-            ))}
-          </div>
-          <div className="checklist-add">
-            <Input
-              aria-label="Checklist step"
-              placeholder="Break the task into a small step…"
-              maxLength={200}
-              value={step}
-              onChange={(e) => setStep(e.target.value)}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!step.trim() || (editing.checklist?.length || 0) >= 30}
-              onClick={() => {
-                setEditing({
-                  ...editing,
-                  checklist: [
-                    ...(editing.checklist || []),
+            </section>
+            <h4>Checklist</h4>
+            <div className="task-checklist">
+              {(editing.checklist || []).map((c) => (
+                <div key={c.id}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={c.done}
+                      onChange={() =>
+                        setEditing({
+                          ...editing,
+                          checklist: editing.checklist?.map((x) =>
+                            x.id === c.id ? { ...x, done: !x.done } : x,
+                          ),
+                        })
+                      }
+                    />
+                    {c.title}
+                  </label>
+                  <button
+                    type="button"
+                    aria-label={`Remove step ${c.title}`}
+                    onClick={() =>
+                      setEditing({
+                        ...editing,
+                        checklist: editing.checklist?.filter(
+                          (x) => x.id !== c.id,
+                        ),
+                      })
+                    }
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="checklist-add">
+              <Input
+                aria-label="Checklist step"
+                placeholder="Break the task into a small step…"
+                maxLength={200}
+                value={step}
+                onChange={(e) => setStep(e.target.value)}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                disabled={
+                  !step.trim() || (editing.checklist?.length || 0) >= 30
+                }
+                onClick={() => {
+                  setEditing({
+                    ...editing,
+                    checklist: [
+                      ...(editing.checklist || []),
+                      {
+                        id: crypto.randomUUID(),
+                        title: step.trim(),
+                        done: false,
+                      },
+                    ],
+                  });
+                  setStep("");
+                }}
+              >
+                Add step
+              </Button>
+            </div>
+            <div className="task-edit-actions">
+              <Button type="submit" disabled={busy || readOnly || !!entryEdit}>
+                Save task
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setEditing(null)}
+              >
+                Cancel
+              </Button>
+              <button
+                type="button"
+                aria-label={`Remove ${editing.title}`}
+                disabled={busy || readOnly}
+                onClick={() =>
+                  void onSave(
                     {
-                      id: crypto.randomUUID(),
-                      title: step.trim(),
-                      done: false,
+                      ...project,
+                      tasks: project.tasks
+                        .filter((t) => t.id !== editing.id)
+                        .map((t) => ({
+                          ...t,
+                          dependsOn: t.dependsOn?.filter(
+                            (id) => id !== editing.id,
+                          ),
+                        })),
                     },
-                  ],
-                });
-                setStep("");
-              }}
-            >
-              Add step
-            </Button>
-          </div>
-          <div className="task-edit-actions">
-            <Button type="submit" disabled={busy || readOnly}>
-              Save task
-            </Button>
+                    project,
+                  ).then((r) => {
+                    if (r) setEditing(null);
+                  })
+                }
+              >
+                <Trash2 size={16} />
+              </button>
+            </div>
+          </fieldset>
+          {readOnly && (
             <Button
               type="button"
               variant="outline"
               onClick={() => setEditing(null)}
             >
-              Cancel
+              Back to tasks
             </Button>
-            <button
-              type="button"
-              aria-label={`Remove ${editing.title}`}
-              disabled={busy || readOnly}
-              onClick={() =>
-                void onSave(
-                  {
-                    ...project,
-                    tasks: project.tasks
-                      .filter((t) => t.id !== editing.id)
-                      .map((t) => ({
-                        ...t,
-                        dependsOn: t.dependsOn?.filter(
-                          (id) => id !== editing.id,
-                        ),
-                      })),
-                  },
-                  project,
-                ).then((r) => {
-                  if (r) setEditing(null);
-                })
-              }
-            >
-              <Trash2 size={16} />
-            </button>
-          </div>
+          )}
         </form>
       ) : (
         <>
-          {layout === "board" ? (
+          {layout === "table" ? (
+            <TaskTable
+              project={project}
+              tasks={visible}
+              readOnly={readOnly}
+              busy={busy}
+              members={members}
+              onSave={onSave}
+              onEdit={openTask}
+            />
+          ) : layout === "timeline" ? (
+            <TaskTimeline project={project} tasks={visible} onEdit={openTask} />
+          ) : layout === "board" ? (
             <div className="task-kanban">
               {states.map((s) => (
                 <section key={s.id}>
@@ -510,7 +896,8 @@ export default function TaskWorkbench({
                     workflow: "todo",
                     dueDate: due,
                     priority,
-                    assignee: owner,
+                    assignee: member || owner,
+                    assigneeEmail: member,
                   },
                 ],
               },
@@ -521,6 +908,7 @@ export default function TaskWorkbench({
               setDue("");
               setPriority("Normal");
               setOwner("");
+              setMember("");
               setFilter("all");
               setQuery("");
             }
@@ -554,6 +942,18 @@ export default function TaskWorkbench({
                 <option>Normal</option>
                 <option>High</option>
                 <option>Low</option>
+              </select>
+            </label>
+            <label>
+              Assign member
+              <select
+                value={member}
+                onChange={(e) => setMember(e.target.value)}
+              >
+                <option value="">Unassigned / manual owner</option>
+                {members.map((m) => (
+                  <option key={m.email}>{m.email}</option>
+                ))}
               </select>
             </label>
             <label>

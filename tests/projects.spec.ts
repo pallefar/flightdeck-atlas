@@ -130,9 +130,9 @@ test("mobile dashboard stays within viewport and both views are reachable", asyn
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
-  await page.getByRole("tab", { name: "God’s Eye", exact: true }).click();
+  await page.getByRole("tab", { name: "Project Eye", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "God’s Eye", exact: true }),
+    page.getByRole("heading", { name: "Project Eye", exact: true }),
   ).toBeVisible();
   await page.getByRole("tab", { name: "Dashboard", exact: true }).click();
   await expect(

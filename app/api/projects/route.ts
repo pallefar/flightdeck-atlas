@@ -10,6 +10,7 @@ import {
   newProject,
 } from "@/lib/server-projects";
 import { visibleProjects } from "@/lib/project-access";
+import { stampTimeEntries } from "@/lib/work-management";
 export const dynamic = "force-dynamic";
 export async function GET() {
   const auth = await authorize("projects.read");
@@ -36,6 +37,7 @@ export async function POST(request: Request) {
   let fields;
   try {
     ({ fields } = await readFields(request));
+    fields = stampTimeEntries(fields, undefined, auth.access.email);
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }

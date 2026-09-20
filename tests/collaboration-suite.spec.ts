@@ -336,7 +336,7 @@ test("app registry, launcher and globe display controls work on mobile", async (
   await page.keyboard.press("Escape");
   await page.goto("/?view=globe");
   await page
-    .getByRole("button", { name: "Open God’s Eye settings", exact: true })
+    .getByRole("button", { name: "Open Project Eye settings", exact: true })
     .click();
   await page
     .getByLabel("Visual preset", { exact: true })

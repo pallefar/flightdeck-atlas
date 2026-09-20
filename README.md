@@ -1,12 +1,12 @@
 # FlightDeck Atlas
 
-A TE Connectivity themed portfolio and action hub, with a dashboard, God’s Eye globe, daily/weekly briefings, consultancy pilots, and Super Admin-controlled access.
+A TE Connectivity themed portfolio and action hub, with a dashboard, Project Eye globe, daily/weekly briefings, consultancy pilots, and Super Admin-controlled access.
 
 ## Included
 
 - Project creation and editing, task completion, progress and location metadata.
 - Durable project records in D1, protected server-side by authenticated user identity.
-- Dashboard and God’s Eye tabs with shared project state, keyboard navigation, and a reversible laptop → office → sky camera journey. View transitions can be cinematic, quick or instant.
+- Dashboard and Project Eye tabs with shared project state, keyboard navigation, and a reversible laptop → office → sky camera journey. View transitions can be cinematic, quick or instant.
 - Soft card shadows, button/visual hover effects and keyboard focus feedback, respecting reduced-motion settings.
 - Globe → building → stylized 3D room → laptop → project journey, with skip, cancel and reduced-motion support.
 - Light and dark themes with a remembered device preference.
@@ -70,9 +70,9 @@ Connections has **From FlightDeck** and **To FlightDeck** flows. Atlas onboardin
 - A compact dashboard widget, full Wellbeing page, running timer indicator, reduced-motion support and a dashboard visibility toggle.
 - Outlook summary and calendar panels are explicitly disconnected pending Microsoft 365 app registration and delegated sign-in. No email/calendar data is fetched. See [personal hub requirements](docs/PERSONAL-HUB-CONTRACT.md).
 
-## Immersive God’s Eye
+## Immersive Project Eye
 
-Dashboard/God’s Eye tabs sit inside the top navigation. God’s Eye hides the sidebar and exposes a labeled settings control. Its saved Explore/Scan preference, imagery, labels, terrain, building layers and optional sunlight/shadows are available there.
+Dashboard/Project Eye tabs sit inside the top navigation. Project Eye hides the sidebar and exposes a labeled settings control. Its saved Explore/Scan preference, imagery, labels, terrain, building layers and optional sunlight/shadows are available there.
 
 Cinematic scan searches actual active Atlas project fields and task text, with accent-insensitive token matching, attention/high-priority/completed filters, animated index channels and a cancellable reveal. It does not query cameras, people, external tracking feeds or the disconnected OS. Example data is explicitly labeled. Unmapped results open the project for editing instead of inventing coordinates.
 
@@ -82,7 +82,7 @@ Tour locations visits mapped results and stops on manual interaction, workspace 
 
 Today & advisor combines quick capture, planned work dates, a prioritized action queue, a focus-time budget and explicit rule-based watch-outs. Project workspaces include a task list/board, owners, due dates, estimates, checklists, notes, manual goals and goal-linked KPI measurements. All product records persist through the authorized project API and revision checks. Dashboard cards/list/status board, a collapsible deadline planner and a cross-view command menu make these tools reachable.
 
-God’s Eye adds circular flight targeting, smooth zoom controls, project orbit and risk marker colors; manual control and Escape stop motion. Reduced motion and the circular-lens setting are respected.
+Project Eye adds circular flight targeting, smooth zoom controls, project orbit and risk marker colors; manual control and Escape stop motion. Reduced motion and the circular-lens setting are respected.
 
 FlightDeck is the chosen future AI provider. Live AI, OS strategy/KPI feeds, TEOA and Outlook remain disconnected. See [research and selected roadmap](docs/PRODUCTIVITY-RESEARCH.md) and [strategy/AI SDK contract](docs/STRATEGY-AI-CONTRACT.md).
 
@@ -92,4 +92,14 @@ The Apps launcher and Super Admin catalog now support icons, links, audiences, f
 
 Presentation Studio provides five TE templates, saved/editable slides, notes, presentation mode and editable PowerPoint export. Globe settings now include seven simulated visual looks, HUD/scope, bloom/sharpening, camera controls, private scenes/annotations, and reported USGS earthquakes. Workspace animations use improved real-time 3D lighting and camera paths.
 
-Apply migration 0002 and enable logical R2 binding BUCKET for attachments. No external service keys are included. Shared SSO, live FlightDeck AI/data, Microsoft 365 and additional globe feeds remain pending their service integrations. See [collaboration/app contract](docs/COLLABORATION-AND-APPS.md) and [God’s Eye audit](docs/GODS-EYE-FEATURE-AUDIT.md).
+Apply migration 0002 and enable logical R2 binding BUCKET for attachments. No external service keys are included. Shared SSO, live FlightDeck AI/data, Microsoft 365 and additional globe feeds remain pending their service integrations. See [collaboration/app contract](docs/COLLABORATION-AND-APPS.md) and [Globe reference audit](docs/GODS-EYE-FEATURE-AUDIT.md).
+
+## Work management and leadership reviews
+
+Project workspaces now include task tables, shared compound saved views, selected-visible-task bulk edits, dated timelines with milestones and dependency conflicts, attributed manual time records, approved/forecast/actual budgets, three task playbooks, and two optional on-save automation recipes. Task and budget drafts retain the source revision to prevent overwriting concurrent edits. Dates are real-calendar validated.
+
+Think like a leader offers CEO, VP and Director perspectives for the current moment, next weekly review or stage gate, grounded in saved project evidence. Reviewed actions can be added without duplicating the same role recommendation; source snapshots and Markdown briefs preserve review context. Snapshot history retains up to 20 reviews within the project payload budget, with an export alternative and explicit deletion. This is deterministic decision support; live AI remains reserved for FlightDeck OS.
+
+Today includes Eat the Frog: one private account-saved daily task choice, concrete first step, personal time reservation, actual focus timer and task completion. Frog blocks are included in the focus budget without double-counting an existing task allocation. They do not book an external calendar.
+
+The map is now called Project Eye; existing globe URLs and preferences are compatible. See [monday.com feature comparison and remaining gaps](docs/MONDAY-WORK-MANAGEMENT-AUDIT.md).

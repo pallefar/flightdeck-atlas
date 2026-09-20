@@ -5,7 +5,7 @@ test("view flight reverses with one canvas, skips cleanly, and keeps tab navigat
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/");
-  await page.getByRole("tab", { name: "God’s Eye", exact: true }).click();
+  await page.getByRole("tab", { name: "Project Eye", exact: true }).click();
   const flight = page.locator(".view-flight");
   await expect(flight).toHaveAttribute("data-direction", "globe");
   await expect(flight.locator("canvas")).toHaveCount(1);
@@ -27,7 +27,7 @@ test("view flight reverses with one canvas, skips cleanly, and keeps tab navigat
   await expect(
     page.getByRole("tabpanel", { name: "Dashboard", exact: true }),
   ).not.toHaveAttribute("inert");
-  await page.getByRole("tab", { name: "God’s Eye", exact: true }).click();
+  await page.getByRole("tab", { name: "Project Eye", exact: true }).click();
   await expect(flight).toHaveCount(0, { timeout: 12000 });
   await page.getByRole("tab", { name: "Dashboard", exact: true }).click();
   await expect(flight).toHaveCount(1);
@@ -44,7 +44,7 @@ test("reduced motion skips camera travel and arrow keys select the other tab", a
   await dashboard.focus();
   await page.keyboard.press("ArrowRight");
   await expect(
-    page.getByRole("tab", { name: "God’s Eye", exact: true }),
+    page.getByRole("tab", { name: "Project Eye", exact: true }),
   ).toBeFocused();
   await expect(page.locator(".view-flight")).toHaveCount(0);
   await expect(page).toHaveURL(/view=globe/);

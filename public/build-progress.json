@@ -1,6 +1,34 @@
 {
-  "updated": "Team collaboration, presentation studio and expanded God’s Eye settings implemented",
+  "updated": "Project Eye, Eat the Frog and leadership workflows verified; 38 scenario checks passed",
   "stages": [
+    {
+      "name": "Official monday.com workflow comparison",
+      "status": "Official reference inspected; full feature matrix and remaining gaps documented"
+    },
+    {
+      "name": "Project Eye rename",
+      "status": "Implemented and verified"
+    },
+    {
+      "name": "Eat the Frog personal daily planning",
+      "status": "Implemented and verified"
+    },
+    {
+      "name": "Task table, saved views, bulk editing and timeline",
+      "status": "Implemented and verified"
+    },
+    {
+      "name": "Time records, budgets, templates and automation recipes",
+      "status": "Implemented and verified"
+    },
+    {
+      "name": "Think like a CEO, VP or Director",
+      "status": "Implemented and verified"
+    },
+    {
+      "name": "Independent criticism, scenario tests and visual review",
+      "status": "Independent functional review passed; 38 automated scenarios passed"
+    },
     {
       "name": "Apps launcher and Super Admin app registry",
       "status": "Implemented; FlightDeck shared login awaits SDK"
@@ -50,11 +78,11 @@
       "status": "Contract prepared; awaiting FlightDeck OS service and SDK"
     },
     {
-      "name": "TE dashboard and God’s Eye globe",
+      "name": "TE dashboard and Project Eye globe",
       "status": "Implemented and reviewed"
     },
     {
-      "name": "Top navigation, full-width God’s Eye and visible map settings",
+      "name": "Top navigation, full-width Project Eye and visible map settings",
       "status": "Implemented and tested"
     },
     {
@@ -103,7 +131,7 @@
     },
     {
       "name": "Updated source and private site",
-      "status": "Ready for publication"
+      "status": "Release verified; publication status is reported in the task"
     }
   ]
 }

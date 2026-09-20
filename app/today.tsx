@@ -1,5 +1,7 @@
 "use client";
 import { useState } from "react";
+import FrogPlan from "./frog-plan";
+import type { WorkspaceData } from "./workspace-tools";
 import {
   ArrowUpRight,
   Check,
@@ -37,6 +39,7 @@ export default function Today({
   onCapacityChange: (minutes: number) => void;
 }) {
   const [filter, setFilter] = useState("today");
+  const [frog, setFrog] = useState<WorkspaceData["preferences"]["frog"]>(null);
   const [projectId, setProjectId] = useState(""),
     [title, setTitle] = useState(""),
     [due, setDue] = useState("");
@@ -49,21 +52,63 @@ export default function Today({
       );
   const captureProject =
     editable.find((p) => p.id === projectId) || editable[0];
-  const queue = advice.actions.filter(
-    ({ t, blocked }) =>
-      filter === "all" ||
-      (filter === "today" &&
-        ((!!t.plannedDate && t.plannedDate <= today) ||
-          (!!t.dueDate && t.dueDate <= today))) ||
-      (filter === "blocked" && blocked) ||
-      (filter === "undated" && !t.dueDate && !t.plannedDate),
-  );
+  const queue = advice.actions
+    .filter(
+      ({ t, blocked }) =>
+        filter === "all" ||
+        (filter === "today" &&
+          ((t.id === frog?.taskId &&
+            advice.actions.some(
+              (a) => a.t === t && a.p.id === frog.projectId,
+            )) ||
+            (!!t.plannedDate && t.plannedDate <= today) ||
+            (!!t.dueDate && t.dueDate <= today))) ||
+        (filter === "blocked" && blocked) ||
+        (filter === "undated" && !t.dueDate && !t.plannedDate),
+    )
+    .sort(
+      (a, b) =>
+        Number(b.p.id === frog?.projectId && b.t.id === frog?.taskId) -
+        Number(a.p.id === frog?.projectId && a.t.id === frog?.taskId),
+    );
   const {
-    total: plannedMinutes,
-    completed: completedMinutes,
+    total: taskPlannedMinutes,
+    completed: taskCompletedMinutes,
     missing: missingEstimates,
   } = dailyAllocation(projects, today);
-  const recommendations = advice.actions.filter((a) => !a.blocked).slice(0, 3);
+  const frogProject = projects.find((p) => p.id === frog?.projectId);
+  const frogTask = frogProject?.tasks.find((t) => t.id === frog?.taskId);
+  const frogReservation =
+    frog &&
+    frogTask &&
+    frogProject &&
+    !frogProject.archived &&
+    frogProject.status !== "On hold" &&
+    frogProject.status !== "Completed"
+      ? Math.max(
+          0,
+          frog.minutes -
+            (frogTask.plannedDate === today
+              ? frogTask.estimateMinutes || 30
+              : 0),
+        )
+      : 0;
+  const plannedMinutes = taskPlannedMinutes + frogReservation;
+  const completedMinutes =
+    taskCompletedMinutes +
+    (frogTask?.done &&
+    frogTask.completedAt &&
+    localDate(new Date(frogTask.completedAt)) === today
+      ? frogReservation
+      : 0);
+  const recommendations = advice.actions
+    .filter((a) => !a.blocked)
+    .sort(
+      (a, b) =>
+        Number(b.p.id === frog?.projectId && b.t.id === frog?.taskId) -
+        Number(a.p.id === frog?.projectId && a.t.id === frog?.taskId),
+    )
+    .slice(0, 3);
   const [showAllWatchouts, setShowAllWatchouts] = useState(false);
   return (
     <main className="hub-page today-page">
@@ -89,6 +134,14 @@ export default function Today({
           Example projects · Add your own projects to plan and capture actions.
         </p>
       )}
+      <FrogPlan
+        projects={projects}
+        demo={demo}
+        busy={busy}
+        onSave={onSave}
+        onOpen={onOpen}
+        onPlan={setFrog}
+      />
       <form
         className="quick-capture"
         onSubmit={async (e) => {
@@ -183,6 +236,12 @@ export default function Today({
                 {completedMinutes} estimated minutes completed; kept in today’s
                 allocation.
               </small>
+              {frogReservation > 0 && (
+                <small>
+                  Includes {frogReservation} additional minutes reserved for
+                  your frog.
+                </small>
+              )}
               {missingEstimates > 0 && (
                 <small>
                   {missingEstimates} unestimated tasks use a 30-minute
@@ -336,8 +395,8 @@ export default function Today({
               <span className="rules-badge">Rule-based</span>
             </div>
             <p className="hub-muted">
-              Overdue work first, then today’s commitments and high priorities.
-              Blocked work needs an unblock action.
+              Your chosen frog first, then overdue work, today’s commitments and
+              high priorities. Blocked work needs an unblock action.
             </p>
             {recommendations.map(({ p, t, reason }, i) => (
               <button
@@ -408,6 +467,11 @@ export default function Today({
             <Sparkles size={21} />
             <h2>FlightDeck AI review</h2>
             <span className="rules-badge">Awaiting FlightDeck OS</span>
+            <p>
+              Available now: open a project and choose Think like a leader for
+              CEO, VP and Director perspectives with evidence and reviewed
+              actions.
+            </p>
             <p>
               Once connected: ask for a portfolio review, suggested priorities,
               task breakdowns, and goal or KPI watch-outs—with links to the

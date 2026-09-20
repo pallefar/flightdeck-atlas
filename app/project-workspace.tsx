@@ -3,8 +3,10 @@ import ProjectCollaboration from "./project-collaboration";
 import { freshProject } from "@/lib/fresh-export";
 import TaskWorkbench from "./task-workbench";
 import ProjectStrategy from "./project-strategy";
-import { taskState } from "@/lib/projects";
-import { useState } from "react";
+import LeadershipReview from "./leadership-review";
+import ProjectDelivery from "./project-delivery";
+import { taskBlocked } from "@/lib/projects";
+import { useState, useEffect, useRef } from "react";
 import { Archive, Download, Globe2, Undo2, X } from "lucide-react";
 import {
   Dialog,
@@ -46,9 +48,19 @@ export default function ProjectWorkspace({
 }) {
   const readOnly = demo || project.canEdit === false;
   const [tab, setTab] = useState<
-    "overview" | "tasks" | "strategy" | "updates" | "collaboration"
+    | "overview"
+    | "tasks"
+    | "strategy"
+    | "updates"
+    | "collaboration"
+    | "leadership"
+    | "delivery"
   >("tasks");
   const [note, setNote] = useState("");
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    dialogRef.current?.scrollTo({ top: 0, behavior: "instant" });
+  }, [tab]);
   return (
     <Dialog
       open
@@ -57,6 +69,7 @@ export default function ProjectWorkspace({
       }}
     >
       <DialogContent
+        ref={dialogRef}
         className="project-dialog workspace-dialog"
         showCloseButton={false}
       >
@@ -117,7 +130,7 @@ export default function ProjectWorkspace({
           </span>
           <span>
             <strong>
-              {project.tasks.filter((t) => taskState(t) === "blocked").length}
+              {project.tasks.filter((t) => taskBlocked(t, project)).length}
             </strong>{" "}
             blocked
           </span>
@@ -141,6 +154,8 @@ export default function ProjectWorkspace({
             [
               "overview",
               "tasks",
+              "leadership",
+              "delivery",
               "strategy",
               "collaboration",
               "updates",
@@ -156,11 +171,15 @@ export default function ProjectWorkspace({
                 ? "Overview"
                 : t === "tasks"
                   ? `Tasks · ${project.tasks.length}`
-                  : t === "strategy"
-                    ? "Strategy & KPIs"
-                    : t === "collaboration"
-                      ? "Collaborate & share"
-                      : `Updates · ${project.activity?.length || 0}`}
+                  : t === "leadership"
+                    ? "Think like a leader"
+                    : t === "delivery"
+                      ? "Delivery & budget"
+                      : t === "strategy"
+                        ? "Strategy & KPIs"
+                        : t === "collaboration"
+                          ? "Collaborate & share"
+                          : `Updates · ${project.activity?.length || 0}`}
             </button>
           ))}
         </div>
@@ -276,6 +295,23 @@ export default function ProjectWorkspace({
             demo={demo}
             onSave={onSave}
             onReload={onReload}
+          />
+        )}
+        {tab === "leadership" && (
+          <LeadershipReview
+            project={project}
+            readOnly={readOnly}
+            busy={busy}
+            onSave={onSave}
+            onSection={setTab}
+          />
+        )}
+        {tab === "delivery" && (
+          <ProjectDelivery
+            project={project}
+            readOnly={readOnly}
+            busy={busy}
+            onSave={onSave}
           />
         )}
         {error && (

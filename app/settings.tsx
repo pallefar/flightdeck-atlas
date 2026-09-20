@@ -85,7 +85,7 @@ export default function Settings({
                 }
               >
                 <option value="dashboard">Dashboard</option>
-                <option value="globe">God’s Eye</option>
+                <option value="globe">Project Eye</option>
               </select>
             </SettingRow>
             <SettingRow
@@ -121,12 +121,12 @@ export default function Settings({
               aria-pressed={tab === "globe"}
               onClick={() => onTabChange("globe")}
             >
-              <Globe2 size={17} /> God’s Eye
+              <Globe2 size={17} /> Project Eye
             </button>
           </div>
           <section
             aria-label={
-              tab === "dashboard" ? "Dashboard settings" : "God’s Eye settings"
+              tab === "dashboard" ? "Dashboard settings" : "Project Eye settings"
             }
           >
             {tab === "dashboard" ? (
@@ -596,7 +596,7 @@ export default function Settings({
             }
           >
             <RotateCcw size={15} /> Reset{" "}
-            {tab === "dashboard" ? "dashboard" : "God’s Eye"}
+            {tab === "dashboard" ? "dashboard" : "Project Eye"}
           </button>
         </footer>
       </DialogContent>
