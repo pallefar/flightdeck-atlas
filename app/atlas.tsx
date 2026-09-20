@@ -70,7 +70,6 @@ import FlightDeckConnection from "./flightdeck-connection";
 import AccessManagement from "./access-management";
 import type { AccessProfile } from "@/lib/access-policy";
 import Ideas from "./ideas";
-import ProjectWorkspace from "./project-workspace";
 import AtlasNavigation from "./atlas-navigation";
 import ProjectManagement from "./project-management";
 import HelpCenter from "./help-center";
@@ -147,7 +146,6 @@ export default function Atlas() {
     [query, setQuery] = useState(""),
     [filter, setFilter] = useState("All projects"),
     [error, setError] = useState(""),
-    [selected, setSelected] = useState<Project | null>(null),
     [presentationProject, setPresentationProject] = useState<string | null>(
       null,
     ),
@@ -166,14 +164,28 @@ export default function Atlas() {
       if (!r.ok) throw Error(body.error || "Projects could not be loaded.");
       setAccess(body.access || null);
       setProjects(body.projects);
-      setSelected((prev) =>
-        prev ? body.projects.find((p) => p.id === prev.id) || null : null,
-      );
-      const requested = new URLSearchParams(location.search).get("project");
+      const url = new URL(location.href);
+      const requested = url.searchParams.get("project");
       if (requested) {
-        const found = body.projects.find((p) => p.id === requested);
-        if (found) setSelected(found);
-        else setError("That project is unavailable or you do not have access.");
+        const found = (body.projects.length ? body.projects : examples).find(
+          (p) => p.id === requested,
+        );
+        if (found) {
+          const destination = url.searchParams.has("work")
+            ? workTool(url.searchParams.get("work"))
+            : "list";
+          setView("manage");
+          setTool(destination);
+          workspaceRef.current = found.id;
+          setWorkspaceId(found.id);
+          url.searchParams.set("view", "manage");
+          url.searchParams.set("workspace", found.id);
+          url.searchParams.set("tool", destination);
+          for (const key of ["project", "work", "scope"])
+            url.searchParams.delete(key);
+          history.replaceState(null, "", url);
+        } else
+          setError("That project is unavailable or you do not have access.");
       }
       setDemo(body.projects.length === 0);
     } catch (e) {
@@ -212,7 +224,6 @@ export default function Atlas() {
       setTool(workTool(params.get("tool")));
       workspaceRef.current = params.get("workspace") || "";
       setWorkspaceId(workspaceRef.current);
-      setSelected(null);
       setFlight(null);
       setMenuOpen(false);
       void load();
@@ -240,16 +251,17 @@ export default function Atlas() {
       requestAnimationFrame(() => tabRefs.current[destination]?.focus());
   }
   function chooseWorkspace(id: string) {
-    workspaceRef.current = id;
-    setWorkspaceId(id);
-    const url = new URL(location.href);
-    url.searchParams.set("workspace", id);
-    history.replaceState(null, "", url);
+    navigate("manage", tool === "projects" ? "overview" : tool, id);
   }
-  function navigate(next: View, nextTool?: WorkTool) {
+  function navigate(next: View, nextTool?: WorkTool, projectId?: string) {
     setMenuOpen(false);
-    setSelected(null);
-    if (next === view && !flight && (!nextTool || nextTool === tool)) return;
+    if (
+      next === view &&
+      !flight &&
+      (!nextTool || nextTool === tool) &&
+      (!projectId || projectId === workspaceId)
+    )
+      return;
     const portfolio = (value: View): value is PortfolioView =>
       value === "dashboard" || value === "globe";
     if (portfolio(next)) lastPortfolioView.current = next;
@@ -284,21 +296,24 @@ export default function Atlas() {
       const destination = nextTool || tool;
       setTool(destination);
       params.set("tool", destination);
-      const id = workspaceRef.current || allData.find((p) => !p.archived)?.id;
-      if (id) {
-        params.set("workspace", id);
-        workspaceRef.current = id;
-        setWorkspaceId(id);
-      }
-      params.set(
-        "scope",
-        new URLSearchParams(location.search).get("scope") || "projects",
-      );
+      const id =
+        destination === "projects"
+          ? ""
+          : (projectId ?? (view === "manage" ? workspaceRef.current : ""));
+      workspaceRef.current = id;
+      setWorkspaceId(id);
+      if (id) params.set("workspace", id);
+    } else {
+      workspaceRef.current = "";
+      setWorkspaceId("");
     }
     history.pushState(null, "", "/?" + params);
     setFlightTarget(null);
     window.scrollTo({
-      top: next === "dashboard" && scale === 0 ? dashboardScroll.current : 0,
+      top:
+        next === "dashboard" && (scale === 0 || view !== "globe")
+          ? dashboardScroll.current
+          : 0,
       behavior: "instant",
     });
   }
@@ -380,7 +395,6 @@ export default function Atlas() {
       setDemo(false);
       if (!existing) setCreating(false);
       if (existing && editing?.id === existing.id) setEditing(null);
-      if (existing && selected?.id === existing.id) setSelected(body.project);
       return body.project;
     } catch (e) {
       setError((e as Error).message);
@@ -404,20 +418,10 @@ export default function Atlas() {
     });
     if (project) openProject(project);
   }
-  function closeProject() {
-    setSelected(null);
-    const url = new URL(location.href);
-    for (const key of ["project", "work", "form"]) url.searchParams.delete(key);
-    history.replaceState(null, "", url);
-  }
   function openProject(p: Project) {
-    const url = new URL(location.href);
-    url.searchParams.set("project", p.id);
-    url.searchParams.delete("work");
-    url.searchParams.delete("form");
-    history.replaceState(null, "", url);
-    setSelected(p);
+    if (!loaded) return;
     setError("");
+    navigate("manage", "overview", p.id);
   }
   const date = loaded
     ? new Intl.DateTimeFormat("en", {
@@ -452,6 +456,11 @@ export default function Atlas() {
             tool={tool}
             loaded={loaded}
             access={access}
+            project={
+              loaded && view === "manage" && tool !== "projects"
+                ? allData.find((p) => p.id === workspaceId)
+                : undefined
+            }
             navigate={navigate}
           />
           <div className="sidebar-bottom">
@@ -564,15 +573,19 @@ export default function Atlas() {
               <CommandMenu
                 projects={allData}
                 onOpen={openProject}
-                disabled={
-                  !loaded || !!flight || !!selected || creating || settingsOpen
-                }
+                disabled={!loaded || !!flight || creating || settingsOpen}
                 commands={[
-                  ...workTools.map((t) => ({
-                    id: "work-" + t.id,
-                    label: t.group + ": " + t.title,
-                    run: () => navigate("manage", t.id),
-                  })),
+                  ...workTools
+                    .filter((t) =>
+                      view === "manage" && workspaceId
+                        ? t.id !== "projects"
+                        : t.id === "projects",
+                    )
+                    .map((t) => ({
+                      id: "work-" + t.id,
+                      label: t.group + ": " + t.title,
+                      run: () => navigate("manage", t.id),
+                    })),
                   {
                     id: "help",
                     label: "Help & getting started",
@@ -731,7 +744,15 @@ export default function Atlas() {
                 canCreate={!!access?.permissions.includes("projects.create")}
                 onProject={chooseWorkspace}
                 onTool={(t) => navigate("manage", t)}
-                onOpen={openProject}
+                onBack={() => navigate("dashboard")}
+                onEdit={(p) => {
+                  setError("");
+                  setEditing(p);
+                }}
+                onGlobe={(p) => {
+                  navigate("globe");
+                  setFlightTarget(p);
+                }}
                 onNew={() => {
                   setError("");
                   setCreating(true);
@@ -891,34 +912,13 @@ export default function Atlas() {
                     </button>
                   </div>
                 )}
-                <div
-                  className="workspace-shortcuts"
-                  aria-label="Work management shortcuts"
-                >
-                  <button onClick={() => navigate("manage", "kanban")}>
-                    <Layers3 size={20} />
-                    <span>
-                      <strong>Kanban board</strong>
-                      <small>Projects & tasks in motion</small>
-                    </span>
-                    <ArrowUpRight size={16} />
-                  </button>
-                  <button onClick={() => navigate("manage", "CEO")}>
-                    <Target size={20} />
-                    <span>
-                      <strong>Think like a leader</strong>
-                      <small>CEO · VP · Director</small>
-                    </span>
-                    <ArrowUpRight size={16} />
-                  </button>
-                  <button onClick={() => navigate("manage", "rules")}>
-                    <Settings2 size={20} />
-                    <span>
-                      <strong>Work tools</strong>
-                      <small>Automations, reports & more</small>
-                    </span>
-                    <ArrowUpRight size={16} />
-                  </button>
+                <div className="project-navigation-hint">
+                  <Folder size={19} />
+                  <span>
+                    <strong>One workspace for every project.</strong> Select a
+                    project below to open its overview, tasks, Kanban,
+                    leadership reviews and work tools.
+                  </span>
                 </div>
                 {settings.dashboard.showMetrics && (
                   <section className="metrics" aria-label="Project overview">
@@ -1060,6 +1060,7 @@ export default function Atlas() {
                           <button
                             key={p.id}
                             className="project-card"
+                            disabled={!loaded}
                             onClick={() => openProject(p)}
                           >
                             <div className="project-card-top">
@@ -1247,33 +1248,6 @@ export default function Atlas() {
           storageError={storageError}
           onReturnFocus={() => settingsTrigger.current?.focus()}
         />
-        {selected && (
-          <ProjectWorkspace
-            onReload={() => void load()}
-            onPresent={() => {
-              setPresentationProject(selected.id);
-              closeProject();
-              navigate("presentations");
-            }}
-            key={selected.id}
-            project={selected}
-            demo={demo}
-            busy={saving}
-            error={error}
-            onClose={closeProject}
-            onSave={save}
-            onEdit={() => {
-              setEditing(selected);
-              closeProject();
-            }}
-            onGlobe={() => {
-              const p = selected;
-              closeProject();
-              navigate("globe");
-              setFlightTarget(p);
-            }}
-          />
-        )}
         <ProjectForm
           open={creating || !!editing}
           project={editing}
@@ -1283,7 +1257,11 @@ export default function Atlas() {
             setCreating(false);
             setEditing(null);
           }}
-          onSave={save}
+          onSave={async (fields, existing) => {
+            const project = await save(fields, existing);
+            if (project && !existing) openProject(project);
+            return project;
+          }}
         />
         {!loaded && (
           <span className="loading-indicator">
@@ -1310,6 +1288,11 @@ export default function Atlas() {
             tool={tool}
             loaded={loaded}
             access={access}
+            project={
+              loaded && view === "manage" && tool !== "projects"
+                ? allData.find((p) => p.id === workspaceId)
+                : undefined
+            }
             navigate={navigate}
           />
         </DialogContent>

@@ -80,12 +80,14 @@ export default function HelpCenter({
               Create a project with the top <strong>New project</strong> button.
             </li>
             <li>
-              Open <strong>Project management → Tasks & subtasks</strong> and
-              capture the next actions.
+              Select a project in the portfolio. Its menus appear in the
+              sidebar; open{" "}
+              <strong>Project management → Tasks & subtasks</strong>.
             </li>
             <li>
-              Move work through the <strong>Kanban board</strong>, then open a{" "}
-              <strong>Leadership</strong> review.
+              Move its tasks through the <strong>Kanban board</strong>, then
+              open a <strong>Leadership</strong> review. Use{" "}
+              <strong>Back to all projects</strong> to return to the portfolio.
             </li>
           </ol>
           <p>
@@ -96,7 +98,8 @@ export default function HelpCenter({
         </div>
       )}
       <p className="help-result-count" role="status">
-        {results.length} {results.length === 1 ? "guide" : "guides"}{query ? ` matching “${query}”` : " to explore"}
+        {results.length} {results.length === 1 ? "guide" : "guides"}
+        {query ? ` matching “${query}”` : " to explore"}
       </p>
       <div className="help-guides">
         {results.map((g) => (

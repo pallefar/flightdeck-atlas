@@ -310,7 +310,8 @@ test("table, timeline, leadership actions and time correction work on desktop an
   page.on("pageerror", (e) => errors.push(e.message));
   try {
     await page.goto(`/?project=${p.id}`);
-    const dialog = page.getByRole("dialog");
+    const dialog = page.locator(".management-page");
+    const nav = page.getByRole("navigation");
     await expect(dialog).toBeVisible();
     await dialog
       .getByRole("button", { name: "Task table", exact: true })
@@ -368,7 +369,7 @@ test("table, timeline, leadership actions and time correction work on desktop an
     p = (await (await api.get(`/api/projects/${p.id}`)).json()).project;
     expect(p.tasks[0].timeEntries).toHaveLength(1);
     expect(p.tasks[0].timeEntries[0].minutes).toBe(40);
-    await dialog
+    await nav
       .getByRole("button", { name: "Delivery & budget", exact: true })
       .click();
     await dialog.getByLabel("Approved budget", { exact: true }).fill("5000");
@@ -381,8 +382,8 @@ test("table, timeline, leadership actions and time correction work on desktop an
     await expect(
       dialog.getByRole("button", { name: "Save budget", exact: true }),
     ).toBeDisabled();
-    await dialog
-      .getByRole("button", { name: "Think like a leader", exact: true })
+    await nav
+      .getByRole("button", { name: "Think like a CEO", exact: true })
       .click();
     await expect(
       dialog.getByText("Intervention to consider", { exact: true }),
@@ -422,9 +423,10 @@ test("table, timeline, leadership actions and time correction work on desktop an
       await dialog.evaluate((e) => e.scrollWidth <= e.clientWidth + 1),
     ).toBe(true);
     await page.goto(`/?project=${p.id}`);
+    await page.getByRole("button", { name: "Open navigation" }).click();
     await page
       .getByRole("dialog")
-      .getByRole("button", { name: "Think like a leader", exact: true })
+      .getByRole("button", { name: "Think like a CEO", exact: true })
       .click();
     await expect(
       page.getByText("Saved reviews · 1", { exact: true }),

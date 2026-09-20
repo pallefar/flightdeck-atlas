@@ -379,10 +379,10 @@ test("work studio UI saves fields, reports, shared notes and works on mobile", a
 }) => {
   const p = await create(page);
   await page.goto(`/?project=${p.id}`);
-  const dialog = page.getByRole("dialog");
-  await dialog
-    .getByRole("button", { name: "Work studio", exact: true })
-    .click();
+  const dialog = page.locator(".management-page");
+  const nav = page.getByRole("navigation");
+  await nav.getByRole("button", { name: "Work tools", exact: true }).click();
+  await nav.getByRole("button", { name: "Custom fields", exact: true }).click();
   await dialog.getByLabel("Field name", { exact: true }).fill("Impact");
   await dialog
     .getByRole("combobox", { name: "Field type", exact: true })
@@ -393,14 +393,16 @@ test("work studio UI saves fields, reports, shared notes and works on mobile", a
   await expect(
     dialog.getByText("number · [impact]", { exact: true }),
   ).toBeVisible();
-  await dialog.getByRole("tab", { name: "Reports", exact: true }).click();
+  await nav
+    .getByRole("button", { name: "Report builder", exact: true })
+    .click();
   await dialog.getByLabel("Widget name", { exact: true }).fill("Open work");
   await dialog
     .getByRole("combobox", { name: "Calculation", exact: true })
     .selectOption("count");
   await dialog.getByRole("button", { name: "Add dashboard widget" }).click();
   await expect(dialog.locator(".report-widget")).toHaveCount(1);
-  await dialog.getByRole("tab", { name: "Live notes", exact: true }).click();
+  await nav.getByRole("button", { name: "Live notes", exact: true }).click();
   await dialog
     .getByLabel("Block title", { exact: true })
     .fill("Launch context");
@@ -414,9 +416,11 @@ test("work studio UI saves fields, reports, shared notes and works on mobile", a
     dialog.getByText("A shared working note.", { exact: true }),
   ).toBeVisible();
   await page.setViewportSize({ width: 375, height: 900 });
-  await dialog
-    .getByRole("combobox", { name: "Work studio tool", exact: true })
-    .selectOption("schedule");
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Scheduling", exact: true })
+    .click();
   await expect(
     dialog.getByRole("heading", { name: "See the chain. Protect the finish." }),
   ).toBeVisible();

@@ -13,13 +13,16 @@ import {
 } from "lucide-react";
 import { workTools, type View, type WorkTool } from "@/lib/navigation";
 import type { AccessProfile } from "@/lib/access-policy";
+import type { Project } from "@/lib/projects";
 export default function AtlasNavigation({
   view,
   tool,
   loaded,
   access,
   navigate,
+  project,
 }: {
+  project?: Project;
   view: View;
   tool: WorkTool;
   loaded: boolean;
@@ -86,27 +89,40 @@ export default function AtlasNavigation({
     );
   }
   const groups = [
-    {
-      name: "Project management",
-      icon: FolderKanban,
-      content: workTools
-        .filter((t) => t.group === "Project management")
-        .map((t) => item(t.title, "manage", t.id)),
-    },
-    {
-      name: "Leadership",
-      icon: BriefcaseBusiness,
-      content: workTools
-        .filter((t) => t.group === "Leadership")
-        .map((t) => item(t.title, "manage", t.id)),
-    },
-    {
-      name: "Work tools",
-      icon: Wrench,
-      content: workTools
-        .filter((t) => t.group === "Work tools")
-        .map((t) => item(t.title, "manage", t.id)),
-    },
+    ...(project
+      ? [
+          {
+            name: "Project",
+            icon: FolderKanban,
+            content: workTools
+              .filter((t) => t.group === "Project")
+              .map((t) => item(t.title, "manage", t.id)),
+          },
+          {
+            name: "Project management",
+            icon: FolderKanban,
+            content: workTools
+              .filter(
+                (t) => t.group === "Project management" && t.id !== "projects",
+              )
+              .map((t) => item(t.title, "manage", t.id)),
+          },
+          {
+            name: "Leadership",
+            icon: BriefcaseBusiness,
+            content: workTools
+              .filter((t) => t.group === "Leadership")
+              .map((t) => item(t.title, "manage", t.id)),
+          },
+          {
+            name: "Work tools",
+            icon: Wrench,
+            content: workTools
+              .filter((t) => t.group === "Work tools")
+              .map((t) => item(t.title, "manage", t.id)),
+          },
+        ]
+      : []),
     {
       name: "Team & personal",
       icon: Users,
@@ -153,6 +169,28 @@ export default function AtlasNavigation({
         <Layers3 size={17} />
         {item("Portfolio dashboard", "dashboard", undefined, "Portfolio")}
       </div>
+      {project ? (
+        <div className="nav-project-identity">
+          <span className="eyebrow">SELECTED PROJECT</span>
+          <strong>{project.name}</strong>
+          <span>{project.status}</span>
+          <button onClick={() => navigate("manage", "projects")}>
+            Switch project
+          </button>
+        </div>
+      ) : (
+        <div className="nav-project-entry">
+          <button
+            className="nav-item"
+            disabled={!loaded}
+            onClick={() => navigate("manage", "projects")}
+          >
+            <FolderKanban size={16} />
+            <span>Choose a project</span>
+          </button>
+          <p>Open a project for tasks, planning, leadership and work tools.</p>
+        </div>
+      )}
       {groups.map((g) => (
         <section className="navigation-group" key={g.name}>
           <button

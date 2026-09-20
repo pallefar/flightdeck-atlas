@@ -61,3 +61,10 @@ Project management includes all projects, project/task Kanban, task list and sub
 The selected working project, tool and Kanban scope survive sign-in and reload. Back/Forward traverses tool destinations. Task filters and editor state survive task-layout switches. Board drag-and-drop and status menus use the same authorized, revision-checked project writes, with read-only and archived projects protected. Drag operations retain their starting revision, and successful moves receive an accessible status announcement.
 
 Help supports keyword search, real destination links, a three-step introduction and contextual explanations that open on hover, focus or tap and dismiss with Escape.
+
+
+## Project-focused navigation refinement
+
+The portfolio remains the cross-project overview. Selecting a project opens its full-page overview and reveals Project, Project management, Leadership and Work tools submenus under its name. Those menus disappear when returning to the portfolio. Tools opened without a project show an explicit project chooser; unavailable project IDs never fall back to another project.
+
+Project overview, updates, collaboration and presentations now sit within that project workspace. Task and goal drafts survive moves between its tools. Kanban always displays that project’s tasks; the portfolio retains its project-status board. Resource planning is constrained to the selected project, and saved presentations are filtered by project before pagination. Shared task/form/timer links normalize to the new workspace while retaining form context. Working-project switches and browser Back/Forward retain explicit project identity.

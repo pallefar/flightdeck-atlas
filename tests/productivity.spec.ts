@@ -97,7 +97,10 @@ test("task workflow, estimates, checklists, goals and KPI measurements persist t
       .locator(".project-card")
       .filter({ hasText: "Productivity QA" })
       .click();
-    await page.getByRole("button", { name: "Task board", exact: true }).click();
+    await page
+      .getByRole("navigation")
+      .getByRole("button", { name: "Kanban board", exact: true })
+      .click();
     await page
       .getByLabel("Workflow for Prepare decision")
       .selectOption("blocked");
@@ -113,7 +116,10 @@ test("task workflow, estimates, checklists, goals and KPI measurements persist t
     await page
       .getByRole("button", { name: "Strategy & KPIs", exact: true })
       .click();
-    await page.getByRole("button", { name: /Tasks ·/ }).click();
+    await page
+      .getByRole("navigation")
+      .getByRole("button", { name: "Tasks & subtasks", exact: true })
+      .click();
     await expect(page.getByLabel("Task description")).toHaveValue(
       "Agree a measurable outcome with Quality.",
     );
@@ -159,7 +165,13 @@ test("task workflow, estimates, checklists, goals and KPI measurements persist t
       page.getByRole("progressbar", { name: "Lead time target progress" }),
     ).toHaveAttribute("aria-valuenow", "50");
     await page.reload();
-    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Strategy & KPIs", exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("navigation")
+      .getByRole("button", { name: "Tasks & subtasks", exact: true })
+      .click();
     await expect(page.getByLabel("Workflow for Prepare decision")).toHaveValue(
       "blocked",
     );

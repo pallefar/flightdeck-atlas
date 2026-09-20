@@ -331,6 +331,7 @@ export default function WorkStudio(
         ) : tab === "resources" ? (
           <ResourcePlanner
             projects={[props.project]}
+            projectOnly
             onSave={props.onSave}
             readOnly={props.readOnly}
           />
@@ -2046,7 +2047,9 @@ export function ResourcePlanner({
   projects,
   onSave,
   readOnly = false,
+  projectOnly = false,
 }: {
+  projectOnly?: boolean;
   projects: Project[];
   onSave: (f: ProjectFields, p?: Project) => Promise<Project | null>;
   readOnly?: boolean;
@@ -2061,13 +2064,16 @@ export function ResourcePlanner({
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
   useEffect(() => {
+    if (projectOnly) return;
     fetch("/api/projects")
       .then((r) => r.json() as Promise<{ projects: Project[] }>)
       .then((b) => setAll(b.projects || []))
       .catch(() => {});
-  }, [projects.map((p) => `${p.id}:${p.revision}`).join(",")]);
+  }, [projectOnly, projects.map((p) => `${p.id}:${p.revision}`).join(",")]);
   const portfolio = [
-      ...all.filter((p) => !projects.some((x) => x.id === p.id)),
+      ...(projectOnly
+        ? []
+        : all.filter((p) => !projects.some((x) => x.id === p.id))),
       ...projects,
     ].filter((p) => !p.archived),
     rows = portfolio.flatMap((p) =>
@@ -2076,7 +2082,7 @@ export function ResourcePlanner({
     people = [
       ...new Set([
         ...rows.map(({ t }) => t.assigneeEmail || t.assignee || "Unassigned"),
-        ...(w.data?.capacity || []).map((p) => p.email),
+        ...(projectOnly ? [] : (w.data?.capacity || []).map((p) => p.email)),
       ]),
     ].sort();
   const selectedRow = rows.find(({ p, t }) => `${p.id}:${t.id}` === selected),
@@ -2132,8 +2138,10 @@ export function ResourcePlanner({
         <h3>Balance the next few weeks.</h3>
         <p>
           Estimated effort spreads across scheduled weekdays. Shared capacity
-          accounts for leave; unavailable capacity stays unknown. Only projects
-          you can access are included.
+          accounts for leave; unavailable capacity stays unknown.{" "}
+          {projectOnly
+            ? "Only this project’s tasks are included."
+            : "Only projects you can access are included."}
         </p>
       </div>
       <div className="work-inline">

@@ -31,7 +31,11 @@ export default function ProjectWorkspace({
   onGlobe,
   onReload,
   onPresent,
+  embedded = false,
+  section,
 }: {
+  embedded?: boolean;
+  section?: "overview" | "updates" | "collaboration";
   project: Project;
   demo: boolean;
   busy: boolean;
@@ -57,29 +61,22 @@ export default function ProjectWorkspace({
     | "collaboration"
     | "leadership"
     | "delivery"
-  >(() =>
-    typeof window !== "undefined" &&
-    new URLSearchParams(window.location.search).has("work")
-      ? "studio"
-      : "tasks",
+  >(
+    () =>
+      section ||
+      (typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).has("work")
+        ? "studio"
+        : "tasks"),
   );
   const [note, setNote] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     dialogRef.current?.scrollTo({ top: 0, behavior: "instant" });
   }, [tab]);
-  return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open && !busy) onClose();
-      }}
-    >
-      <DialogContent
-        ref={dialogRef}
-        className={`project-dialog workspace-dialog ${tab === "studio" ? "studio-dialog" : ""}`}
-        showCloseButton={false}
-      >
+  const content = (
+    <>
+      {!embedded && (
         <div className="workspace-sticky-heading">
           <DialogTitle>{project.name}</DialogTitle>
           <button aria-label="Close" disabled={busy} onClick={onClose}>
@@ -87,80 +84,86 @@ export default function ProjectWorkspace({
             <span>Close</span>
           </button>
         </div>
+      )}
+      {embedded ? (
+        <p className="hub-muted">
+          {project.description || "Project workspace"}
+        </p>
+      ) : (
         <DialogDescription className={tab === "studio" ? "sr-only" : ""}>
           {project.description || "Project workspace"}
         </DialogDescription>
-        {demo && (
-          <p className="demo-detail">
-            Example project · Create your own project to save changes.
-          </p>
+      )}
+      {demo && (
+        <p className="demo-detail">
+          Example project · Create your own project to save changes.
+        </p>
+      )}
+      {!demo && readOnly && (
+        <p className="hub-muted">
+          Your role provides view access to this project. Editing requires
+          permission from the Super Admin.
+        </p>
+      )}
+      {project.archived && (
+        <p className="demo-detail">
+          Archived · Restore this project to put it back into your action queue.
+        </p>
+      )}
+      {!demo && <LiveWorkStatus project={project} onReload={onReload} />}
+      <div className="workspace-meta">
+        <span
+          className={`status ${project.status.toLowerCase().replaceAll(" ", "-")}`}
+        >
+          {project.status}
+        </span>
+        <span>{project.functionArea || project.category}</span>
+        <span>
+          {project.dueDate ? `Target ${project.dueDate}` : "No target date"}
+        </span>
+        {project.priority === "High" && (
+          <span className="priority-high">High priority</span>
         )}
-        {!demo && readOnly && (
-          <p className="hub-muted">
-            Your role provides view access to this project. Editing requires
-            permission from the Super Admin.
-          </p>
-        )}
-        {project.archived && (
-          <p className="demo-detail">
-            Archived · Restore this project to put it back into your action
-            queue.
-          </p>
-        )}
-        {!demo && <LiveWorkStatus project={project} onReload={onReload} />}
-        <div className="workspace-meta">
-          <span
-            className={`status ${project.status.toLowerCase().replaceAll(" ", "-")}`}
-          >
-            {project.status}
-          </span>
-          <span>{project.functionArea || project.category}</span>
-          <span>
-            {project.dueDate ? `Target ${project.dueDate}` : "No target date"}
-          </span>
-          {project.priority === "High" && (
-            <span className="priority-high">High priority</span>
-          )}
-        </div>
-        {tab !== "studio" && (
-          <>
-            <div className="section-heading">
-              <h3>Project progress</h3>
-              <span>{progress(project)}% complete</span>
-            </div>
-            <Progress
-              aria-label="Project progress"
-              value={progress(project)}
-              className={`progress-bar ${project.color}`}
-            />
-            <div className="workspace-kpis">
-              <span>
-                <strong>
-                  {project.tasks.filter((t) => !t.archived && !t.done).length}
-                </strong>{" "}
-                open tasks
-              </span>
-              <span>
-                <strong>
-                  {project.tasks.filter((t) => taskBlocked(t, project)).length}
-                </strong>{" "}
-                blocked
-              </span>
-              <span>
-                <strong>
-                  {project.tasks
-                    .filter((t) => !t.archived && !t.done)
-                    .reduce((n, t) => n + (t.estimateMinutes || 0), 0)}
-                </strong>{" "}
-                estimated min left
-              </span>
-              <span>
-                <strong>{project.objectives?.length || 0}</strong> strategy
-                goals
-              </span>
-            </div>
-          </>
-        )}
+      </div>
+      {tab !== "studio" && (!embedded || tab === "overview") && (
+        <>
+          <div className="section-heading">
+            <h3>Project progress</h3>
+            <span>{progress(project)}% complete</span>
+          </div>
+          <Progress
+            aria-label="Project progress"
+            value={progress(project)}
+            className={`progress-bar ${project.color}`}
+          />
+          <div className="workspace-kpis">
+            <span>
+              <strong>
+                {project.tasks.filter((t) => !t.archived && !t.done).length}
+              </strong>{" "}
+              open tasks
+            </span>
+            <span>
+              <strong>
+                {project.tasks.filter((t) => taskBlocked(t, project)).length}
+              </strong>{" "}
+              blocked
+            </span>
+            <span>
+              <strong>
+                {project.tasks
+                  .filter((t) => !t.archived && !t.done)
+                  .reduce((n, t) => n + (t.estimateMinutes || 0), 0)}
+              </strong>{" "}
+              estimated min left
+            </span>
+            <span>
+              <strong>{project.objectives?.length || 0}</strong> strategy goals
+            </span>
+          </div>
+        </>
+      )}
+      {!embedded && (
         <div
           className="workspace-tabs filter-tabs"
           aria-label="Project sections"
@@ -210,199 +213,224 @@ export default function ProjectWorkspace({
             </button>
           ))}
         </div>
-        {tab === "overview" ? (
-          <div className="project-overview">
+      )}
+      {tab === "overview" ? (
+        <div className="project-overview">
+          <div>
+            <h3>Outcome & direction</h3>{" "}
+            {(project.nextAction || project.blocker || project.benefit) && (
+              <div className="project-context">
+                {project.nextAction && (
+                  <p>
+                    <strong>Next action</strong>
+                    {project.nextAction}
+                  </p>
+                )}
+                {project.blocker && (
+                  <p className="attention">
+                    <strong>Blocker</strong>
+                    {project.blocker}
+                  </p>
+                )}
+                {project.benefit && (
+                  <p>
+                    <strong>Success measure</strong>
+                    {project.benefit}
+                  </p>
+                )}
+              </div>
+            )}
+            <p className="hub-muted">
+              {!project.nextAction && !project.blocker && !project.benefit
+                ? "Set a next action and success measure in Edit project."
+                : ""}
+            </p>
+          </div>
+          <dl>
             <div>
-              <h3>Outcome & direction</h3>{" "}
-              {(project.nextAction || project.blocker || project.benefit) && (
-                <div className="project-context">
-                  {project.nextAction && (
-                    <p>
-                      <strong>Next action</strong>
-                      {project.nextAction}
-                    </p>
-                  )}
-                  {project.blocker && (
-                    <p className="attention">
-                      <strong>Blocker</strong>
-                      {project.blocker}
-                    </p>
-                  )}
-                  {project.benefit && (
-                    <p>
-                      <strong>Success measure</strong>
-                      {project.benefit}
-                    </p>
-                  )}
-                </div>
-              )}
-              <p className="hub-muted">
-                {!project.nextAction && !project.blocker && !project.benefit
-                  ? "Set a next action and success measure in Edit project."
-                  : ""}
-              </p>
+              <dt>Sponsor</dt>
+              <dd>{project.sponsor || "Not assigned"}</dd>
             </div>
-            <dl>
-              <div>
-                <dt>Sponsor</dt>
-                <dd>{project.sponsor || "Not assigned"}</dd>
-              </div>
-              <div>
-                <dt>Location</dt>
-                <dd>{project.location || "Not set"}</dd>
-              </div>
-              <div>
-                <dt>Onboarding</dt>
-                <dd>{project.onboardingStage || "Discovery"}</dd>
-              </div>
-              <div>
-                <dt>Last update</dt>
-                <dd>{new Date(project.updatedAt).toLocaleDateString()}</dd>
-              </div>
-            </dl>
-          </div>
-        ) : tab !== "updates" ? null : (
-          <div className="workspace-updates">
-            {!readOnly && (
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  if (!note.trim()) return;
-                  const result = await onSave(project, project, note.trim());
-                  if (result) setNote("");
-                }}
-              >
-                <Textarea
-                  disabled={busy}
-                  aria-label="Project update"
-                  maxLength={1000}
-                  required
-                  placeholder="What changed? Capture a decision, result, or follow-up."
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                />
-                <Button type="submit" disabled={busy || !note.trim()}>
-                  Record update
-                </Button>
-              </form>
-            )}
-            {[...(project.activity || [])].reverse().map((e) => (
-              <article className="project-update" key={e.id}>
-                <p>{e.text}</p>
-                <time>{new Date(e.at).toLocaleString()}</time>
-              </article>
-            ))}
-            {!project.activity?.length && (
-              <p className="hub-muted">
-                Updates will appear here as you work. Earlier activity has not
-                been backfilled.
-              </p>
-            )}
-          </div>
-        )}
-        <div hidden={tab !== "tasks"}>
-          <TaskWorkbench
-            project={project}
-            readOnly={readOnly}
-            busy={busy}
-            onSave={onSave}
-            onReload={onReload}
-          />
+            <div>
+              <dt>Location</dt>
+              <dd>{project.location || "Not set"}</dd>
+            </div>
+            <div>
+              <dt>Onboarding</dt>
+              <dd>{project.onboardingStage || "Discovery"}</dd>
+            </div>
+            <div>
+              <dt>Last update</dt>
+              <dd>{new Date(project.updatedAt).toLocaleDateString()}</dd>
+            </div>
+          </dl>
         </div>
-        <div hidden={tab !== "strategy"}>
-          <ProjectStrategy
-            project={project}
-            readOnly={readOnly}
-            busy={busy}
-            onSave={onSave}
-          />
-        </div>
-        {tab === "collaboration" && (
-          <ProjectCollaboration
-            project={project}
-            demo={demo}
-            onSave={onSave}
-            onReload={onReload}
-          />
-        )}
-        {tab === "leadership" && (
-          <LeadershipReview
-            project={project}
-            readOnly={readOnly}
-            busy={busy}
-            onSave={onSave}
-            onSection={setTab}
-          />
-        )}
-        {tab === "studio" && (
-          <WorkStudio
-            project={project}
-            readOnly={readOnly}
-            busy={busy}
-            onSave={onSave}
-            onReload={onReload}
-          />
-        )}
-        {tab === "delivery" && (
-          <ProjectDelivery
-            project={project}
-            readOnly={readOnly}
-            busy={busy}
-            onSave={onSave}
-          />
-        )}
-        {error && (
-          <p role="alert" className="form-error">
-            {error}
-          </p>
-        )}
-        <div className="detail-actions">
-          {!demo && (
-            <Button variant="outline" onClick={onPresent}>
-              Create presentation
-            </Button>
-          )}
-          {project.latitude !== null && (
-            <Button variant="outline" onClick={onGlobe}>
-              <Globe2 size={16} /> Find on globe
-            </Button>
-          )}
+      ) : tab !== "updates" ? null : (
+        <div className="workspace-updates">
           {!readOnly && (
-            <>
-              <Button onClick={onEdit}>Edit project</Button>
-              <Button
-                variant="outline"
-                onClick={async () => {
-                  try {
-                    const latest = await freshProject(project.id);
-                    downloadText(
-                      `flightdeck-onboarding-${latest.name.replace(/[^a-z0-9]+/gi, "-")}.md`,
-                      onboardingPack(latest),
-                    );
-                  } catch (e) {
-                    alert((e as Error).message);
-                  }
-                }}
-              >
-                <Download size={15} /> Onboarding pack
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!note.trim()) return;
+                const result = await onSave(project, project, note.trim());
+                if (result) setNote("");
+              }}
+            >
+              <Textarea
+                disabled={busy}
+                aria-label="Project update"
+                maxLength={1000}
+                required
+                placeholder="What changed? Capture a decision, result, or follow-up."
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+              />
+              <Button type="submit" disabled={busy || !note.trim()}>
+                Record update
               </Button>
-              <button
-                className="archive-button"
-                disabled={busy || project.canArchive === false}
-                onClick={async () => {
-                  const result = await onSave(
-                    { ...project, archived: !project.archived },
-                    project,
-                  );
-                  if (result) onClose();
-                }}
-              >
-                {project.archived ? <Undo2 size={15} /> : <Archive size={15} />}
-                {project.archived ? "Restore project" : "Archive project"}
-              </button>
-            </>
+            </form>
+          )}
+          {[...(project.activity || [])].reverse().map((e) => (
+            <article className="project-update" key={e.id}>
+              <p>{e.text}</p>
+              <time>{new Date(e.at).toLocaleString()}</time>
+            </article>
+          ))}
+          {!project.activity?.length && (
+            <p className="hub-muted">
+              Updates will appear here as you work. Earlier activity has not
+              been backfilled.
+            </p>
           )}
         </div>
+      )}
+      {!embedded && (
+        <>
+          <div hidden={tab !== "tasks"}>
+            <TaskWorkbench
+              project={project}
+              readOnly={readOnly}
+              busy={busy}
+              onSave={onSave}
+              onReload={onReload}
+            />
+          </div>
+          <div hidden={tab !== "strategy"}>
+            <ProjectStrategy
+              project={project}
+              readOnly={readOnly}
+              busy={busy}
+              onSave={onSave}
+            />
+          </div>
+        </>
+      )}
+      {tab === "collaboration" && (
+        <ProjectCollaboration
+          project={project}
+          demo={demo}
+          onSave={onSave}
+          onReload={onReload}
+        />
+      )}
+      {tab === "leadership" && (
+        <LeadershipReview
+          project={project}
+          readOnly={readOnly}
+          busy={busy}
+          onSave={onSave}
+          onSection={setTab}
+        />
+      )}
+      {tab === "studio" && (
+        <WorkStudio
+          project={project}
+          readOnly={readOnly}
+          busy={busy}
+          onSave={onSave}
+          onReload={onReload}
+        />
+      )}
+      {tab === "delivery" && (
+        <ProjectDelivery
+          project={project}
+          readOnly={readOnly}
+          busy={busy}
+          onSave={onSave}
+        />
+      )}
+      {error && (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      )}
+      <div className="detail-actions">
+        {!demo && (
+          <Button variant="outline" onClick={onPresent}>
+            Create presentation
+          </Button>
+        )}
+        {project.latitude !== null && (
+          <Button variant="outline" onClick={onGlobe}>
+            <Globe2 size={16} /> Find on globe
+          </Button>
+        )}
+        {!readOnly && (
+          <>
+            <Button onClick={onEdit}>Edit project</Button>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                try {
+                  const latest = await freshProject(project.id);
+                  downloadText(
+                    `flightdeck-onboarding-${latest.name.replace(/[^a-z0-9]+/gi, "-")}.md`,
+                    onboardingPack(latest),
+                  );
+                } catch (e) {
+                  alert((e as Error).message);
+                }
+              }}
+            >
+              <Download size={15} /> Onboarding pack
+            </Button>
+            <button
+              className="archive-button"
+              disabled={busy || project.canArchive === false}
+              onClick={async () => {
+                const result = await onSave(
+                  { ...project, archived: !project.archived },
+                  project,
+                );
+                if (result) onClose();
+              }}
+            >
+              {project.archived ? <Undo2 size={15} /> : <Archive size={15} />}
+              {project.archived ? "Restore project" : "Archive project"}
+            </button>
+          </>
+        )}
+      </div>
+    </>
+  );
+  if (embedded)
+    return <section className="embedded-project-details">{content}</section>;
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !busy) onClose();
+      }}
+    >
+      <DialogContent
+        ref={dialogRef}
+        className={
+          "project-dialog workspace-dialog " +
+          (tab === "studio" ? "studio-dialog" : "")
+        }
+        showCloseButton={false}
+      >
+        {content}
       </DialogContent>
     </Dialog>
   );

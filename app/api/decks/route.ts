@@ -9,6 +9,7 @@ export async function GET(req: Request) {
   try {
     const query = new URL(req.url).searchParams,
       id = query.get("id"),
+      projectId = query.get("project"),
       offset = Math.max(0, Math.min(100000, Number(query.get("offset")) || 0)),
       db = database(),
       rows = id
@@ -18,13 +19,14 @@ export async function GET(req: Request) {
             .all()
         : await db
             .prepare(
-              "SELECT * FROM atlas_decks WHERE owner_id=? OR json_extract(data,'$.shared')=1 ORDER BY updated_at DESC,id DESC LIMIT 51 OFFSET ?",
+              "SELECT * FROM atlas_decks WHERE (owner_id=? OR json_extract(data,'$.shared')=1) AND (? IS NULL OR EXISTS (SELECT 1 FROM json_each(atlas_decks.data,'$.projectIds') WHERE value=?)) ORDER BY updated_at DESC,id DESC LIMIT 51 OFFSET ?",
             )
-            .bind(a.access.userId, offset)
+            .bind(a.access.userId, projectId, projectId, offset)
             .all(),
       decks = [];
     for (const row of rows.results.slice(0, 50)) {
       const d = deckSchema.parse(JSON.parse(row.data as string));
+      if (projectId && !d.projectIds.includes(projectId)) continue;
       if (row.owner_id !== a.access.userId && !d.shared) continue;
       let permitted = true;
       for (const pid of d.projectIds)

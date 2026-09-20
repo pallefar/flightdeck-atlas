@@ -127,9 +127,12 @@ test("a project action, update, briefing, archive, and restore form one durable 
     .click();
   const id = (await (await created).json()).project.id;
   try {
+    await expect(
+      page.getByRole("heading", { name: "Project overview", exact: true }),
+    ).toBeVisible();
     await page
-      .locator(".project-card")
-      .filter({ hasText: "Action hub QA" })
+      .getByRole("navigation")
+      .getByRole("button", { name: "Tasks & subtasks", exact: true })
       .click();
     await page
       .getByLabel("New task", { exact: true })
@@ -151,9 +154,12 @@ test("a project action, update, briefing, archive, and restore form one durable 
       .getByRole("checkbox", { name: "Agree a measurable outcome" })
       .click();
     await expect(
-      page.getByText("100% complete", { exact: true }),
+      page.locator(".project-identity-banner").getByText(/100% complete/),
     ).toBeVisible();
-    await page.getByRole("button", { name: /Updates ·/ }).click();
+    await page
+      .getByRole("navigation")
+      .getByRole("button", { name: "Project updates", exact: true })
+      .click();
     await expect(
       page.getByText("Task details updated: Agree a measurable outcome", {
         exact: true,
@@ -170,7 +176,9 @@ test("a project action, update, briefing, archive, and restore form one durable 
         exact: true,
       }),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Back to all projects", exact: true })
+      .click();
     await page
       .getByRole("button", { name: "Team & personal", exact: true })
       .click();
@@ -243,12 +251,14 @@ test("consultancy playbook creates a real onboarding project and does not duplic
   const p = (await (await created).json()).project;
   try {
     await expect(
-      page.getByRole("dialog", { name: "Make evidence easier to find" }),
+      page
+        .locator(".project-identity-banner")
+        .getByText("Make evidence easier to find", { exact: true }),
     ).toBeVisible();
     expect(p.tasks).toHaveLength(7);
     expect(p.functionArea).toBe("Quality");
     expect(p.onboardingStage).toBe("Discovery");
-    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page.goBack();
     await expect(
       card.getByRole("button", { name: "Open pilot" }),
     ).toBeVisible();

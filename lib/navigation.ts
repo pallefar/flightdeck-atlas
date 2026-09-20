@@ -1,5 +1,29 @@
 export const workTools = [
   {
+    id: "overview",
+    title: "Project overview",
+    group: "Project",
+    help: "See this project’s outcome, progress, sponsor and next action. Use the project menus for tasks, planning, leadership and work tools. Back to all projects returns to your portfolio.",
+  },
+  {
+    id: "collaboration",
+    title: "Collaborate & share",
+    group: "Project",
+    help: "Manage discussions, files and access for this project. Atlas access must first be granted by the Super Admin; a project link alone does not grant access.",
+  },
+  {
+    id: "updates",
+    title: "Project updates",
+    group: "Project",
+    help: "Record decisions, progress and results for this project. Its activity history also records saved changes.",
+  },
+  {
+    id: "slides",
+    title: "Project presentations",
+    group: "Project",
+    help: "Create, edit and export a presentation using this project’s data. Review the slides before sharing them.",
+  },
+  {
     id: "projects",
     title: "All projects",
     group: "Project management",
@@ -9,7 +33,7 @@ export const workTools = [
     id: "kanban",
     title: "Kanban board",
     group: "Project management",
-    help: "Switch between portfolio projects and the selected project’s tasks. Drag a card into a status column, or use its Move to menu on a keyboard or phone. Changes save immediately; dependencies and permissions still apply.",
+    help: "Move this project’s tasks through To do, Doing, Blocked and Done. Drag a card into a column or use its status menu on a keyboard or phone. Changes save immediately; dependencies and permissions still apply. The portfolio has a separate board for project statuses.",
   },
   {
     id: "list",
@@ -99,7 +123,7 @@ export const workTools = [
     id: "resources",
     title: "Resource planner",
     group: "Work tools",
-    help: "Inspect assignments and capacity across your accessible projects. Drag work to propose an owner or date change, then review and confirm it. Set your capacity in Team workspace.",
+    help: "Inspect this project’s assignments and capacity. Drag work to propose an owner or date change, then review and confirm it. Team workspace provides planning across projects.",
   },
   {
     id: "reports",

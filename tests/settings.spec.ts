@@ -92,7 +92,7 @@ test("globe settings change the map and instant journey, persist, and honor expl
     .getByRole("button", { name: "Enter workspace", exact: true })
     .click();
   await expect(
-    page.getByRole("dialog", { name: "FlightDeck OS", exact: true }),
+    page.locator(".project-identity-banner").getByText("FlightDeck OS", { exact: true }),
   ).toBeVisible();
   await expect(page.locator(".journey-dialog")).toHaveCount(0);
   await page.goto("/?view=dashboard");

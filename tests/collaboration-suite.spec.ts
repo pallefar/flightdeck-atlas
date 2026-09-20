@@ -272,7 +272,7 @@ test("collaboration, sharing, recurrence, attachments and deck persistence enfor
   ).toBeVisible();
   await page.getByRole("button", { name: "Reviews", exact: true }).click();
   await expect(page.getByText("approved", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("button", { name: "Back to all projects", exact: true }).click();
   await page.goto("/?view=presentations");
   await page.getByRole("button", { name: /Leadership update/ }).click();
   const fileDownload = page.waitForEvent("download");

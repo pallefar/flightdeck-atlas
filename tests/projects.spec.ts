@@ -45,13 +45,16 @@ test("projects persist across reloads, tasks update, stale writes conflict, and 
     const created = await response.json();
     id = created.project.id;
     ownedFixtures.push(id);
-    await page.reload();
     await expect(
-      page.locator(".project-card").filter({ hasText: "QA test project" }),
+      page.getByRole("heading", { name: "Project overview", exact: true }),
     ).toBeVisible();
+    await page.reload();
+    await expect(page.locator(".project-identity-banner")).toContainText(
+      "QA test project",
+    );
     await page
-      .locator(".project-card")
-      .filter({ hasText: "QA test project" })
+      .getByRole("navigation")
+      .getByRole("button", { name: "Tasks & subtasks", exact: true })
       .click();
     await page
       .getByLabel("New task", { exact: true })
@@ -62,7 +65,7 @@ test("projects persist across reloads, tasks update, stale writes conflict, and 
     ).toBeVisible();
     await page.getByRole("checkbox", { name: "Verify persistence" }).click();
     await expect(
-      page.getByText("100% complete", { exact: true }),
+      page.locator(".project-identity-banner").getByText(/100% complete/),
     ).toBeVisible();
     const checks = await page.evaluate(async (original) => {
       const latest = (await (await fetch("/api/projects")).json()) as {
@@ -86,7 +89,9 @@ test("projects persist across reloads, tasks update, stale writes conflict, and 
     expect(checks.invalid).toBe(400);
     expect(revision).toBe(3);
     await page.reload();
-    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Tasks & subtasks", exact: true }),
+    ).toBeVisible();
     await expect(
       page.getByRole("checkbox", { name: "Verify persistence" }),
     ).toBeChecked();

@@ -17,7 +17,9 @@ export default function PresentationStudio({
   projects,
   demo,
   initialProjectId,
+  scopedProjectId,
 }: {
+  scopedProjectId?: string;
   projects: Project[];
   demo: boolean;
   initialProjectId?: string | null;
@@ -38,7 +40,13 @@ export default function PresentationStudio({
     [dirty, setDirty] = useState(false);
   async function load(offset = 0) {
     try {
-      const r = await fetch(`/api/decks?offset=${offset}`),
+      const r = await fetch(
+          "/api/decks?offset=" +
+            offset +
+            (scopedProjectId
+              ? "&project=" + encodeURIComponent(scopedProjectId)
+              : ""),
+        ),
         b = (await r.json()) as {
           error: string;
           deck: Deck;
@@ -54,7 +62,7 @@ export default function PresentationStudio({
   }
   useEffect(() => {
     void load();
-  }, []);
+  }, [scopedProjectId]);
   useEffect(() => {
     if (!present) return;
     const key = (e: KeyboardEvent) => {
@@ -289,11 +297,18 @@ export default function PresentationStudio({
             {demo && <p>Create your own project to build a presentation.</p>}
             <p className="hub-muted">
               Uses saved project data and editable templates. AI narrative
-              drafting awaits FlightDeck. Select up to 15 projects.
+              drafting awaits FlightDeck.{" "}
+              {scopedProjectId
+                ? "This workspace uses the selected project."
+                : "Select up to 15 projects."}
             </p>
           </section>
           <section>
-            <h2>Saved presentations</h2>
+            <h2>
+              {scopedProjectId
+                ? "Presentations for this project"
+                : "Saved presentations"}
+            </h2>
             <div className="suite-card-grid">
               {decks.map((d) => (
                 <button
