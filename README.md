@@ -13,6 +13,12 @@ A TE Connectivity themed portfolio and action hub, with a dashboard, Project Eye
 - FlightDeck DTO validation, an injectable SDK transport, and an integration handoff. **Live FlightDeck SSO and sync are pending the new SDK.**
 - A clearly labeled example workspace until you add your own projects.
 
+## Work studio
+
+Open a project and choose **Work studio** for custom fields/formulas, dependency scheduling and baselines, event rules, task stopwatch and billable costs, request intake/approval, shared notes, resource planning, reports and versioned playbooks. Task views include nested tasks, archive/restore and guarded cross-project transfers. Saved report widgets appear on the dashboard; **Team workspace → Planner** shows the portfolio resource grid. Project/tool links now survive sign-in and reload.
+
+Scheduled reminders appear in the Atlas inbox at their stored time. Shared notes refresh automatically and reject conflicting same-block edits. Form links require existing Atlas/project access; publishing this update does not open the private Site to external guests. FlightDeck AI, shared identity, Outlook and external/background actions remain pending the agreed OS services. See the [work-management coverage and limits](docs/MONDAY-WORK-MANAGEMENT-AUDIT.md).
+
 ## Run locally
 
 Use Node.js 22.13 or newer.
@@ -23,6 +29,8 @@ npm run db:generate # only if the schema changes
 npm run build
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_brave_vector.sql
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0001_past_blue_shield.sql
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0002_lowly_thing.sql
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0003_dazzling_blue_blade.sql
 npm run dev
 ```
 

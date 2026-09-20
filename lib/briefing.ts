@@ -27,7 +27,7 @@ export function briefing(
   const live = projects.filter((p) => !p.archived);
   const actions = live.flatMap((p) =>
     p.tasks
-      .filter((t) => !t.done)
+      .filter((t) => !t.archived && !t.done)
       .map((t) => ({
         p,
         t,
@@ -82,7 +82,7 @@ export function briefing(
       (p) =>
         p.status !== "Completed" &&
         !p.nextAction &&
-        !p.tasks.some((t) => !t.done),
+        !p.tasks.some((t) => !t.archived && !t.done),
     ),
     due: actions.filter((a) => a.due && a.due <= through),
   };

@@ -11,6 +11,8 @@ import {
   type Project,
   type ProjectFields,
 } from "@/lib/projects";
+import { AdvancedTaskFields, FilterBuilder } from "./advanced-task-fields";
+import type { AdvancedFilter } from "@/lib/advanced-work";
 import { TaskTable, TaskTimeline } from "./task-views";
 import { filteredTasks, loggedMinutes } from "@/lib/work-management";
 import type { TaskView } from "@/lib/work-model";
@@ -26,8 +28,10 @@ export default function TaskWorkbench({
   readOnly,
   busy,
   onSave,
+  onReload,
 }: {
   project: Project;
+  onReload?: () => void;
   readOnly: boolean;
   busy: boolean;
   onSave: (
@@ -61,6 +65,8 @@ export default function TaskWorkbench({
     [priority, setPriority] = useState<Task["priority"]>("Normal"),
     [owner, setOwner] = useState("");
   const [member, setMember] = useState("");
+  const [createParent, setCreateParent] = useState("");
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<Task | null>(null),
     [step, setStep] = useState("");
   const [draftBase, setDraftBase] = useState<Project | null>(null);
@@ -80,7 +86,12 @@ export default function TaskWorkbench({
     [entryMinutes, setEntryMinutes] = useState(25),
     [entryNote, setEntryNote] = useState(""),
     [entryEdit, setEntryEdit] = useState<string | null>(null);
+  const [advanced, setAdvanced] = useState<AdvancedFilter>({
+    mode: "all",
+    groups: [],
+  });
   const view = {
+    advanced,
     layout,
     filter: filter as TaskView["filter"],
     query,
@@ -91,6 +102,15 @@ export default function TaskWorkbench({
     state: filterState,
   };
   const visible = filteredTasks(project, view, localDate(), myEmail);
+  const treeRows: Task[] = [];
+  const addTree = (t: Task) => {
+    treeRows.push(t);
+    if (!collapsed.has(t.id))
+      visible.filter((x) => x.parentId === t.id).forEach(addTree);
+  };
+  visible
+    .filter((t) => !t.parentId || !visible.some((x) => x.id === t.parentId))
+    .forEach(addTree);
   function openTask(t: Task) {
     setDraftBase(project);
     setEditing({ ...t, checklist: [...(t.checklist || [])] });
@@ -98,6 +118,7 @@ export default function TaskWorkbench({
     setEntryEdit(null);
   }
   function applyView(v: TaskView) {
+    setAdvanced(v.advanced || { mode: "all", groups: [] });
     setLayout(v.layout);
     setFilter(v.filter);
     setQuery(v.query);
@@ -131,6 +152,13 @@ export default function TaskWorkbench({
         className={`workbench-task ${t.done ? "is-done" : ""}`}
         key={t.id}
       >
+        {t.parentId && (
+          <small className="subtask-path">
+            ↳{" "}
+            {project.tasks.find((x) => x.id === t.parentId)?.title ||
+              "Parent task"}
+          </small>
+        )}
         <div className="workbench-task-title">
           <label>
             <input
@@ -183,6 +211,29 @@ export default function TaskWorkbench({
             unfinished
           </small>
         )}
+        {project.tasks.some((x) => x.parentId === t.id && !x.archived) && (
+          <button
+            type="button"
+            className="subtask-control"
+            aria-expanded={!collapsed.has(t.id)}
+            aria-label={`${collapsed.has(t.id) ? "Expand" : "Collapse"} subtasks for ${t.title}`}
+            onClick={() =>
+              setCollapsed((old) => {
+                const next = new Set(old);
+                if (next.has(t.id)) next.delete(t.id);
+                else next.add(t.id);
+                return next;
+              })
+            }
+          >
+            {collapsed.has(t.id) ? "▸" : "▾"}{" "}
+            {
+              project.tasks.filter((x) => x.parentId === t.id && !x.archived)
+                .length
+            }{" "}
+            subtasks
+          </button>
+        )}
         {t.recurrence && t.recurrence !== "none" && (
           <small>Repeats {t.recurrence}</small>
         )}
@@ -210,6 +261,33 @@ export default function TaskWorkbench({
   }
   return (
     <fieldset className="task-workbench" disabled={busy}>
+      {project.tasks.some((t) => t.archived) && (
+        <details className="advanced-filter">
+          <summary>
+            Archived tasks · {project.tasks.filter((t) => t.archived).length}
+          </summary>
+          {project.tasks
+            .filter((t) => t.archived)
+            .map((t) => (
+              <div className="work-inline" key={t.id}>
+                <span>{t.title}</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={readOnly || busy}
+                  onClick={() => void saveTask({ ...t, archived: false })}
+                >
+                  Restore task
+                </Button>
+              </div>
+            ))}
+        </details>
+      )}
+      <FilterBuilder
+        value={advanced}
+        onChange={setAdvanced}
+        fields={project.work?.fields}
+      />
       <div className="task-workbench-toolbar">
         <Input
           ref={searchRef}
@@ -389,6 +467,7 @@ export default function TaskWorkbench({
         <button
           className="text-link"
           onClick={() => {
+            setAdvanced({ mode: "all", groups: [] });
             setFilter("all");
             setQuery("");
             setGroup("");
@@ -787,6 +866,11 @@ export default function TaskWorkbench({
                 Add step
               </Button>
             </div>
+            <AdvancedTaskFields
+              task={editing}
+              project={project}
+              onChange={setEditing}
+            />
             <div className="task-edit-actions">
               <Button type="submit" disabled={busy || readOnly || !!entryEdit}>
                 Save task
@@ -810,6 +894,10 @@ export default function TaskWorkbench({
                         .filter((t) => t.id !== editing.id)
                         .map((t) => ({
                           ...t,
+                          parentId: t.parentId === editing.id ? "" : t.parentId,
+                          scheduleLinks: t.scheduleLinks?.filter(
+                            (l) => l.projectId || l.taskId !== editing.id,
+                          ),
                           dependsOn: t.dependsOn?.filter(
                             (id) => id !== editing.id,
                           ),
@@ -846,9 +934,17 @@ export default function TaskWorkbench({
               members={members}
               onSave={onSave}
               onEdit={openTask}
+              onReload={onReload}
             />
           ) : layout === "timeline" ? (
-            <TaskTimeline project={project} tasks={visible} onEdit={openTask} />
+            <TaskTimeline
+              project={project}
+              tasks={visible}
+              onEdit={openTask}
+              readOnly={readOnly}
+              busy={busy}
+              onSave={onSave}
+            />
           ) : layout === "board" ? (
             <div className="task-kanban">
               {states.map((s) => (
@@ -867,7 +963,7 @@ export default function TaskWorkbench({
               ))}
             </div>
           ) : (
-            <div className="task-workbench-list">{visible.map(card)}</div>
+            <div className="task-workbench-list">{treeRows.map(card)}</div>
           )}
           {!visible.length && (
             <p className="hub-muted">
@@ -898,6 +994,7 @@ export default function TaskWorkbench({
                     priority,
                     assignee: member || owner,
                     assigneeEmail: member,
+                    parentId: createParent,
                   },
                 ],
               },
@@ -909,6 +1006,7 @@ export default function TaskWorkbench({
               setPriority("Normal");
               setOwner("");
               setMember("");
+              setCreateParent("");
               setFilter("all");
               setQuery("");
             }
@@ -923,6 +1021,27 @@ export default function TaskWorkbench({
             onChange={(e) => setTitle(e.target.value)}
           />
           <div className="task-detail-grid">
+            <label>
+              New task parent
+              <select
+                value={createParent}
+                onChange={(e) => setCreateParent(e.target.value)}
+              >
+                <option value="">Top-level task</option>
+                {project.tasks
+                  .filter(
+                    (t) =>
+                      !t.archived &&
+                      !t.done &&
+                      (!t.recurrence || t.recurrence === "none"),
+                  )
+                  .map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.title}
+                    </option>
+                  ))}
+              </select>
+            </label>
             <label>
               Task due date
               <Input

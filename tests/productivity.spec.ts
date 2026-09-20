@@ -1,4 +1,14 @@
 import { test, expect } from "@playwright/test";
+const ownedFixtures: string[] = [];
+test.afterEach(async ({ page }) => {
+  for (const id of ownedFixtures.splice(0)) {
+    const r = await page.request.get(`/api/projects/${id}`);
+    if (r.ok()) {
+      const p = (await r.json()).project;
+      await page.request.delete(`/api/projects/${id}?revision=${p.revision}`);
+    }
+  }
+});
 import {
   examples,
   projectSchema,
@@ -80,6 +90,7 @@ test("task workflow, estimates, checklists, goals and KPI measurements persist t
     },
   );
   expect(created.id).toBeTruthy();
+  ownedFixtures.push(created.id);
   try {
     await page.reload();
     await page
@@ -148,10 +159,7 @@ test("task workflow, estimates, checklists, goals and KPI measurements persist t
       page.getByRole("progressbar", { name: "Lead time target progress" }),
     ).toHaveAttribute("aria-valuenow", "50");
     await page.reload();
-    await page
-      .locator(".project-card")
-      .filter({ hasText: "Productivity QA" })
-      .click();
+    await expect(page.getByRole("dialog")).toBeVisible();
     await expect(page.getByLabel("Workflow for Prepare decision")).toHaveValue(
       "blocked",
     );

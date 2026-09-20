@@ -1,3 +1,4 @@
+import { dueReminders } from "@/lib/work-reminders";
 import { authorize } from "@/lib/access";
 import { taskBlocked } from "@/lib/projects";
 import { database, json, sameOrigin } from "@/lib/server-projects";
@@ -81,6 +82,7 @@ export async function GET() {
       ? (await db.prepare("SELECT id,name FROM atlas_roles").all()).results
       : [];
     return json({
+      email: a.access.email,
       capacity,
       apps,
       teams: teams.filter(
@@ -89,7 +91,11 @@ export async function GET() {
       teamOptions: teams.map((t) => ({ id: t.id, name: t.name })),
       people,
       roles,
-      notifications,
+      notifications: [...(await dueReminders(a.access)), ...notifications]
+        .sort((x, y) =>
+          String(y.created_at).localeCompare(String(x.created_at)),
+        )
+        .slice(0, 100),
       preferences: prefs
         ? { ...defaultPreferences, ...JSON.parse(prefs.data as string) }
         : defaultPreferences,
@@ -110,6 +116,18 @@ export async function POST(req: Request) {
       return json({ error: "This record is too large." }, 400);
     const b = JSON.parse(raw),
       db = database();
+    if (
+      b.action === "read-notification" &&
+      String(b.id).startsWith("reminder:")
+    ) {
+      await db
+        .prepare(
+          "UPDATE atlas_work_records SET closed=1 WHERE id=? AND owner=? AND kind='reminder'",
+        )
+        .bind(String(b.id).slice(9), a.access.userId)
+        .run();
+      return json({ success: true });
+    }
     if (b.action === "read-notification") {
       await db
         .prepare(
@@ -140,6 +158,7 @@ export async function POST(req: Request) {
           !target ||
           !task ||
           task.done ||
+          task.archived ||
           target.project.archived ||
           target.project.status === "Completed" ||
           target.project.status === "On hold" ||

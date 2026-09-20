@@ -1,5 +1,6 @@
 "use client";
-import { useState } from "react";
+import { numericValue } from "@/lib/advanced-work";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -24,6 +25,7 @@ export function TaskTable({
   members,
   onSave,
   onEdit,
+  onReload,
 }: {
   project: Project;
   tasks: Task[];
@@ -32,7 +34,24 @@ export function TaskTable({
   members: { email: string }[];
   onSave: (f: ProjectFields, p?: Project) => Promise<Project | null>;
   onEdit: (t: Task) => void;
+  onReload?: () => void;
 }) {
+  const [targets, setTargets] = useState<Project[]>([]),
+    [target, setTarget] = useState(""),
+    [transferError, setTransferError] = useState(""),
+    [transferring, setTransferring] = useState(false);
+  useEffect(() => {
+    fetch("/api/projects")
+      .then((r) => r.json() as Promise<{ projects: Project[] }>)
+      .then((b) =>
+        setTargets(
+          (b.projects || []).filter(
+            (p) => p.id !== project.id && p.canEdit !== false && !p.archived,
+          ),
+        ),
+      )
+      .catch(() => {});
+  }, [project.id, project.revision]);
   const [selected, setSelected] = useState<string[]>([]),
     [action, setAction] = useState("priority"),
     [value, setValue] = useState("High");
@@ -132,6 +151,88 @@ export function TaskTable({
           </button>
         </div>
       )}
+      {!readOnly && chosen.length > 0 && (
+        <div className="suite-card">
+          <div className="work-inline">
+            <Button
+              disabled={busy}
+              variant="outline"
+              onClick={async () => {
+                if (
+                  await onSave(
+                    {
+                      ...project,
+                      tasks: project.tasks.map((t) =>
+                        ids.has(t.id) ? { ...t, archived: true } : t,
+                      ),
+                    },
+                    project,
+                  )
+                )
+                  setSelected([]);
+              }}
+            >
+              Archive {chosen.length} selected tasks
+            </Button>
+            <label>
+              Move selected tasks to
+              <select
+                aria-label="Move selected tasks to"
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+              >
+                <option value="">Choose project</option>
+                {targets.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button
+              disabled={!target || transferring || busy}
+              onClick={async () => {
+                setTransferring(true);
+                setTransferError("");
+                try {
+                  const r = await fetch("/api/work/transfer", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        source: project.id,
+                        target,
+                        sourceRevision: project.revision,
+                        targetRevision: targets.find((p) => p.id === target)
+                          ?.revision,
+                        ids: chosen.map((t) => t.id),
+                      }),
+                    }),
+                    b = (await r.json()) as { error: string };
+                  if (!r.ok) throw Error(b.error);
+                  setSelected([]);
+                  onReload?.();
+                } catch (e) {
+                  setTransferError((e as Error).message);
+                } finally {
+                  setTransferring(false);
+                }
+              }}
+            >
+              Move {chosen.length} tasks
+            </Button>
+          </div>
+          <p>
+            Move entire parent/dependency groups together. Destination access,
+            assignees, and field definitions are checked before either project
+            changes.
+          </p>
+          {transferError && (
+            <p role="alert" className="form-error">
+              {transferError}
+            </p>
+          )}
+        </div>
+      )}
       <div
         className="work-table-scroll"
         tabIndex={0}
@@ -162,6 +263,9 @@ export function TaskTable({
               <th>Priority</th>
               <th>Effort</th>
               <th>Group</th>
+              {project.work?.fields.map((f) => (
+                <th key={f.id}>{f.name}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -206,6 +310,23 @@ export function TaskTable({
                   {loggedMinutes(t)} min logged
                 </td>
                 <td>{t.group || "Ungrouped"}</td>
+                {project.work?.fields.map((f) => (
+                  <td key={f.id}>
+                    {f.type === "formula"
+                      ? (numericValue(
+                          t,
+                          f.id,
+                          project.work!.fields,
+                        )?.toLocaleString(undefined, {
+                          maximumFractionDigits: 2,
+                        }) ?? "—")
+                      : typeof t.customValues?.[f.id] === "boolean"
+                        ? t.customValues[f.id]
+                          ? "Yes"
+                          : "No"
+                        : String(t.customValues?.[f.id] ?? "—")}
+                  </td>
+                ))}
               </tr>
             ))}
           </tbody>
@@ -222,11 +343,27 @@ export function TaskTimeline({
   project,
   tasks,
   onEdit,
+  readOnly = true,
+  busy = false,
+  onSave,
 }: {
   project: Project;
   tasks: Task[];
   onEdit: (t: Task) => void;
+  readOnly?: boolean;
+  busy?: boolean;
+  onSave?: (f: ProjectFields, p?: Project) => Promise<Project | null>;
 }) {
+  const [drag, setDrag] = useState<{
+    id: string;
+    x: number;
+    width: number;
+  } | null>(null);
+  const [shift, setShift] = useState<{
+    task: Task;
+    days: number;
+    base: Project;
+  } | null>(null);
   const [anchor, setAnchor] = useState(""),
     [span, setSpan] = useState(30);
   const dated = tasks.filter(
@@ -283,9 +420,52 @@ export function TaskTimeline({
         </Button>
       </div>
       <p className="hub-muted">
-        Task dates and milestones. Click a row to inspect or edit dates.
-        Dependency conflicts are flagged; dates do not shift automatically.
+        Task dates and milestones. Click a row to inspect or edit dates. Drag a
+        dated bar to propose a new schedule, then review and apply the change.
       </p>
+      {shift && (
+        <div className="suite-card">
+          <strong>
+            Move {shift.task.title} by {shift.days} calendar days?
+          </strong>
+          <p>
+            Only this task moves. Use Work studio → Scheduling to review
+            dependent date changes.
+          </p>
+          <Button
+            disabled={busy || readOnly}
+            onClick={async () => {
+              const move = (d: string | undefined) =>
+                d
+                  ? new Date((dayNumber(d) + shift.days) * 86400000)
+                      .toISOString()
+                      .slice(0, 10)
+                  : d;
+              const result = await onSave?.(
+                {
+                  ...shift.base,
+                  tasks: shift.base.tasks.map((t) =>
+                    t.id === shift.task.id
+                      ? {
+                          ...t,
+                          startDate: move(t.startDate),
+                          dueDate: move(t.dueDate),
+                        }
+                      : t,
+                  ),
+                },
+                shift.base,
+              );
+              if (result) setShift(null);
+            }}
+          >
+            Apply schedule move
+          </Button>
+          <Button variant="outline" onClick={() => setShift(null)}>
+            Cancel move
+          </Button>
+        </div>
+      )}
       <div
         className="timeline-scroll"
         tabIndex={0}
@@ -347,6 +527,29 @@ export function TaskTimeline({
                       />
                     )}
                   <span
+                    onPointerDown={(e) => {
+                      if (readOnly || busy) return;
+                      e.stopPropagation();
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                      setDrag({
+                        id: t.id,
+                        x: e.clientX,
+                        width:
+                          e.currentTarget.parentElement!.getBoundingClientRect()
+                            .width,
+                      });
+                    }}
+                    onPointerUp={(e) => {
+                      if (!drag || drag.id !== t.id) return;
+                      e.stopPropagation();
+                      const days = Math.round(
+                        ((e.clientX - drag.x) / drag.width) * span,
+                      );
+                      if (days) setShift({ task: t, days, base: project });
+                      setDrag(null);
+                    }}
+                    onPointerCancel={() => setDrag(null)}
+                    onClick={(e) => e.stopPropagation()}
                     className={`timeline-bar ${t.done ? "done" : taskBlocked(t, project) ? "waiting" : ""} ${t.milestone ? "milestone" : ""}`}
                     style={{
                       left: `${left}%`,

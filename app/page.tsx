@@ -18,10 +18,21 @@ export default async function Home({
       "ideas",
       "access",
       "wellbeing",
+      "today",
+      "apps",
+      "team",
+      "presentations",
     ].includes(params.view)
       ? params.view
       : null;
-  await requireChatGPTUser(view ? `/?view=${view}` : "/");
+  const returnParams = new URLSearchParams();
+  if (view) returnParams.set("view", view);
+  for (const key of ["project", "work", "form", "look"]) {
+    const value = params[key];
+    if (typeof value === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(value))
+      returnParams.set(key, value);
+  }
+  await requireChatGPTUser(returnParams.size ? `/?${returnParams}` : "/");
   let access;
   try {
     access = await getAccess();

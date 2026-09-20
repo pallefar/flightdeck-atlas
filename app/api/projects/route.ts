@@ -1,3 +1,8 @@
+import {
+  validateWorkAccess,
+  guardSQL,
+  guardValues,
+} from "@/lib/work-validation";
 import { authorize, superAdminEmail } from "@/lib/access";
 import { canChangeProject } from "@/lib/access-policy";
 import {
@@ -57,16 +62,28 @@ export async function POST(request: Request) {
         400,
       );
     const project = newProject(fields);
+    let dependencyGuards;
+    try {
+      dependencyGuards = await validateWorkAccess(
+        fields,
+        project.id,
+        auth.access,
+        true,
+      );
+    } catch (e) {
+      return json({ error: (e as Error).message }, 400);
+    }
     if (project.tasks.length > 200)
       return json(
         { error: "Recurring tasks would exceed the 200-task project limit." },
         400,
       );
     const db = database();
-    await db.batch([
+    const results = await db.batch([
       db
         .prepare(
-          "INSERT INTO atlas_projects (id, owner_id, data, source, updated_at, revision) VALUES (?, ?, ?, ?, ?, ?)",
+          "INSERT INTO atlas_projects (id, owner_id, data, source, updated_at, revision) SELECT ?, ?, ?, ?, ?, ? WHERE 1=1" +
+            guardSQL(dependencyGuards),
         )
         .bind(
           project.id,
@@ -79,16 +96,22 @@ export async function POST(request: Request) {
           project.source,
           project.updatedAt,
           1,
+          ...guardValues(dependencyGuards),
         ),
       db
         .prepare(
-          "INSERT INTO atlas_project_shares (project_id,data,revision) VALUES (?,?,1)",
+          "INSERT INTO atlas_project_shares (project_id,data,revision) SELECT ?,?,1 WHERE changes()>0",
         )
         .bind(
           project.id,
           JSON.stringify({ visibility: "private", grants: [] }),
         ),
     ]);
+    if (!results[0].meta.changes)
+      return json(
+        { error: "A dependency changed. Retry creating this project." },
+        409,
+      );
     return json(
       {
         project: {

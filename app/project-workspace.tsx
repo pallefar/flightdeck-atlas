@@ -1,4 +1,5 @@
 "use client";
+import WorkStudio, { LiveWorkStatus } from "./work-studio";
 import ProjectCollaboration from "./project-collaboration";
 import { freshProject } from "@/lib/fresh-export";
 import TaskWorkbench from "./task-workbench";
@@ -48,6 +49,7 @@ export default function ProjectWorkspace({
 }) {
   const readOnly = demo || project.canEdit === false;
   const [tab, setTab] = useState<
+    | "studio"
     | "overview"
     | "tasks"
     | "strategy"
@@ -55,7 +57,12 @@ export default function ProjectWorkspace({
     | "collaboration"
     | "leadership"
     | "delivery"
-  >("tasks");
+  >(() =>
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).has("work")
+      ? "studio"
+      : "tasks",
+  );
   const [note, setNote] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -70,7 +77,7 @@ export default function ProjectWorkspace({
     >
       <DialogContent
         ref={dialogRef}
-        className="project-dialog workspace-dialog"
+        className={`project-dialog workspace-dialog ${tab === "studio" ? "studio-dialog" : ""}`}
         showCloseButton={false}
       >
         <div className="workspace-sticky-heading">
@@ -80,7 +87,7 @@ export default function ProjectWorkspace({
             <span>Close</span>
           </button>
         </div>
-        <DialogDescription>
+        <DialogDescription className={tab === "studio" ? "sr-only" : ""}>
           {project.description || "Project workspace"}
         </DialogDescription>
         {demo && (
@@ -100,6 +107,7 @@ export default function ProjectWorkspace({
             queue.
           </p>
         )}
+        {!demo && <LiveWorkStatus project={project} onReload={onReload} />}
         <div className="workspace-meta">
           <span
             className={`status ${project.status.toLowerCase().replaceAll(" ", "-")}`}
@@ -114,38 +122,45 @@ export default function ProjectWorkspace({
             <span className="priority-high">High priority</span>
           )}
         </div>
-        <div className="section-heading">
-          <h3>Project progress</h3>
-          <span>{progress(project)}% complete</span>
-        </div>
-        <Progress
-          aria-label="Project progress"
-          value={progress(project)}
-          className={`progress-bar ${project.color}`}
-        />
-        <div className="workspace-kpis">
-          <span>
-            <strong>{project.tasks.filter((t) => !t.done).length}</strong> open
-            tasks
-          </span>
-          <span>
-            <strong>
-              {project.tasks.filter((t) => taskBlocked(t, project)).length}
-            </strong>{" "}
-            blocked
-          </span>
-          <span>
-            <strong>
-              {project.tasks
-                .filter((t) => !t.done)
-                .reduce((n, t) => n + (t.estimateMinutes || 0), 0)}
-            </strong>{" "}
-            estimated min left
-          </span>
-          <span>
-            <strong>{project.objectives?.length || 0}</strong> strategy goals
-          </span>
-        </div>
+        {tab !== "studio" && (
+          <>
+            <div className="section-heading">
+              <h3>Project progress</h3>
+              <span>{progress(project)}% complete</span>
+            </div>
+            <Progress
+              aria-label="Project progress"
+              value={progress(project)}
+              className={`progress-bar ${project.color}`}
+            />
+            <div className="workspace-kpis">
+              <span>
+                <strong>
+                  {project.tasks.filter((t) => !t.archived && !t.done).length}
+                </strong>{" "}
+                open tasks
+              </span>
+              <span>
+                <strong>
+                  {project.tasks.filter((t) => taskBlocked(t, project)).length}
+                </strong>{" "}
+                blocked
+              </span>
+              <span>
+                <strong>
+                  {project.tasks
+                    .filter((t) => !t.archived && !t.done)
+                    .reduce((n, t) => n + (t.estimateMinutes || 0), 0)}
+                </strong>{" "}
+                estimated min left
+              </span>
+              <span>
+                <strong>{project.objectives?.length || 0}</strong> strategy
+                goals
+              </span>
+            </div>
+          </>
+        )}
         <div
           className="workspace-tabs filter-tabs"
           aria-label="Project sections"
@@ -154,6 +169,7 @@ export default function ProjectWorkspace({
             [
               "overview",
               "tasks",
+              "studio",
               "leadership",
               "delivery",
               "strategy",
@@ -165,21 +181,32 @@ export default function ProjectWorkspace({
               key={t}
               className={tab === t ? "chosen" : ""}
               aria-pressed={tab === t}
-              onClick={() => setTab(t)}
+              onClick={() => {
+                setTab(t);
+                const url = new URL(location.href);
+                if (t === "studio") url.searchParams.set("work", "fields");
+                else {
+                  url.searchParams.delete("work");
+                  url.searchParams.delete("form");
+                }
+                history.replaceState(null, "", url);
+              }}
             >
               {t === "overview"
                 ? "Overview"
                 : t === "tasks"
                   ? `Tasks · ${project.tasks.length}`
-                  : t === "leadership"
-                    ? "Think like a leader"
-                    : t === "delivery"
-                      ? "Delivery & budget"
-                      : t === "strategy"
-                        ? "Strategy & KPIs"
-                        : t === "collaboration"
-                          ? "Collaborate & share"
-                          : `Updates · ${project.activity?.length || 0}`}
+                  : t === "studio"
+                    ? "Work studio"
+                    : t === "leadership"
+                      ? "Think like a leader"
+                      : t === "delivery"
+                        ? "Delivery & budget"
+                        : t === "strategy"
+                          ? "Strategy & KPIs"
+                          : t === "collaboration"
+                            ? "Collaborate & share"
+                            : `Updates · ${project.activity?.length || 0}`}
             </button>
           ))}
         </div>
@@ -279,6 +306,7 @@ export default function ProjectWorkspace({
             readOnly={readOnly}
             busy={busy}
             onSave={onSave}
+            onReload={onReload}
           />
         </div>
         <div hidden={tab !== "strategy"}>
@@ -304,6 +332,15 @@ export default function ProjectWorkspace({
             busy={busy}
             onSave={onSave}
             onSection={setTab}
+          />
+        )}
+        {tab === "studio" && (
+          <WorkStudio
+            project={project}
+            readOnly={readOnly}
+            busy={busy}
+            onSave={onSave}
+            onReload={onReload}
           />
         )}
         {tab === "delivery" && (

@@ -1,3 +1,4 @@
+import { matchesFilter } from "./advanced-work";
 import {
   taskBlocked,
   type ProjectFields,
@@ -74,6 +75,8 @@ export function filteredTasks(
 ) {
   const rows = p.tasks.filter(
     (t) =>
+      !t.archived &&
+      matchesFilter(t, view.advanced, p.work?.fields) &&
       `${t.title} ${t.assignee || ""} ${t.description || ""}`
         .toLowerCase()
         .includes(view.query.toLowerCase()) &&

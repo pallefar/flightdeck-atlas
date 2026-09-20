@@ -115,3 +115,24 @@ export const preferences = sqliteTable("atlas_preferences", {
   data: text("data").notNull(),
   revision: integer("revision").notNull().default(1),
 });
+
+export const workRecords = sqliteTable(
+  "atlas_work_records",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    owner: text("owner").notNull(),
+    data: text("data").notNull(),
+    revision: integer("revision").notNull().default(1),
+    updatedAt: text("updated_at").notNull(),
+    availableAt: text("available_at").notNull().default(""),
+    closed: integer("closed").notNull().default(0),
+  },
+  (t) => [
+    index("idx_atlas_work_project").on(t.projectId, t.kind),
+    index("idx_atlas_work_owner_due").on(t.owner, t.availableAt),
+  ],
+);

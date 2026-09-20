@@ -1,6 +1,34 @@
 {
-  "updated": "Project Eye, Eat the Frog and leadership workflows verified; 38 scenario checks passed",
+  "updated": "Work studio verified: all 47 automated scenarios passed; independent functional and visual review completed",
   "stages": [
+    {
+      "name": "Custom fields, formulas, nested tasks and compound conditions",
+      "status": "Implemented; formula safety and persistence checks passed"
+    },
+    {
+      "name": "Dependency planning, drag dates, critical path and baselines",
+      "status": "Implemented; cycle and concurrency checks passed"
+    },
+    {
+      "name": "Stopwatch, billable rates, expenses and inbox reminders",
+      "status": "Implemented; durable session and cancellation checks passed"
+    },
+    {
+      "name": "Request intake, shared notes and resource planner",
+      "status": "Implemented; approval and concurrent-edit checks passed"
+    },
+    {
+      "name": "Versioned playbooks, widgets and bulk transfer",
+      "status": "Implemented; propagation and transfer checks passed"
+    },
+    {
+      "name": "Independent review and full regression pass",
+      "status": "47 automated scenarios passed; formula, concurrency, transfer and mobile review fixes verified"
+    },
+    {
+      "name": "Project links, reload continuity and mobile tool navigation",
+      "status": "Verified: project context survives sign-in/reload; graph scrolling stays inside mobile dialog"
+    },
     {
       "name": "Official monday.com workflow comparison",
       "status": "Official reference inspected; full feature matrix and remaining gaps documented"

@@ -10,7 +10,7 @@ export function leadershipReview(
   horizon: ReviewHorizon,
   today: string,
 ) {
-  const open = p.tasks.filter((t) => !t.done),
+  const open = p.tasks.filter((t) => !t.archived && !t.done),
     blocked = open.filter((t) => taskBlocked(t, p)),
     late = open.filter((t) => t.dueDate && t.dueDate < today);
   const unowned = open.filter((t) => !t.assignee && !t.assigneeEmail),
@@ -219,7 +219,7 @@ export function leadershipReview(
     add(
       "gate",
       "What is the go / no-go evidence?",
-      `${p.tasks.filter((t) => t.milestone && !t.done).length} milestones still open; ${gaps.length} key inputs missing.`,
+      `${p.tasks.filter((t) => t.milestone && !t.archived && !t.done).length} milestones still open; ${gaps.length} key inputs missing.`,
       "Prepare the stage-gate evidence and name the decision owner",
       gaps.length > 0,
     );

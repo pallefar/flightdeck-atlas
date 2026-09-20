@@ -50,7 +50,9 @@ export function portfolioAdvice(projects: Project[], today = localDate()) {
         "Review scope and owners before agreeing a new delivery date.",
         "high",
       );
-    const unassigned = p.tasks.filter((t) => !t.done && !t.assignee?.trim());
+    const unassigned = p.tasks.filter(
+      (t) => !t.archived && !t.done && !t.assignee?.trim(),
+    );
     if (unassigned.length)
       add(
         "owner",
@@ -67,7 +69,7 @@ export function portfolioAdvice(projects: Project[], today = localDate()) {
         `Last project update: ${p.updatedAt.slice(0, 10)}.`,
         "Record a short progress update and confirm the next action.",
       );
-    if (!p.tasks.some((t) => !t.done) && !p.nextAction?.trim())
+    if (!p.tasks.some((t) => !t.archived && !t.done) && !p.nextAction?.trim())
       add(
         "next",
         "Define the next action",
@@ -88,7 +90,7 @@ export function portfolioAdvice(projects: Project[], today = localDate()) {
   );
   const actions = live.flatMap((p) =>
     p.tasks
-      .filter((t) => !t.done)
+      .filter((t) => !t.archived && !t.done)
       .map((t) => ({
         p,
         t,
@@ -129,7 +131,7 @@ export function dailyAllocation(projects: Project[], today = localDate()) {
     .filter(
       (t) =>
         t.plannedDate === today &&
-        (!t.done ||
+        ((!t.archived && !t.done) ||
           (!!t.completedAt && localDate(new Date(t.completedAt)) === today)),
     );
   return {

@@ -86,6 +86,10 @@ export default function ProjectCollaboration({
   );
   useEffect(() => {
     void load();
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, 10000);
+    return () => clearInterval(timer);
   }, [load]);
   async function submit(
     data: Draft,

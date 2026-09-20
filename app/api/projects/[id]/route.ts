@@ -1,3 +1,13 @@
+import {
+  processWorkMutation,
+  cancellationStatement,
+} from "@/lib/work-mutation";
+import { evaluateRules } from "@/lib/advanced-work";
+import {
+  validateWorkAccess,
+  guardSQL,
+  guardValues,
+} from "@/lib/work-validation";
 import { authorize } from "@/lib/access";
 import {
   database,
@@ -99,19 +109,27 @@ export async function PUT(
     } catch (e) {
       return json({ error: (e as Error).message }, 400);
     }
-    const automated = applyWorkRules(fields, previous);
-    const valid = projectSchema.safeParse(automated.fields);
-    if (!valid.success)
-      return json({ error: valid.error.issues[0].message }, 400);
-    const recorded = recordChanges(valid.data, previous, updateNote, updatedAt);
-    for (const text of automated.applied)
-      recorded.activity.push({
-        id: crypto.randomUUID(),
-        at: updatedAt,
-        kind: "project",
-        text: `Automation: ${text}`,
-      });
-    recorded.activity = recorded.activity.slice(-200);
+    let dependencyGuards, processed;
+    try {
+      processed = processWorkMutation(
+        fields,
+        previous,
+        updateNote,
+        updatedAt,
+        auth.access.email,
+      );
+      dependencyGuards = await validateWorkAccess(
+        processed.recorded,
+        id,
+        auth.access,
+      );
+    } catch (e) {
+      return json(
+        { error: e instanceof Error ? e.message : "Check the work settings." },
+        400,
+      );
+    }
+    const recorded = processed.recorded;
     if (recorded.tasks.length > 200)
       return json(
         {
@@ -123,31 +141,33 @@ export async function PUT(
     const statements = [
       db
         .prepare(
-          "UPDATE atlas_projects SET data = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND revision = ?",
+          "UPDATE atlas_projects SET data = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND revision = ?" +
+            guardSQL(dependencyGuards),
         )
-        .bind(JSON.stringify(recorded), updatedAt, id, revision),
+        .bind(
+          JSON.stringify(recorded),
+          updatedAt,
+          id,
+          revision,
+          ...guardValues(dependencyGuards),
+        ),
     ];
-    for (const t of fields.tasks) {
-      const old = previous.tasks.find((x) => x.id === t.id);
-      if (
-        t.assigneeEmail &&
-        t.assigneeEmail !== auth.access.email &&
-        old?.assigneeEmail !== t.assigneeEmail
-      )
-        statements.push(
-          db
-            .prepare(
-              "INSERT INTO atlas_notifications (id,recipient,project_id,text,created_at,read) SELECT ?,?,?,?,?,0 WHERE changes()>0",
-            )
-            .bind(
-              crypto.randomUUID(),
-              t.assigneeEmail,
-              id,
-              `Assigned to you: ${t.title}`,
-              updatedAt,
-            ),
-        );
-    }
+    for (const notice of processed.notices)
+      statements.push(
+        db
+          .prepare(
+            "INSERT INTO atlas_notifications (id,recipient,project_id,text,created_at,read) SELECT ?,?,?,?,?,0 WHERE changes()>0",
+          )
+          .bind(
+            crypto.randomUUID(),
+            notice.recipient,
+            id,
+            notice.text,
+            updatedAt,
+          ),
+      );
+    const cancel = cancellationStatement(db, previous, recorded);
+    if (cancel) statements.push(cancel);
     const [result] = await db.batch(statements);
     if (!result.meta.changes)
       return json(

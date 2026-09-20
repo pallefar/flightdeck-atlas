@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { advancedFilterSchema } from "./advanced-work";
 export const budgetSchema = z.object({
   currency: z.enum(["USD", "EUR", "GBP", "PLN", "DKK", "CNY"]),
   approved: z.number().finite().min(0).max(1e12).nullable(),
@@ -6,6 +7,7 @@ export const budgetSchema = z.object({
   actual: z.number().finite().min(0).max(1e12).nullable(),
 });
 export const savedViewSchema = z.object({
+  advanced: advancedFilterSchema.optional(),
   id: z.string().min(1).max(80),
   name: z.string().trim().min(1).max(60),
   query: z.string().max(200),

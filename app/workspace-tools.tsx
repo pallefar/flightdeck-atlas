@@ -1,5 +1,6 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { ResourcePlanner } from "./work-studio";
+import { useCallback, useEffect, useState, useRef } from "react";
 import {
   Grid3X3,
   ExternalLink,
@@ -22,6 +23,7 @@ import { flightdeckApp, defaultPreferences } from "@/lib/collaboration";
 import type { AccessProfile } from "@/lib/access-policy";
 import type { Project, ProjectFields } from "@/lib/projects";
 export type WorkspaceData = {
+  email: string;
   capacity: { email: string; weeklyHours: number; leaveDays: string[] }[];
   apps: AppEntry[];
   teams: Team[];
@@ -57,6 +59,15 @@ export function useWorkspace() {
   }, []);
   useEffect(() => {
     void load();
+    const refresh = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    const timer = setInterval(refresh, 30000);
+    window.addEventListener("focus", refresh);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+    };
   }, [load]);
   async function mutate(payload: unknown) {
     setBusy(true);
@@ -517,12 +528,16 @@ export function TeamHub({
   projects,
   onOpen,
   onCreate,
+  onSave,
 }: {
   access: AccessProfile | null;
   projects: Project[];
   onOpen: (p: Project) => void;
   onCreate: (p: ProjectFields) => Promise<Project | null>;
+  onSave: (f: ProjectFields, p?: Project) => Promise<Project | null>;
 }) {
+  const capacityDirty = useRef(false);
+  const capacityBase = useRef<WorkspaceData | null>(null);
   const w = useWorkspace(),
     [tab, setTab] = useState("inbox"),
     [team, setTeam] = useState<Team | null>(null),
@@ -530,7 +545,7 @@ export function TeamHub({
     [leave, setLeave] = useState(""),
     [shareCapacity, setShareCapacity] = useState(false);
   useEffect(() => {
-    if (w.data) {
+    if (w.data && !capacityDirty.current) {
       setHours(String(w.data.preferences.weeklyHours));
       setLeave(w.data.preferences.leaveDays.join("\n"));
       setShareCapacity(w.data.preferences.shareCapacity);
@@ -564,7 +579,14 @@ export function TeamHub({
         <Users size={30} />
       </div>
       <div className="filter-tabs suite-tabs">
-        {["inbox", "teams", "capacity", "onboarding", "proposals"].map((t) => (
+        {[
+          "inbox",
+          "teams",
+          "capacity",
+          "planner",
+          "onboarding",
+          "proposals",
+        ].map((t) => (
           <button
             key={t}
             aria-pressed={tab === t}
@@ -754,6 +776,13 @@ export function TeamHub({
           )}
         </>
       )}
+      {tab === "planner" && (
+        <ResourcePlanner
+          projects={projects}
+          onSave={onSave}
+          readOnly={projects.every((p) => p.id.startsWith("demo-"))}
+        />
+      )}
       {tab === "capacity" && (
         <>
           <div className="suite-card">
@@ -764,14 +793,16 @@ export function TeamHub({
               connected.
             </p>
             <form
-              onSubmit={(e) => {
+              onSubmit={async (e) => {
                 e.preventDefault();
-                if (w.data)
-                  void w.mutate({
+                const base = capacityBase.current || w.data;
+                if (
+                  base &&
+                  (await w.mutate({
                     action: "preferences",
-                    revision: w.data.preferenceRevision,
+                    revision: base.preferenceRevision,
                     data: {
-                      ...w.data.preferences,
+                      ...base.preferences,
                       weeklyHours: Number(hours),
                       shareCapacity,
                       leaveDays: leave
@@ -779,7 +810,11 @@ export function TeamHub({
                         .map((x) => x.trim())
                         .filter(Boolean),
                     },
-                  });
+                  }))
+                ) {
+                  capacityDirty.current = false;
+                  capacityBase.current = null;
+                }
               }}
             >
               <fieldset disabled={w.busy}>
@@ -791,14 +826,22 @@ export function TeamHub({
                       min={0}
                       max={80}
                       value={hours}
-                      onChange={(e) => setHours(e.target.value)}
+                      onChange={(e) => {
+                        capacityBase.current ||= w.data;
+                        capacityDirty.current = true;
+                        setHours(e.target.value);
+                      }}
                     />
                   </label>
                   <label>
                     Leave dates (YYYY-MM-DD, one per line)
                     <textarea
                       value={leave}
-                      onChange={(e) => setLeave(e.target.value)}
+                      onChange={(e) => {
+                        capacityBase.current ||= w.data;
+                        capacityDirty.current = true;
+                        setLeave(e.target.value);
+                      }}
                     />
                   </label>
                 </div>
@@ -806,11 +849,32 @@ export function TeamHub({
                   <input
                     type="checkbox"
                     checked={shareCapacity}
-                    onChange={(e) => setShareCapacity(e.target.checked)}
+                    onChange={(e) => {
+                      capacityBase.current ||= w.data;
+                      capacityDirty.current = true;
+                      setShareCapacity(e.target.checked);
+                    }}
                   />
                   Share working hours and leave dates with my Atlas teams
                 </label>
                 <Button>Save capacity</Button>
+                {capacityDirty.current && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      if (w.data) {
+                        setHours(String(w.data.preferences.weeklyHours));
+                        setLeave(w.data.preferences.leaveDays.join("\n"));
+                        setShareCapacity(w.data.preferences.shareCapacity);
+                      }
+                      capacityBase.current = null;
+                      capacityDirty.current = false;
+                    }}
+                  >
+                    Discard capacity changes
+                  </Button>
+                )}
               </fieldset>
             </form>
           </div>

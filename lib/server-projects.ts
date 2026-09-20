@@ -142,6 +142,7 @@ export function recordChanges(
       add("project", "KPI measurements updated");
     for (const [key, label] of [
       ["budget", "Budget"],
+      ["work", "Work management settings"],
       ["taskViews", "Saved task views"],
       ["automations", "Automation recipes"],
       ["leadershipReviews", "Leadership review snapshots"],
@@ -169,6 +170,12 @@ export function recordChanges(
           "milestone",
           "group",
           "timeEntries",
+          "parentId",
+          "archived",
+          "customValues",
+          "scheduleLinks",
+          "hourlyRate",
+          "billable",
         ].some(
           (key) =>
             JSON.stringify(task[key as keyof typeof task]) !==
@@ -228,6 +235,7 @@ export function recordChanges(
         startDate: "",
         timeEntries: [],
         dependsOn: [],
+        scheduleLinks: [],
         recurrenceSource: task.id,
         checklist: task.checklist?.map((c) => ({ ...c, done: false })),
       });

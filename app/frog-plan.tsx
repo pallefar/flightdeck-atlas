@@ -45,7 +45,7 @@ export default function FrogPlan({
     )
     .flatMap((p) =>
       p.tasks
-        .filter((t) => !t.done && !taskBlocked(t, p))
+        .filter((t) => !t.archived && !t.done && !taskBlocked(t, p))
         .map((t) => ({ p, t })),
     );
   const selection = candidates.find((x) => `${x.p.id}/${x.t.id}` === chosen);
@@ -57,7 +57,7 @@ export default function FrogPlan({
       p.archived ||
       p.status === "On hold" ||
       p.status === "Completed");
-  const unavailable = !!frog && (!p || !task);
+  const unavailable = !!frog && (!p || !task || task.archived);
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!w.data || !selection) return;

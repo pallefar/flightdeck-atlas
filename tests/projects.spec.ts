@@ -1,4 +1,14 @@
 import { test, expect } from "@playwright/test";
+const ownedFixtures: string[] = [];
+test.afterEach(async ({ page }) => {
+  for (const id of ownedFixtures.splice(0)) {
+    const r = await page.request.get(`/api/projects/${id}`);
+    if (r.ok()) {
+      const p = (await r.json()).project;
+      await page.request.delete(`/api/projects/${id}?revision=${p.revision}`);
+    }
+  }
+});
 test("projects persist across reloads, tasks update, stale writes conflict, and invalid input is rejected", async ({
   page,
   request,
@@ -34,6 +44,7 @@ test("projects persist across reloads, tasks update, stale writes conflict, and 
     expect(response.status()).toBe(201);
     const created = await response.json();
     id = created.project.id;
+    ownedFixtures.push(id);
     await page.reload();
     await expect(
       page.locator(".project-card").filter({ hasText: "QA test project" }),
@@ -75,10 +86,7 @@ test("projects persist across reloads, tasks update, stale writes conflict, and 
     expect(checks.invalid).toBe(400);
     expect(revision).toBe(3);
     await page.reload();
-    await page
-      .locator(".project-card")
-      .filter({ hasText: "QA test project" })
-      .click();
+    await expect(page.getByRole("dialog")).toBeVisible();
     await expect(
       page.getByRole("checkbox", { name: "Verify persistence" }),
     ).toBeChecked();

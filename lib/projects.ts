@@ -1,5 +1,11 @@
 import { z } from "zod";
 import {
+  advancedWorkSchema,
+  scheduleLinkSchema,
+  calculate,
+  localLinks,
+} from "./advanced-work";
+import {
   budgetSchema,
   savedViewSchema,
   reviewSnapshotSchema,
@@ -54,6 +60,29 @@ export const taskSchema = z.object({
     )
     .max(30)
     .optional(),
+  templateRef: z
+    .object({
+      projectId: z.string().max(80),
+      templateId: z.string().max(80),
+      taskId: z.string().max(80),
+      version: z.number().int().min(1),
+    })
+    .optional(),
+  parentId: z.string().max(80).optional(),
+  archived: z.boolean().optional(),
+  customValues: z
+    .record(
+      z.union([
+        z.string().max(1000),
+        z.number().finite(),
+        z.boolean(),
+        z.null(),
+      ]),
+    )
+    .optional(),
+  scheduleLinks: z.array(scheduleLinkSchema).max(30).optional(),
+  hourlyRate: z.number().finite().min(0).max(100000).optional(),
+  billable: z.boolean().optional(),
   completedAt: z.string().nullable().optional(),
 });
 export const objectiveSchema = z.object({
@@ -95,6 +124,7 @@ export function taskState(t: Task) {
 }
 export function taskBlocked(t: Task, p: { tasks: Task[] }) {
   return (
+    !t.archived &&
     !t.done &&
     (t.workflow === "blocked" ||
       (t.dependsOn || []).some((id) => !p.tasks.find((x) => x.id === id)?.done))
@@ -115,6 +145,7 @@ export const projectSchema = z
     objectives: z.array(objectiveSchema).max(30).optional(),
     kpis: z.array(kpiSchema).max(40).optional(),
     budget: budgetSchema.optional(),
+    work: advancedWorkSchema.optional(),
     taskViews: z.array(savedViewSchema).max(12).optional(),
     automations: automationSchema.optional(),
     leadershipReviews: z.array(reviewSnapshotSchema).max(20).optional(),
@@ -143,6 +174,11 @@ export const projectSchema = z
   .superRefine((p, ctx) => {
     for (const items of [
       p.tasks,
+      p.work?.fields || [],
+      p.work?.rules || [],
+      p.work?.widgets || [],
+      p.work?.baselines || [],
+      p.work?.expenses || [],
       p.objectives || [],
       p.kpis || [],
       p.taskViews || [],
@@ -164,19 +200,138 @@ export const projectSchema = z
         code: z.ZodIssueCode.custom,
         message: "Task start must be on or before its due date.",
       });
+    const issue = (message: string) =>
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+    for (const t of p.tasks) {
+      const parents = new Set([t.id]);
+      let parent = t.parentId,
+        depth = 0;
+      while (parent) {
+        if (parents.has(parent) || !ids.has(parent) || ++depth > 6) {
+          issue(
+            "Subtasks need an existing parent, no cycles, and at most six levels.",
+          );
+          break;
+        }
+        parents.add(parent);
+        parent = p.tasks.find((x) => x.id === parent)?.parentId;
+      }
+      if (t.done && p.tasks.some((x) => x.parentId === t.id && !x.done))
+        issue("Complete all subtasks before completing their parent.");
+      if (
+        t.recurrence &&
+        t.recurrence !== "none" &&
+        (t.parentId || p.tasks.some((x) => x.parentId === t.id))
+      )
+        issue(
+          "Repeating tasks cannot have a parent or subtasks. Repeat standalone tasks.",
+        );
+      for (const [key, value] of Object.entries(t.customValues || {})) {
+        const f = p.work?.fields.find((f) => f.id === key);
+        if (!f) {
+          issue("Custom values must reference an existing field.");
+          continue;
+        }
+        if (value === null || value === "") continue;
+        if (
+          f.type === "formula" ||
+          (f.type === "number" && typeof value !== "number") ||
+          (f.type === "checkbox" && typeof value !== "boolean") ||
+          (["text", "date", "select"].includes(f.type) &&
+            typeof value !== "string") ||
+          (f.type === "date" && !validDate(String(value))) ||
+          (f.type === "select" && !f.options.includes(String(value)))
+        )
+          issue(`Check the value for ${f.name}.`);
+      }
+    }
+    const fields = p.work?.fields || [];
+    const formulaMemo = new Map<string, boolean>();
+    const checkFormula = (key: string, seen: Set<string>): boolean => {
+      if (seen.has(key)) return false;
+      if (formulaMemo.has(key)) return formulaMemo.get(key)!;
+      const f = fields.find((f) => f.id === key);
+      if (!f)
+        return ["estimate", "actual", "rate", "cost", "complete"].includes(key);
+      if (f.type !== "formula") return ["number", "checkbox"].includes(f.type);
+      const refs = [...f.formula.matchAll(/\[([a-z][a-z0-9_]*)\]/g)].map(
+        (m) => m[1],
+      );
+      const valid =
+        calculate(f.formula, () => 1, true) !== null &&
+        refs.every((k) => checkFormula(k, new Set([...seen, key])));
+      formulaMemo.set(key, valid);
+      return valid;
+    };
+    for (const f of fields) {
+      if (
+        [
+          "estimate",
+          "actual",
+          "rate",
+          "cost",
+          "complete",
+          "state",
+          "priority",
+          "owner",
+          "group",
+          "title",
+        ].includes(f.id)
+      )
+        issue("This field key is reserved.");
+      if (
+        f.type === "select" &&
+        (!f.options.length || new Set(f.options).size !== f.options.length)
+      )
+        issue("Select fields need unique options.");
+      if (f.type === "formula" && !checkFormula(f.id, new Set()))
+        issue(
+          "Use valid arithmetic and numeric field references, without formula cycles.",
+        );
+    }
+    for (const b of p.work?.baselines || [])
+      if (
+        b.tasks.some(
+          (t) =>
+            (t.start && !validDate(t.start)) ||
+            (t.finish && !validDate(t.finish)),
+        )
+      )
+        issue("Baseline dates must be valid.");
+    for (const e of p.work?.expenses || [])
+      if (!validDate(e.date)) issue("Use a valid expense date.");
+    for (const r of p.work?.rules || []) {
+      if (
+        r.action === "priority" &&
+        !["High", "Normal", "Low"].includes(r.value)
+      )
+        issue("Choose a valid rule priority.");
+      if (
+        r.action === "workflow" &&
+        !["todo", "doing", "blocked"].includes(r.value)
+      )
+        issue("Choose a valid workflow action.");
+      if (r.action === "group" && r.value.length > 60)
+        issue("Group names allow 60 characters.");
+    }
     const state = new Map<string, number>();
     const visit = (id: string): boolean => {
       if (state.get(id) === 1) return true;
       if (state.get(id) === 2) return false;
       state.set(id, 1);
-      if ((p.tasks.find((t) => t.id === id)?.dependsOn || []).some(visit))
+      if (
+        (p.tasks.find((t) => t.id === id)
+          ? localLinks(p.tasks.find((t) => t.id === id)!)
+          : []
+        ).some((l) => visit(l.taskId))
+      )
         return true;
       state.set(id, 2);
       return false;
     };
     if (
       p.tasks.some(
-        (t) => (t.dependsOn || []).some((d) => !ids.has(d)) || visit(t.id),
+        (t) => localLinks(t).some((l) => !ids.has(l.taskId)) || visit(t.id),
       )
     )
       ctx.addIssue({
@@ -235,12 +390,14 @@ export type Project = ProjectFields & {
   updatedAt: string;
   revision: number;
 };
-export const progress = (p: Project) =>
-  p.tasks.length
-    ? Math.round((p.tasks.filter((t) => t.done).length / p.tasks.length) * 100)
+export const progress = (p: Project) => {
+  const active = p.tasks.filter((t) => !t.archived);
+  return active.length
+    ? Math.round((active.filter((t) => t.done).length / active.length) * 100)
     : p.status === "Completed"
       ? 100
       : 0;
+};
 export const examples: Project[] = [
   {
     id: "demo-1",

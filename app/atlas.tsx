@@ -45,6 +45,7 @@ import {
   type Project,
   type ProjectFields,
 } from "@/lib/projects";
+import { ReportWidgets, ActiveTaskTimer } from "./work-studio";
 import { AppLauncher, AppAdministration, TeamHub } from "./workspace-tools";
 import PresentationStudio from "./presentation-studio";
 import Today from "./today";
@@ -164,9 +165,6 @@ export default function Atlas() {
       );
       const requested = new URLSearchParams(location.search).get("project");
       if (requested) {
-        const cleanUrl = new URL(location.href);
-        cleanUrl.searchParams.delete("project");
-        history.replaceState(null, "", cleanUrl);
         const found = body.projects.find((p) => p.id === requested);
         if (found) setSelected(found);
         else setError("That project is unavailable or you do not have access.");
@@ -368,7 +366,18 @@ export default function Atlas() {
     });
     if (project) openProject(project);
   }
+  function closeProject() {
+    setSelected(null);
+    const url = new URL(location.href);
+    for (const key of ["project", "work", "form"]) url.searchParams.delete(key);
+    history.replaceState(null, "", url);
+  }
   function openProject(p: Project) {
+    const url = new URL(location.href);
+    url.searchParams.set("project", p.id);
+    url.searchParams.delete("work");
+    url.searchParams.delete("form");
+    history.replaceState(null, "", url);
     setSelected(p);
     setError("");
   }
@@ -686,7 +695,9 @@ export default function Atlas() {
                 className={`theme-toggle ${view === "globe" ? "globe-settings-trigger" : ""}`}
                 ref={settingsTrigger}
                 aria-label={
-                  view === "globe" ? "Open Project Eye settings" : "Open settings"
+                  view === "globe"
+                    ? "Open Project Eye settings"
+                    : "Open settings"
                 }
                 title="Settings"
                 disabled={!loaded}
@@ -727,6 +738,7 @@ export default function Atlas() {
               </Button>
             </div>
           </header>
+          {!demo && <ActiveTaskTimer />}
           <div className="view-content" inert={!!flight} aria-busy={!!flight}>
             {error && (
               <div className="error-banner" role="alert">
@@ -750,6 +762,7 @@ export default function Atlas() {
                 projects={projects}
                 onOpen={openProject}
                 onCreate={save}
+                onSave={save}
               />
             ) : view === "presentations" ? (
               <PresentationStudio
@@ -967,6 +980,18 @@ export default function Atlas() {
                         </button>
                       ))}
                     </div>
+                    {projects.some(
+                      (p) => !p.archived && p.work?.widgets.length,
+                    ) && (
+                      <section className="portfolio-widgets">
+                        <h3>Your project measures</h3>
+                        {projects
+                          .filter((p) => !p.archived && p.work?.widgets.length)
+                          .map((p) => (
+                            <ReportWidgets key={p.id} project={p} compact />
+                          ))}
+                      </section>
+                    )}
                     <div className="project-toolbar">
                       <div className="filter-tabs" aria-label="Filter projects">
                         {[
@@ -1205,7 +1230,7 @@ export default function Atlas() {
             onReload={() => void load()}
             onPresent={() => {
               setPresentationProject(selected.id);
-              setSelected(null);
+              closeProject();
               navigate("presentations");
             }}
             key={selected.id}
@@ -1213,15 +1238,15 @@ export default function Atlas() {
             demo={demo}
             busy={saving}
             error={error}
-            onClose={() => setSelected(null)}
+            onClose={closeProject}
             onSave={save}
             onEdit={() => {
               setEditing(selected);
-              setSelected(null);
+              closeProject();
             }}
             onGlobe={() => {
               const p = selected;
-              setSelected(null);
+              closeProject();
               navigate("globe");
               setFlightTarget(p);
             }}
