@@ -1,5 +1,11 @@
 "use client";
-import { useCallback, useEffect, useState, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -72,6 +78,7 @@ import AccessManagement from "./access-management";
 import type { AccessProfile } from "@/lib/access-policy";
 import Ideas from "./ideas";
 import AtlasNavigation from "./atlas-navigation";
+import { useCountUp } from "@/lib/motion/useMotion";
 import ProjectManagement from "./project-management";
 import HelpCenter from "./help-center";
 import FeatureHelp from "./feature-help";
@@ -926,28 +933,28 @@ export default function Atlas() {
                   <section className="metrics" aria-label="Project overview">
                     <Metric
                       label="TOTAL PROJECTS"
-                      value={data.length.toString()}
+                      value={data.length}
                       detail="Across your workspace"
                       icon={<Folder />}
                     />
                     <Metric
                       label="IN PROGRESS"
-                      value={active.toString().padStart(2, "0")}
+                      value={active}
+                      pad={2}
                       detail="Ideas becoming reality"
                       icon={<Layers3 />}
                     />
                     <Metric
                       label="TASKS COMPLETE"
-                      value={done.toString().padStart(2, "0")}
+                      value={done}
+                      pad={2}
                       detail={`Of ${data.reduce((s, p) => s + p.tasks.length, 0)} total tasks`}
                       icon={<Check />}
                     />
                     <Metric
                       label="ON THE MAP"
-                      value={data
-                        .filter((p) => p.latitude !== null)
-                        .length.toString()
-                        .padStart(2, "0")}
+                      value={data.filter((p) => p.latitude !== null).length}
+                      pad={2}
                       detail="Projects with a location"
                       icon={<Globe2 />}
                     />
@@ -1295,25 +1302,41 @@ export default function Atlas() {
 function Metric({
   label,
   value,
+  pad = 1,
   detail,
   icon,
 }: {
   label: string;
-  value: string;
+  value: number;
+  /** Zero-pad to this many digits ("04"). */
+  pad?: number;
   detail: string;
   icon: React.ReactNode;
 }) {
+  const number = useRef<HTMLElement>(null);
+  const format = (n: number) => String(n).padStart(pad, "0");
+  // The shared motion layer's stat count-up (lib/motion): it replays the
+  // rendered number from the old value on every change, and from 0 when the
+  // tile mounts in the browser. Not over server-rendered HTML: that number is
+  // already on screen, and pulling it back to 0 would flash it.
+  const browserMount = useSyncExternalStore(
+    noSubscription,
+    () => true,
+    () => false,
+  );
+  useCountUp(number, value, { mountFrom: browserMount ? 0 : null, format });
   return (
     <div className="metric">
       <div className="metric-label">
         {label}
         {icon}
       </div>
-      <strong>{value}</strong>
+      <strong ref={number}>{format(value)}</strong>
       <span>{detail}</span>
     </div>
   );
 }
+const noSubscription = () => () => {};
 function ProjectForm({
   open,
   project,

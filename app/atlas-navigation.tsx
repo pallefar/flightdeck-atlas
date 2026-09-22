@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   Layers3,
@@ -15,6 +15,7 @@ import { workTools, type View, type WorkTool } from "@/lib/navigation";
 import type { AccessProfile } from "@/lib/access-policy";
 import type { Project } from "@/lib/projects";
 import FlightDeckContextSwitcher from "./flightdeck-context-switcher";
+import { useDisclosure } from "@/lib/motion/useMotion";
 export default function AtlasNavigation({
   view,
   tool,
@@ -35,6 +36,19 @@ export default function AtlasNavigation({
     "Team & personal",
     "Connections & admin",
   ]);
+  // Group open/close through the shared motion layer (lib/motion/disclosure.ts):
+  // the opened links unfold and the groups below glide instead of jumping.
+  // The chevron keeps its own CSS turn (navigation.css), so none is passed.
+  // capture() goes right before a change of `collapsed`; with motion off it
+  // measures nothing, and the new state simply renders.
+  const nav = useRef<HTMLElement>(null);
+  const groupMotion = useDisclosure(nav, {
+    selector: ".nav-group-toggle, .nav-submenu, .help-nav-link",
+  });
+  // False until the mount's own effects (the stored groups, the first
+  // auto-expand) have run: those settle without motion, and so does the
+  // view a link or a reload opens while the workspace is still loading.
+  const mounted = useRef(false);
   useEffect(() => {
     try {
       const value = JSON.parse(
@@ -55,10 +69,23 @@ export default function AtlasNavigation({
           ? "Connections & admin"
           : "";
   useEffect(() => {
-    if (activeGroup)
-      setCollapsed((old) => old.filter((x) => x !== activeGroup));
+    if (!activeGroup) return;
+    // A navigation made elsewhere (a project card, the command menu) opens
+    // its group: that moves the sidebar, so it unfolds like a click.
+    if (mounted.current && loaded) groupMotion.capture();
+    setCollapsed((old) => old.filter((x) => x !== activeGroup));
+    // Only a new group opens it. groupMotion is stable (useDisclosure returns
+    // the same object) and `loaded` is read, not a trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeGroup]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   function toggle(group: string) {
+    groupMotion.capture();
     setCollapsed((old) => {
       const next = old.includes(group)
         ? old.filter((x) => x !== group)
@@ -161,7 +188,7 @@ export default function AtlasNavigation({
     },
   ];
   return (
-    <nav className="atlas-navigation" aria-label="Main navigation">
+    <nav ref={nav} className="atlas-navigation" aria-label="Main navigation">
       <FlightDeckContextSwitcher access={access} />
       <div className="primary-nav-link">
         <ListTodo size={17} />
