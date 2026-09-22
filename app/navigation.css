@@ -986,7 +986,8 @@
   color: var(--muted-foreground);
   white-space: nowrap;
 }
-.fd-context label {
+.fd-context label,
+.fd-context-label {
   font-size: 10px;
   font-weight: 600;
   line-height: 1.4;
@@ -1015,6 +1016,35 @@
 .fd-context .fd-context-select:disabled {
   cursor: not-allowed;
 }
+.fd-context .fd-context-select[aria-disabled="true"] {
+  cursor: progress;
+}
+/* The same focus outline as every other sidebar control, in place of the
+   component's faint ring. */
+.fd-context .fd-context-select:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+  box-shadow: none;
+  border-color: var(--orange);
+}
+/* Current context with nothing to switch to: plain text, full contrast. */
+.fd-context-fixed {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.fd-context-value {
+  display: block;
+  height: 32px;
+  line-height: 30px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .fd-context [data-slot="native-select-icon"] {
   right: 10px;
 }
@@ -1030,6 +1060,15 @@
 .fd-context-status p {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+.fd-context-line {
+  display: grid;
+}
+.fd-context-line > * {
+  grid-area: 1 / 1;
+}
+.fd-context-ghost {
+  visibility: hidden;
 }
 .fd-context-status small {
   display: block;
@@ -1063,7 +1102,13 @@
   height: 40px;
   font-size: 14px;
 }
-.mobile-navigation-dialog .fd-context label {
+.mobile-navigation-dialog .fd-context-value {
+  height: 40px;
+  line-height: 38px;
+  font-size: 14px;
+}
+.mobile-navigation-dialog .fd-context label,
+.mobile-navigation-dialog .fd-context-label {
   font-size: 12px;
 }
 @media (prefers-reduced-motion: reduce) {

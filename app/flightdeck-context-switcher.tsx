@@ -33,8 +33,11 @@ type Snapshot = {
   checkedAt: string | null;
   retryAfter: number | null;
   saving: boolean;
+  /** The choice being saved, shown in the selects until the save answers. */
+  pending: SelectionRequest | null;
   error: string;
 };
+type SelectionRequest = { osWorkspaceId: string; osProjectId: string | null };
 const initial: Snapshot = {
   loaded: false,
   state: null,
@@ -46,6 +49,7 @@ const initial: Snapshot = {
   checkedAt: null,
   retryAfter: null,
   saving: false,
+  pending: null,
   error: "",
 };
 let snapshot = initial;
@@ -68,7 +72,10 @@ const clearStates: ContextState[] = [
   "not_configured",
   "not_permitted",
 ];
-function apply(body: ContextResponse) {
+/** `keepError` is set for the check that directly follows a failed save, so
+ * its message is not hidden the moment it appears. Any later check that
+ * confirms FlightDeck again clears it. */
+function apply(body: ContextResponse, keepError = false) {
   window.clearTimeout(retryTimer);
   // Unreachable, busy or unexpected responses keep the last good lists.
   update({
@@ -83,6 +90,7 @@ function apply(body: ContextResponse) {
           selected: body.selected,
           projectFallback: body.projectFallback,
           lastGoodAt: body.checkedAt,
+          ...(keepError ? {} : { error: "" }),
         }
       : {}),
     ...(clearStates.includes(body.state)
@@ -101,7 +109,7 @@ function apply(body: ContextResponse) {
       body.retryAfter * 1000,
     );
 }
-async function refresh() {
+async function refresh(options: { keepError?: boolean } = {}) {
   const started = generation;
   try {
     const response = await fetch("/api/flightdeck/context", {
@@ -109,22 +117,25 @@ async function refresh() {
     });
     if (started !== generation) return;
     if (response.status === 401 || response.status === 403) {
-      apply({
-        state: "not_permitted",
-        workspaces: [],
-        projects: [],
-        selected: null,
-        projectFallback: false,
-        retryAfter: null,
-        checkedAt: new Date().toISOString(),
-      });
+      apply(
+        {
+          state: "not_permitted",
+          workspaces: [],
+          projects: [],
+          selected: null,
+          projectFallback: false,
+          retryAfter: null,
+          checkedAt: new Date().toISOString(),
+        },
+        options.keepError,
+      );
       return;
     }
     const body = contextResponseSchema.safeParse(
       response.ok ? await response.json() : null,
     );
     if (started !== generation) return;
-    if (body.success) apply(body.data);
+    if (body.success) apply(body.data, options.keepError);
     else
       update({
         loaded: true,
@@ -140,12 +151,11 @@ async function refresh() {
       });
   }
 }
-async function choose(next: {
-  osWorkspaceId: string;
-  osProjectId: string | null;
-}) {
+async function choose(next: SelectionRequest) {
+  // One save at a time: a second PUT could land on the server first.
+  if (snapshot.saving) return;
   const mine = ++generation;
-  update({ saving: true, error: "" });
+  update({ saving: true, pending: next, error: "" });
   try {
     const response = await fetch("/api/flightdeck/context", {
       method: "PUT",
@@ -157,13 +167,14 @@ async function choose(next: {
     const body = contextResponseSchema.safeParse(raw);
     if (response.ok && body.success) {
       apply(body.data);
-      update({ saving: false });
+      update({ saving: false, pending: null });
       window.dispatchEvent(new Event(PREFERENCES_CHANGED_EVENT));
       return;
     }
     const failure = contextErrorSchema.safeParse(raw);
     update({
       saving: false,
+      pending: null,
       error: failure.success
         ? failure.data.error
         : "The FlightDeck context could not be saved. Try again.",
@@ -172,11 +183,12 @@ async function choose(next: {
     if (mine !== generation) return;
     update({
       saving: false,
+      pending: null,
       error: "The FlightDeck context could not be saved. Try again.",
     });
   }
   // Show what the OS now says (for example a workspace disabled meanwhile).
-  void refresh();
+  void refresh({ keepError: true });
 }
 function subscribe(listener: () => void) {
   listeners.add(listener);
@@ -302,16 +314,25 @@ export default function FlightDeckContextSwitcher({
   const id = useId();
   if (!superAdmin || context.state === "not_permitted") return null;
   const workspaces = context.workspaces;
-  const projects = visibleProjects(context.projects, superAdmin);
-  const workspaceValue = context.selected?.osWorkspaceId || "";
-  const projectValue = context.selected?.osProjectId || "";
+  // A choice being saved is shown at once and put back only if it fails.
+  const shown = context.pending ?? context.selected;
+  const workspaceValue = shown?.osWorkspaceId || "";
+  const projectValue = shown?.osProjectId || "";
+  // While a workspace change saves, that workspace's projects are unknown.
+  const switchingWorkspace =
+    !!context.pending &&
+    context.pending.osWorkspaceId !== context.selected?.osWorkspaceId;
+  const projects = switchingWorkspace
+    ? []
+    : visibleProjects(context.projects, superAdmin);
   const currentWorkspace = workspaces.find((w) => w.id === workspaceValue);
   const currentProject = projects.find((p) => p.id === projectValue);
   // Changes are only offered against a list the OS has just confirmed.
   const live =
-    !context.saving &&
-    !!context.state &&
-    (freshStates as string[]).includes(context.state);
+    !!context.state && (freshStates as string[]).includes(context.state);
+  // While saving, the selects stay enabled so the one in use keeps keyboard
+  // focus; they are marked busy and further changes are ignored.
+  const busy = context.saving;
   const canSwitch = (options: OsContextEntry[], value: string) => {
     const selectable = options.filter((o) => o.enabled);
     return (
@@ -319,8 +340,22 @@ export default function FlightDeckContextSwitcher({
       (selectable.length === 1 && selectable[0].id !== value)
     );
   };
+  // Like the OS sidebar, which shows a switcher only when there is something
+  // to switch to: a confirmed context with no alternative reads as plain
+  // text, not as a greyed-out control that looks unavailable.
+  const fixedWorkspace =
+    live && currentWorkspace && !canSwitch(workspaces, workspaceValue)
+      ? currentWorkspace
+      : null;
+  const fixedProject =
+    live &&
+    currentWorkspace?.enabled &&
+    currentProject &&
+    !canSwitch(projects, projectValue)
+      ? currentProject
+      : null;
   const placeholder = (kind: "workspace" | "project", count: number) =>
-    !context.loaded
+    !context.loaded || busy
       ? "Loading…"
       : count
         ? `Choose a ${kind}`
@@ -333,7 +368,7 @@ export default function FlightDeckContextSwitcher({
       className="fd-context"
       role="group"
       aria-labelledby={`${id}-title`}
-      aria-busy={context.saving || !context.loaded}
+      aria-busy={busy || !context.loaded}
     >
       <div className="fd-context-heading">
         <span className="eyebrow" id={`${id}-title`}>
@@ -341,64 +376,99 @@ export default function FlightDeckContextSwitcher({
         </span>
         <span className="fd-context-badge">Read-only</span>
       </div>
-      <label htmlFor={`${id}-workspace`}>FlightDeck workspace</label>
-      <NativeSelect
-        id={`${id}-workspace`}
-        size="sm"
-        className="fd-context-select"
-        title={currentWorkspace?.label}
-        value={currentWorkspace ? workspaceValue : ""}
-        disabled={!live || !canSwitch(workspaces, workspaceValue)}
-        onChange={(e) =>
-          void choose({ osWorkspaceId: e.target.value, osProjectId: null })
-        }
-      >
-        {!currentWorkspace && (
-          <NativeSelectOption value="" disabled>
-            {placeholder("workspace", workspaces.length)}
-          </NativeSelectOption>
-        )}
-        {workspaces.map((w) => (
-          <NativeSelectOption key={w.id} value={w.id} disabled={!w.enabled}>
-            {workspaceOptionText(w)}
-          </NativeSelectOption>
-        ))}
-      </NativeSelect>
-      <label htmlFor={`${id}-project`}>FlightDeck project</label>
-      <NativeSelect
-        id={`${id}-project`}
-        size="sm"
-        className="fd-context-select"
-        title={currentProject ? projectLabel(currentProject) : undefined}
-        value={currentProject ? projectValue : ""}
-        disabled={
-          !live ||
-          !currentWorkspace?.enabled ||
-          !canSwitch(projects, projectValue)
-        }
-        onChange={(e) =>
-          void choose({
-            osWorkspaceId: workspaceValue,
-            osProjectId: e.target.value,
-          })
-        }
-      >
-        {!currentProject && (
-          <NativeSelectOption value="" disabled>
-            {placeholder("project", projects.length)}
-          </NativeSelectOption>
-        )}
-        {projects.map((p) => (
-          <NativeSelectOption key={p.id} value={p.id} disabled={!p.enabled}>
-            {projectOptionText(projects, p)}
-          </NativeSelectOption>
-        ))}
-      </NativeSelect>
+      {fixedWorkspace ? (
+        <p className="fd-context-fixed">
+          <span className="fd-context-label">FlightDeck workspace</span>
+          <span className="fd-context-value" title={fixedWorkspace.label}>
+            {workspaceOptionText(fixedWorkspace)}
+          </span>
+        </p>
+      ) : (
+        <>
+          <label htmlFor={`${id}-workspace`}>FlightDeck workspace</label>
+          <NativeSelect
+            id={`${id}-workspace`}
+            size="sm"
+            className="fd-context-select"
+            title={currentWorkspace?.label}
+            value={currentWorkspace ? workspaceValue : ""}
+            disabled={
+              !live || (!busy && !canSwitch(workspaces, workspaceValue))
+            }
+            aria-disabled={busy || undefined}
+            onChange={(e) =>
+              void choose({ osWorkspaceId: e.target.value, osProjectId: null })
+            }
+          >
+            {!currentWorkspace && (
+              <NativeSelectOption value="" disabled>
+                {placeholder("workspace", workspaces.length)}
+              </NativeSelectOption>
+            )}
+            {workspaces.map((w) => (
+              <NativeSelectOption key={w.id} value={w.id} disabled={!w.enabled}>
+                {workspaceOptionText(w)}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </>
+      )}
+      {fixedProject ? (
+        <p className="fd-context-fixed">
+          <span className="fd-context-label">FlightDeck project</span>
+          <span className="fd-context-value" title={projectLabel(fixedProject)}>
+            {projectOptionText(projects, fixedProject)}
+          </span>
+        </p>
+      ) : (
+        <>
+          <label htmlFor={`${id}-project`}>FlightDeck project</label>
+          <NativeSelect
+            id={`${id}-project`}
+            size="sm"
+            className="fd-context-select"
+            title={currentProject ? projectLabel(currentProject) : undefined}
+            value={currentProject ? projectValue : ""}
+            disabled={
+              !live ||
+              !currentWorkspace?.enabled ||
+              (!busy && !canSwitch(projects, projectValue))
+            }
+            aria-disabled={busy || undefined}
+            onChange={(e) =>
+              void choose({
+                osWorkspaceId: workspaceValue,
+                osProjectId: e.target.value,
+              })
+            }
+          >
+            {!currentProject && (
+              <NativeSelectOption value="" disabled>
+                {placeholder("project", projects.length)}
+              </NativeSelectOption>
+            )}
+            {projects.map((p) => (
+              <NativeSelectOption key={p.id} value={p.id} disabled={!p.enabled}>
+                {projectOptionText(projects, p)}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </>
+      )}
       <div className="fd-context-status" data-tone={message.tone}>
         <span className="fd-context-dot" aria-hidden="true" />
         <p>
-          <span role="status">{context.saving ? "Saving…" : message.text}</span>
-          {message.at?.iso && !context.saving && (
+          {/* While saving, the previous text is kept invisibly in the same
+              cell so the row, and the nav below it, keep their height. */}
+          <span className="fd-context-line">
+            <span role="status">{busy ? "Saving…" : message.text}</span>
+            {busy && (
+              <span className="fd-context-ghost" aria-hidden="true">
+                {message.text}
+              </span>
+            )}
+          </span>
+          {message.at?.iso && (
             <small>
               {message.at.label}{" "}
               <time dateTime={message.at.iso}>{time(message.at.iso)}</time>

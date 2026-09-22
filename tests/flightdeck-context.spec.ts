@@ -383,10 +383,35 @@ async function mockContext(page: Page, options: { saved?: OsSelection } = {}) {
     saved: options.saved ?? null,
     override: null as null | { state: string; status?: number },
     puts: [] as unknown[],
+    /** Holds each PUT until it resolves, to look at the page mid-save. */
+    hold: null as null | Promise<void>,
+    /** Answers the next PUTs with this refusal instead of saving. */
+    putFailure: null as null | {
+      status: number;
+      body: unknown;
+      headers?: Record<string, string>;
+    },
+    gets: 0,
+    lastCheckedAt: "",
   };
   await page.route("**/api/flightdeck/context", async (route) => {
     const request = route.request();
     const checkedAt = new Date().toISOString();
+    if (request.method() === "PUT" && state.hold) await state.hold;
+    if (request.method() === "PUT" && state.putFailure) {
+      state.puts.push(request.postDataJSON());
+      await route.fulfill({
+        status: state.putFailure.status,
+        contentType: "application/json",
+        headers: state.putFailure.headers,
+        body: JSON.stringify(state.putFailure.body),
+      });
+      return;
+    }
+    if (request.method() === "GET") {
+      state.gets++;
+      state.lastCheckedAt = checkedAt;
+    }
     if (state.override) {
       await route.fulfill({
         status: state.override.status ?? 200,
@@ -473,10 +498,35 @@ test("sidebar lists mirror FlightDeck workspace and project rules", async ({
     "Rhineland rollout",
   ]);
   await expect(project.locator('option[value="legacy"]')).toBeDisabled();
-  // Keyboard reachable.
+  // Keyboard reachable, with the same 2px orange focus outline as the rest
+  // of the sidebar (not the faint 3px component ring).
   await workspace.focus();
   await page.keyboard.press("Tab");
   await expect(project).toBeFocused();
+  const focusStyle = () =>
+    project.evaluate((select) => {
+      const probe = document.createElement("span");
+      probe.style.color = "var(--orange)";
+      select.parentElement!.appendChild(probe);
+      const orange = getComputedStyle(probe).color;
+      probe.remove();
+      const style = getComputedStyle(select);
+      return {
+        matches: select.matches(":focus-visible"),
+        outline: `${style.outlineStyle} ${style.outlineWidth}`,
+        outlineIsOrange: style.outlineColor === orange,
+        borderIsOrange: style.borderTopColor === orange,
+        boxShadow: style.boxShadow,
+      };
+    });
+  // Polled: the component animates box-shadow, so wait for it to settle.
+  await expect.poll(focusStyle).toEqual({
+    matches: true,
+    outline: "solid 2px",
+    outlineIsOrange: true,
+    borderIsOrange: true,
+    boxShadow: "none",
+  });
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Open navigation" }).click();
@@ -518,10 +568,13 @@ test("selection persists across reload and a workspace change picks its default 
     osWorkspaceId: "hr-de",
     osProjectId: null,
   });
-  // A single-project workspace leaves nothing to switch to.
+  // A single-project workspace leaves nothing to switch to: plain text.
   mock.os.projects["hr-de"] = [entry("general", "General", true, true)];
   await refocus(page);
-  await expect(sidebar(page).getByLabel("FlightDeck project")).toBeDisabled();
+  await expect(sidebar(page).getByLabel("FlightDeck project")).toHaveCount(0);
+  await expect(sidebar(page).locator(".fd-context-value")).toHaveText([
+    "General",
+  ]);
   expect(direct).toEqual([]);
 });
 
@@ -538,6 +591,21 @@ test("an unknown saved project falls back inside the same workspace", async ({
   await expect(context.getByRole("status")).toHaveText(
     "Saved project unavailable. Showing General.",
   );
+  // That notice wraps to two lines; "Saving…" in its place must not pull
+  // the nav below it up.
+  const nav = page
+    .locator("aside.sidebar")
+    .getByRole("button", { name: "Today and advisor" });
+  const navTop = async () => (await nav.boundingBox())!.y;
+  const before = await navTop();
+  let release = () => {};
+  mock.hold = new Promise<void>((resolve) => (release = resolve));
+  await context.getByLabel("FlightDeck project").selectOption("payroll");
+  await expect(context.getByRole("status")).toHaveText("Saving…");
+  expect(await navTop()).toBe(before);
+  release();
+  mock.hold = null;
+  await expect(context.getByRole("status")).toHaveText("Connected");
   // A saved workspace that disappeared is never swapped for another one.
   mock.saved = { osWorkspaceId: "gone", osProjectId: "general" };
   await refocus(page);
@@ -581,6 +649,171 @@ test("unreachable keeps the last good lists while refusal and missing configurat
   mock.override = null;
   await refocus(page);
   await expect(workspace).toHaveValue("te-ops");
+});
+
+test("saving keeps focus on the changed select, shows the choice and holds the layout", async ({
+  page,
+}) => {
+  const mock = await mockContext(page);
+  let release = () => {};
+  const holdNextPut = () =>
+    (mock.hold = new Promise<void>((resolve) => (release = resolve)));
+  await page.goto("/");
+  const context = sidebar(page);
+  const workspace = context.getByLabel("FlightDeck workspace");
+  const project = context.getByLabel("FlightDeck project");
+  await expect(context.getByRole("status")).toHaveText("Connected");
+  const nav = page
+    .locator("aside.sidebar")
+    .getByRole("button", { name: "Today and advisor" });
+  const navTop = async () => (await nav.boundingBox())!.y;
+  const before = await navTop();
+  const looks = () =>
+    Promise.all(
+      [workspace, project].map((select) =>
+        select.evaluate((el) => ({
+          disabled: el.matches(":disabled"),
+          opacity: getComputedStyle(el.parentElement!).opacity,
+        })),
+      ),
+    );
+
+  holdNextPut();
+  await project.focus();
+  await project.selectOption("rhineland");
+  await expect(context.getByRole("status")).toHaveText("Saving…");
+  // The choice shows at once. The select keeps focus and is marked busy,
+  // not disabled, so neither control greys out and the nav does not move.
+  await expect(project).toHaveValue("rhineland");
+  await expect(project).toBeFocused();
+  await expect(project).toHaveAttribute("aria-disabled", "true");
+  expect(await looks()).toEqual([
+    { disabled: false, opacity: "1" },
+    { disabled: false, opacity: "1" },
+  ]);
+  await expect(context.locator("small")).toContainText("checked");
+  expect(await navTop()).toBe(before);
+  // Another change while the save runs is ignored. (Playwright will not pick
+  // an option inside an aria-disabled select, so change it directly.)
+  await project.evaluate((el) => {
+    (el as unknown as HTMLSelectElement).value = "general";
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await expect(project).toHaveValue("rhineland");
+  release();
+  await expect(context.getByRole("status")).toHaveText("Connected");
+  await expect(project).toHaveValue("rhineland");
+  await expect(project).toBeFocused();
+  await expect(project).not.toHaveAttribute("aria-disabled");
+  expect(await navTop()).toBe(before);
+  expect(mock.puts).toEqual([
+    { osWorkspaceId: "te-ops", osProjectId: "rhineland" },
+  ]);
+
+  // In the mobile menu focus stays on the select, inside the dialog.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  const dialog = page.getByRole("dialog").locator(".fd-context");
+  const mobileWorkspace = dialog.getByLabel("FlightDeck workspace");
+  const mobileProject = dialog.getByLabel("FlightDeck project");
+  holdNextPut();
+  await mobileWorkspace.focus();
+  await mobileWorkspace.selectOption("hr-de");
+  await expect(dialog.getByRole("status")).toHaveText("Saving…");
+  await expect(mobileWorkspace).toHaveValue("hr-de");
+  // The new workspace's projects are not known until the save answers.
+  await expect(mobileProject).toHaveValue("");
+  await expect(mobileProject.locator("option")).toHaveText(["Loading…"]);
+  await expect(mobileWorkspace).toBeFocused();
+  release();
+  await expect(mobileProject).toHaveValue("general");
+  await expect(mobileWorkspace).toBeFocused();
+  expect(
+    await page.evaluate(
+      () => !!document.activeElement?.closest('[role="dialog"]'),
+    ),
+  ).toBe(true);
+});
+
+test("a failed save shows its error until a later check confirms FlightDeck", async ({
+  page,
+}) => {
+  const mock = await mockContext(page);
+  await page.goto("/");
+  const context = sidebar(page);
+  const project = context.getByLabel("FlightDeck project");
+  await expect(project).toHaveValue("general");
+  mock.putFailure = {
+    status: 429,
+    headers: { "Retry-After": "5" },
+    body: {
+      error: "FlightDeck is busy. Try again shortly.",
+      state: "rate_limited",
+      retryAfter: 5,
+    },
+  };
+  const gets = mock.gets;
+  await project.selectOption("rhineland");
+  const alert = context.getByRole("alert");
+  await expect(alert).toHaveText("FlightDeck is busy. Try again shortly.");
+  // The refused choice is put back.
+  await expect(project).toHaveValue("general");
+  // The check that follows the failure does not hide the message at once...
+  await expect.poll(() => mock.gets).toBe(gets + 1);
+  await expect(context.locator("time")).toHaveAttribute(
+    "datetime",
+    mock.lastCheckedAt,
+  );
+  await expect(context.getByRole("status")).toHaveText("Connected");
+  await expect(alert).toBeVisible();
+  // ...but a later confirmed check clears it.
+  mock.putFailure = null;
+  await refocus(page);
+  await expect(alert).toHaveCount(0);
+  await expect(context.getByRole("status")).toHaveText("Connected");
+  // A later successful save starts clean as well.
+  await project.selectOption("rhineland");
+  await expect(project).toHaveValue("rhineland");
+  await expect(alert).toHaveCount(0);
+});
+
+test("with nothing to switch to, the current context reads as plain text", async ({
+  page,
+}) => {
+  const mock = await mockContext(page);
+  mock.os.workspaces = [entry("te-ops", "TE Operations", true, true)];
+  mock.os.projects["te-ops"] = [entry("general", "General", true, true)];
+  await page.goto("/");
+  const context = sidebar(page);
+  await expect(context.getByRole("status")).toHaveText("Connected");
+  await expect(context.locator("select")).toHaveCount(0);
+  const values = context.locator(".fd-context-value");
+  await expect(values).toHaveText(["TE Operations", "General"]);
+  await expect(
+    context.getByText("FlightDeck workspace", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    context.getByText("FlightDeck project", { exact: true }),
+  ).toBeVisible();
+  expect(
+    await values.evaluateAll((els) =>
+      els.map((el) => getComputedStyle(el).opacity),
+    ),
+  ).toEqual(["1", "1"]);
+  // A second project makes the project a switcher again.
+  mock.os.projects["te-ops"].push(entry("rhineland", "Rhineland rollout"));
+  await refocus(page);
+  await expect(context.getByLabel("FlightDeck project")).toBeEnabled();
+  await expect(values).toHaveText(["TE Operations"]);
+  // Stale lists read as unavailable, not as a healthy current context.
+  mock.override = { state: "os_unreachable" };
+  await refocus(page);
+  await expect(context.getByRole("status")).toHaveText(
+    "FlightDeck unreachable",
+  );
+  await expect(values).toHaveCount(0);
+  await expect(context.getByLabel("FlightDeck workspace")).toBeDisabled();
+  await expect(context.getByLabel("FlightDeck project")).toBeDisabled();
 });
 
 test("the live context route stays same-origin, signed-in and free of the credential", async ({
