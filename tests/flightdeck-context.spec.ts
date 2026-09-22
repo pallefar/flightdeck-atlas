@@ -169,6 +169,20 @@ test("context transport sends only the bearer credential and maps every OS outco
         }),
     ),
   ).toEqual({ state: "invalid_response" });
+  // The OS's stable instanceId (proposal §8b decision 10) is accepted before
+  // the OS starts sending it; any other new key still rejects the response.
+  expect(
+    await outcome(
+      () =>
+        jsonResponse(200, {
+          integrationId: "atlas",
+          instanceId: "os-7c1e2f0a9b3d4c5e",
+          workspaces: fixture().workspaces,
+          generatedAt: at,
+        }),
+      "workspaces",
+    ),
+  ).toMatchObject({ state: "ok", data: { instanceId: "os-7c1e2f0a9b3d4c5e" } });
   // Strict DTOs: forbidden or unknown fields reject the whole response.
   expect(
     await outcome(

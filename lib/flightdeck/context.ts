@@ -8,7 +8,13 @@ import { z } from "zod";
  * bound; 255 is the filesystem path-component cap they live under. */
 export const osIdSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,254}$/);
 const integrationIdSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/);
-const isoSchema = z.string().datetime({ offset: true });
+export const isoSchema = z.string().datetime({ offset: true });
+/** The OS's stable instance id (proposal §8b decision 10): generated once in
+ * the te-ops setting `instance.id`, never written by a route. Accepted
+ * before the OS sends it so that adding it cannot break the strict DTO. */
+export const osInstanceIdSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/);
 const entrySchema = z
   .object({
     id: osIdSchema,
@@ -25,6 +31,7 @@ const uniqueIds = (items: { id: string }[]) =>
 export const osWorkspacesResponseSchema = z
   .object({
     integrationId: integrationIdSchema,
+    instanceId: osInstanceIdSchema.optional(),
     workspaces: z
       .array(entrySchema)
       .max(1000)
