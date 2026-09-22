@@ -628,10 +628,41 @@ test("the live context route stays same-origin, signed-in and free of the creden
   expect(results.get.body).not.toMatch(leaks);
   expect(results.put.body).not.toMatch(leaks);
   expect(results.invalid).toBe(400);
-  const crossSite = await page.request.put("/api/flightdeck/context", {
-    headers: { Origin: "https://attacker.example" },
-    data: { osWorkspaceId: "te-ops" },
+  // Aimed at the route's own origin check: these pass the dev server's origin
+  // guard (a foreign-host Origin is stopped there with a plain-text 403), so
+  // only the route can refuse them, and it answers in JSON.
+  const crossSiteHeaders: Record<string, string>[] = [
+    { Origin: "http://localhost:3000" },
+    { "Sec-Fetch-Site": "cross-site" },
+  ];
+  for (const headers of crossSiteHeaders) {
+    const crossSite = await page.request.put("/api/flightdeck/context", {
+      headers,
+      data: { osWorkspaceId: "te-ops" },
+    });
+    expect(crossSite.status()).toBe(403);
+    expect(await crossSite.json()).toEqual({
+      error: "Request origin is not allowed.",
+    });
+  }
+  // Only the context route changes the selection: a preferences save that
+  // carries one keeps whatever was stored before.
+  const before = await (await page.request.get("/api/workspace")).json();
+  const saved = await page.request.post("/api/workspace", {
+    data: {
+      action: "preferences",
+      revision: before.preferenceRevision,
+      data: {
+        ...before.preferences,
+        flightdeckContext: { osWorkspaceId: "forged", osProjectId: "forged" },
+      },
+    },
   });
-  expect(crossSite.status()).toBe(403);
+  expect(saved.status()).toBe(200);
+  const after = await (await page.request.get("/api/workspace")).json();
+  expect(after.preferenceRevision).toBe(before.preferenceRevision + 1);
+  expect(after.preferences.flightdeckContext).toEqual(
+    before.preferences.flightdeckContext,
+  );
   expect(direct).toEqual([]);
 });
