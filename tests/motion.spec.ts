@@ -160,46 +160,127 @@ async function settled(page: Page, target: { text: string }[]) {
     .toBe(true);
 }
 
+/** A workspace project, varied so each stat tile shows its own number. */
+const project = (i: number) => ({
+  id: `motion-${i}`,
+  name: `Motion project ${i}`,
+  description: "A workspace project.",
+  status: i % 2 ? "In progress" : "Planning",
+  category: "Platform",
+  location: "Copenhagen, Denmark",
+  latitude: i % 3 ? 55.6 + i / 100 : null,
+  longitude: i % 3 ? 12.5 : null,
+  dueDate: "2026-12-01",
+  color: "orange",
+  tasks: [
+    { id: "a", title: "One", done: true },
+    { id: "b", title: "Two", done: i % 2 === 0 },
+  ],
+  source: "atlas",
+  updatedAt: "2026-09-20",
+  revision: 1,
+  canEdit: true,
+  ownedByMe: true,
+});
+
+/** Answers GET /api/projects, for every page of the context, with the real
+ * response carrying `n` generated projects instead of the workspace's own. So
+ * a test sees the same data whatever the local D1 holds. 0 is the demo
+ * workspace: Atlas then shows its example projects. */
+async function serveProjects(page: Page, n: number) {
+  await page.context().route("**/api/projects", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const response = await route.fetch();
+    const body = await response.json();
+    body.projects = Array.from({ length: n }, (_, i) => project(i + 1));
+    await route.fulfill({ response, json: body });
+  });
+}
+
+/** The numbers every sampled frame showed, split at the load's commit: the
+ * tiles painted before `/api/projects` answered (the first <strong> the
+ * sampler saw; Atlas renders its demo examples then), and the tiles mounted
+ * from then on. The load always mounts new tiles: the shell is keyed by the
+ * signed-in user, and the stat section by where its numbers come from. */
+async function loadFrames(page: Page) {
+  const frames = (await numberFrames(page)).filter((f) => f.node);
+  const first = frames[0]?.node;
+  return {
+    painted: frames.filter((f) => f.node === first).map((f) => f.nums),
+    loaded: frames.filter((f) => f.node !== first).map((f) => f.nums),
+  };
+}
+
+const WORKSPACES = [
+  ["the demo workspace", 0],
+  ["a workspace with 1 project", 1],
+  ["a workspace with 9 projects", 9],
+] as const;
+
 test.describe("with motion (a browser not under automation)", () => {
-  test("a page load never pulls a painted number back, and ends on the rendered text", async ({
+  for (const [workspace, n] of WORKSPACES)
+    test(`a page load never counts, in ${workspace}: the painted numbers stay until the loaded ones replace them`, async ({
+      motionPage: page,
+    }) => {
+      await serveProjects(page, n);
+      const target = await renderedWithoutMotion(page);
+      const shown = Object.fromEntries(target.map((t) => [t.label, t.text]));
+      await sampleNumbers(page);
+      await recordNumberWrites(page);
+      await page.goto("/");
+      expect(await page.evaluate(() => navigator.webdriver)).toBe(false);
+      await expect.poll(() => tileMounts(page)).toBeGreaterThan(1);
+      await settled(page, target);
+      // No count at all. Counting from 0 would pull back a number already on
+      // screen (the server HTML). Counting from the demo examples painted
+      // before the load would show numbers that are neither: a workspace of 1
+      // project counted 4 > 3 > 2 > 1 on every load.
+      expect(await writes(page)).toEqual([]);
+      const { painted, loaded } = await loadFrames(page);
+      // Before the load: one set of numbers, never moving.
+      expect(new Set(painted.map((nums) => JSON.stringify(nums))).size).toBe(1);
+      // From the load's commit on: the loaded numbers, from its first frame.
+      expect(loaded.length).toBeGreaterThan(0);
+      for (const nums of loaded) expect(nums).toEqual(shown);
+      // With projects of its own, the load swaps the demo numbers for them.
+      if (n > 0) expect(painted[0]).not.toEqual(shown);
+      else expect(painted[0]).toEqual(shown);
+      // Byte-identical to the motion-off render: no style attribute, no extra node.
+      expect(await numbers(page)).toEqual(target);
+    });
+
+  test("Start fresh in the demo workspace shows the empty workspace's numbers at once", async ({
     motionPage: page,
   }) => {
-    const target = await renderedWithoutMotion(page);
+    await serveProjects(page, 0);
     await sampleNumbers(page);
     await recordNumberWrites(page);
     await page.goto("/");
-    expect(await page.evaluate(() => navigator.webdriver)).toBe(false);
-    // The shell mounts again once it knows who is signed in
-    // (WellbeingProvider is keyed by the user), so the tiles the server
-    // painted are replaced while the page loads. That second mount used to
-    // count from 0 under a number already on screen.
+    await expect(page.locator(".nav-item").first()).toBeEnabled();
     await expect.poll(() => tileMounts(page)).toBeGreaterThan(1);
-    await settled(page, target);
-
-    const frames = await numberFrames(page);
-    for (const tile of target) {
-      const seen = frames
-        .map((f) => f.nums[tile.label])
-        .filter((text): text is string => text !== undefined);
-      expectOnlyRises(seen, tile);
-      // A number the server painted stays as it is: no count at all.
-      if (seen[0] === tile.text)
-        expect(
-          (await writes(page)).filter((w) => w.label === tile.label),
-        ).toEqual([]);
-    }
-    // Byte-identical to the motion-off render: no style attribute, no extra node.
-    expect(await numbers(page)).toEqual(target);
+    await page.waitForTimeout(800);
+    const before = (await numberFrames(page)).length;
+    // The demo examples give way to the user's own, empty, workspace.
+    await page.getByRole("button", { name: "Start fresh" }).click();
+    await expect(page.locator(".demo-banner")).toHaveCount(0);
+    await page.waitForTimeout(900);
+    expect(await writes(page)).toEqual([]);
+    const after = (await numberFrames(page)).slice(before);
+    expect(after.length).toBeGreaterThan(0);
+    for (const frame of after)
+      expect(frame.nums).toEqual({
+        "TOTAL PROJECTS": "0",
+        "IN PROGRESS": "00",
+        "TASKS COMPLETE": "00",
+        "ON THE MAP": "00",
+      });
   });
 
   test("a stat tile that mounts again counts from 0 again", async ({
     motionPage: page,
   }) => {
+    await serveProjects(page, 9);
     const target = await renderedWithoutMotion(page);
-    test.skip(
-      target.every((t) => Number(t.text) === 0),
-      "nothing to count in this workspace",
-    );
     await recordNumberWrites(page);
     await page.goto("/");
     await settled(page, target);
@@ -222,24 +303,42 @@ test.describe("with motion (a browser not under automation)", () => {
     expect(await numbers(page)).toEqual(target);
   });
 
-  test("reduced motion: the numbers never move", async ({
-    motionPage: page,
-  }) => {
-    const target = await renderedWithoutMotion(page);
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await sampleNumbers(page);
-    await recordNumberWrites(page);
-    await page.goto("/");
-    await expect(page.locator(".nav-item").first()).toBeEnabled();
-    await expect.poll(() => tileMounts(page)).toBeGreaterThan(1);
-    await page.waitForTimeout(1200);
-    expect(await writes(page)).toEqual([]);
-    // Every frame, through the shell's second mount, shows the final numbers.
-    const shown = Object.fromEntries(target.map((t) => [t.label, t.text]));
-    for (const frame of await numberFrames(page))
-      if (frame.node) expect(frame.nums).toEqual(shown);
-    expect(await numbers(page)).toEqual(target);
-  });
+  for (const [workspace, n] of WORKSPACES.slice(0, 2))
+    test(`reduced motion, in ${workspace}: the numbers never move`, async ({
+      motionPage: page,
+    }) => {
+      await serveProjects(page, n);
+      const target = await renderedWithoutMotion(page);
+      const shown = Object.fromEntries(target.map((t) => [t.label, t.text]));
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await sampleNumbers(page);
+      await recordNumberWrites(page);
+      await page.goto("/");
+      await expect(page.locator(".nav-item").first()).toBeEnabled();
+      await expect.poll(() => tileMounts(page)).toBeGreaterThan(1);
+      await page.waitForTimeout(1200);
+      expect(await writes(page)).toEqual([]);
+      // The demo numbers painted before the load give way to the loaded ones
+      // at the load's commit. That swap is data arriving, not motion. From
+      // that commit on, every frame shows the final numbers.
+      const { painted, loaded } = await loadFrames(page);
+      expect(new Set(painted.map((nums) => JSON.stringify(nums))).size).toBe(1);
+      for (const nums of loaded) expect(nums).toEqual(shown);
+      // A tile that mounts again, which counts from 0 with motion, shows its
+      // number at once.
+      await page.getByRole("button", { name: "Today and advisor" }).click();
+      await expect(page.locator(".metrics")).toHaveCount(0);
+      const before = (await numberFrames(page)).length;
+      await page
+        .getByRole("button", { name: "Portfolio", exact: true })
+        .click();
+      await expect(page.locator(".metrics")).toHaveCount(1);
+      await page.waitForTimeout(900);
+      expect(await writes(page)).toEqual([]);
+      for (const frame of (await numberFrames(page)).slice(before))
+        if (frame.node) expect(frame.nums).toEqual(shown);
+      expect(await numbers(page)).toEqual(target);
+    });
 });
 
 test("under automation the layer is off: final numbers at once, never written", async ({
