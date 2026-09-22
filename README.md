@@ -10,7 +10,7 @@ A TE Connectivity themed portfolio and action hub, with a dashboard, Project Eye
 - Soft card shadows, button/visual hover effects and keyboard focus feedback, respecting reduced-motion settings.
 - Globe → building → stylized 3D room → laptop → project journey, with skip, cancel and reduced-motion support.
 - Light and dark themes with a remembered device preference.
-- FlightDeck DTO validation, an injectable SDK transport, and an integration handoff. Read-only FlightDeck workspace/project context is live locally for the Super Admin (see below). **Live FlightDeck SSO, import and sync are pending the new SDK.**
+- FlightDeck DTO validation, an injectable SDK transport, and an integration handoff. Read-only FlightDeck workspace/project context is live locally for the Super Admin, and the Super Admin can send a prepared project to FlightDeck as a proposal for OS review (see below). **Live FlightDeck SSO, import and sync are pending the new SDK.**
 - A clearly labeled example workspace until you add your own projects.
 
 ## Work studio
@@ -31,6 +31,7 @@ node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0001_past_blue_shield.sql
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0002_lowly_thing.sql
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0003_dazzling_blue_blade.sql
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0004_silly_speedball.sql
 npm run dev
 ```
 
@@ -41,7 +42,7 @@ npx tsc --noEmit
 npx playwright test
 ```
 
-The browser tests use an already running local server at port 5173 and Chrome. They create and remove temporary projects and access fixtures in the local database. The SDK adapter tests use fixtures and do not contact FlightDeck.
+The browser tests use an already running local server at port 5173 and Chrome. They create and remove temporary projects and access fixtures in the local database. The SDK adapter, context and onboarding tests use fixtures (`tests/fixtures/os-project-onboarding.json` records the OS onboarding contract) and never contact FlightDeck.
 
 ## FlightDeck integration
 
@@ -56,7 +57,15 @@ See [SDK requirements](docs/FLIGHTDECK-SDK-REQUIREMENTS.md).
 
 Configure it in the ignored `.env.local` for development (or as deployment secrets): `ATLAS_FLIGHTDECK_URL`, for example `http://127.0.0.1:4173` (plain HTTP is accepted only for a loopback address), and `ATLAS_FLIGHTDECK_INBOUND_TOKEN`, an OS inbound credential with the `read:context` scope. Never commit or print the credential. Restart `npm run dev` after changing either value. A hosted Atlas cannot reach an OS running on another computer's loopback address, so this connection is local only.
 
-**Still disconnected:** FlightDeck SSO and delegated per-user identity, per-user OS membership filtering, project import and onboarding (`/api/flightdeck/import` and `/api/flightdeck/onboard/:id` return `503 flightdeck_not_connected`), sync and AI. The private preview’s platform identity is not FlightDeck SSO.
+**Built, waiting on the OS: sending a project to FlightDeck for review.** In Connections → To FlightDeck, a project's onboarding form has three tabs: **Basics** (prefilled from the project), **FlightDeck details** (country, works-council relevance, owner role titles, data sources, access requested and more, with one-click prefill from a pilot's checklist) and **Review & send**, which lists every field that will be sent and everything that never is. A readiness meter counts the nine required items and links to each missing one. Only the Atlas Super Admin can press **Send to FlightDeck**, and only for a saved, complete draft, after choosing the destination workspace in that tab.
+
+- Sending files a *request* (kind `project-onboarding`) through the OS inbound API with the same server-side credential. An OS admin reviews it; nothing is created automatically. No person names, emails or assignees are sent: owners travel as role titles.
+- Atlas records each send in D1 (`atlas_flightdeck_operations`, migration 0004) before contacting the OS, so a lost reply is retried with the same key and can never file twice.
+- The form shows the status: Submitted → Linked → Setup in progress → Setup complete. "Needs more info" from the OS reopens the draft. Atlas checks at most once a minute and backs off. "Linked" appears only after FlightDeck confirms the project through `read:context`; the link is kept in `atlas_project_links`.
+- The OS must ship the `project-onboarding` kind (plan workstream W1, not deployed yet) and enable it with both `INBOUND_PROJECT_ONBOARDING_ENABLED=true` and `inbound.api.integrationKinds=atlas:project-onboarding`, and the Atlas credential needs the `submit:proposal` scope. Until then a send is refused and nothing is filed. This path is tested against a recorded contract fixture, not a running OS.
+- Optional `ATLAS_INSTALLATION_ID` (a lowercase slug) scopes the link records; unset means `atlas-local`. Set it once, before the first send.
+
+**Still disconnected:** FlightDeck SSO and delegated per-user identity, per-user OS membership filtering, import from FlightDeck (`/api/flightdeck/import` returns `503 flightdeck_not_connected`), sync and AI. The private preview’s platform identity is not FlightDeck SSO.
 
 ## Map and motion
 
@@ -80,7 +89,7 @@ The future SDK/master-app/TEOA contract is in [docs/MASTER-APP-CONTRACT.md](docs
 
 ## Project onboarding bridge
 
-Connections has **From FlightDeck** and **To FlightDeck** flows. Atlas onboarding drafts persist with proposed OS names and workspace planning notes; users can edit, remove and export them. The OS intake list and creation endpoints stay explicitly disconnected until delegated identity, project-level access, durable external links and idempotent creation are implemented with the SDK. No draft sends data to the OS or submits automatically. See [the bridge contract](docs/PROJECT-BRIDGE-CONTRACT.md).
+Connections has **From FlightDeck** and **To FlightDeck** flows. Atlas onboarding drafts persist with proposed OS names, workspace planning notes and FlightDeck details; users can edit, remove and export them. The Super Admin can send a saved, complete draft to FlightDeck as a proposal (above); nothing is sent automatically. Import from FlightDeck stays disconnected until delegated identity and project-level access exist with the SDK. See [the bridge contract](docs/PROJECT-BRIDGE-CONTRACT.md).
 
 ## Wellbeing and personal overview
 

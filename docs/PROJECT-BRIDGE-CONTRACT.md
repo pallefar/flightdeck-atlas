@@ -1,6 +1,6 @@
 # FlightDeck ↔ Atlas project onboarding
 
-Status: proposed SDK contract, not a live OS integration. Atlas supports saved onboarding drafts now. Discovery, import and OS creation stay disabled until the delegated SDK and access enforcement below are available.
+Status: proposed SDK contract. Atlas supports saved onboarding drafts, and (since 2026-09-22) sending a draft to FlightDeck OS **as a proposal** for an OS admin to review: see "Onboarding as a proposal" below. That path is built and tested in Atlas against a recorded contract fixture; it works end to end only once the OS ships the `project-onboarding` kind. Discovery, import and direct OS creation stay disabled until the delegated SDK and access enforcement below are available.
 
 ## User flows
 
@@ -8,7 +8,7 @@ Status: proposed SDK contract, not a live OS integration. Atlas supports saved o
 
 **To FlightDeck:** create and work on an Atlas project first. Save an onboarding draft with the proposed OS label and optional workspace hint. The hint is plain planning text, not an authorized workspace ID. Once connected, select an accessible destination workspace with project-creation permission, review the final label, and explicitly submit. On successful creation, bind the OS reference to the existing Atlas project. No second Atlas project is created. Draft exports and existing consultancy onboarding stages do not imply that an OS project exists.
 
-Current UI: Connections → From FlightDeck / To FlightDeck. Drafts persist in project storage, use existing edit permissions and revision conflict protection, and record changes in project history. No draft is submitted automatically when an SDK connection is later enabled.
+Current UI: Connections → From FlightDeck / To FlightDeck. Drafts persist in project storage, use existing edit permissions and revision conflict protection, and record changes in project history. No draft is submitted automatically when an SDK connection is later enabled. To FlightDeck has three tabs (Basics, FlightDeck details, Review & send); only the Atlas Super Admin can send, and only a saved, complete draft.
 
 ## SDK surface required
 
@@ -22,6 +22,13 @@ Current UI: Connections → From FlightDeck / To FlightDeck. Drafts persist in p
 
 Only the reviewed name and origin metadata are proposed for the initial OS creation. Atlas descriptions, tasks, location, deadlines, owners and metrics are not silently copied into OS fields. TEOA Advantage enablement or governance approvals are separate operations.
 
+**Amended 2026-09-22, owner decision 2 of the Atlas onboarding plan.** The owner answered the plan's 13 recommendations with "take you recomendations"; decision 2 was "Yes. Nothing becomes OS data without a reviewer accepting it". The sentence above still holds for OS creation. In addition, the plan's §3 field allowlist may travel to the OS **as a proposal** (submission kind `project-onboarding`, payload `atlas-project-onboarding/1`, built in `lib/flightdeck/onboarding.ts`):
+
+- **May travel:** the proposed OS name, the destination workspace, an optional proposed project id, function area, category, summary, success measure, status, priority, target date, site, country (ISO 3166), works-council relevance (yes/no/unknown, a fact that never drives a step), legal entity, headcount band, owner **role titles** (process, data, support), data sources, access requested (to-dos, never grants), task progress as counts (or "not tracked"), and whether Cowork setup is requested. Also the Atlas project id and revision, the Atlas installation id, an idempotency key, and `requestedBy`, the sha256 of the sending Super Admin's Atlas user id.
+- **Nothing in it becomes OS data until an OS reviewer accepts it.** The reviewer may accept, edit or drop each group, and creates the project by hand. Owners are appointed in the OS from its own roster.
+- **Never sent:** the sponsor, task assignees and any email address, person names, time entries, goal owners, collaboration content, files, budget, task and checklist titles, and the preferred-workspace planning note.
+- The summary and success measure are free text. They are stored in the OS's untracked payload only and are never put into a prompt (decision 5). The OS proposal §8b notes that a later Cowork setup step could still read them from a brief file; that is part of the open Legal question below. The form warns on an `@` or a phone-number shape, but free text can still hold personal data. Retention of these copies and cross-border handling are **open with Legal** (decision 6): the owner must forward the question, and nothing is deleted automatically in the meantime.
+
 ## Required server persistence before enabling writes
 
 Add authoritative, installation-scoped `project_links`, outside generic editable project JSON:
@@ -33,13 +40,21 @@ Add authoritative, installation-scoped `project_links`, outside generic editable
 
 Add durable onboarding operations with the Atlas revision, destination, proposed label, origin, stable idempotency key, status and OS operation/reference. Reserve before the remote call. After a lost response, enter “Needs reconciliation” and query the existing operation; do not issue a fresh key. Store confirmed links only after verified success. Imported Atlas rows and their links must commit in one transaction; uniqueness must hold across users and concurrent requests.
 
+Built for the proposal path (migration `drizzle/0004_silly_speedball.sql`): `atlas_flightdeck_operations` (unique `idempotency_key`; at most one open send per Atlas project by a partial unique index) and `atlas_project_links` with both uniques above. A link is written only when the OS read-back says `promoted` **and** `read:context` lists that project under a published OS `instanceId`.
+
 ## Access is a release gate
 
 Current Atlas grants allow all authorized members to view local Atlas projects. Before importing any OS data, intersect all linked-project reads with current OS project access on every API request, including project lists, direct reads/writes, briefings, exports, globe content and AI inputs. Atlas Admin or Super Admin never bypasses OS membership. A project import must not expose its label or metadata to unrelated Atlas members.
 
 Bind delegated credentials to verified immutable identities and instances on the server. A client ref, role, workspace name or `canImport` flag does not authorize an import. Revalidate at submission, not only during discovery. Revocation, account switching, missing credentials and authorization errors fail closed. Never remove confirmed links merely because a page, outage or revoked membership omits them.
 
-The current `/api/flightdeck/catalog` returns an authenticated disconnected state. Import and onboard endpoints enforce Atlas authentication/origin checks and return `503 flightdeck_not_connected`; they perform no OS writes. They must be replaced together with server persistence and access filtering, not enabled by a client flag or a URL.
+The current `/api/flightdeck/catalog` returns an authenticated disconnected state. The import endpoint enforces Atlas authentication/origin checks and returns `503 flightdeck_not_connected`; it performs no OS writes. It must be replaced together with server persistence and access filtering, not enabled by a client flag or a URL.
+
+## Onboarding as a proposal (built 2026-09-22)
+
+`POST /api/flightdeck/onboard/:id` with `{ destinationWorkspaceId, revision }`, same-origin, Atlas Super Admin only (decision 7). In order: the saved project must be at that revision and complete; the destination is taken from this request only (never from saved preferences or the planning note) and re-checked against fresh OS lists (`chooseContext`); an operation row is reserved with a fresh v4 idempotency key; then Atlas sends one `POST /api/inbound/v1/submissions` with the machine credential and no `X-Workspace-Id` (without the header the OS reads te-ops; W1 pins the route to te-ops whatever the header says, decision 3). The OS receipt (`submissionId`, `receivedAt`, `payloadSha256`) is stored. A timeout or unexpected reply keeps the reservation, and Retry sends the same key to the same destination; a same-key retry gets the OS's `200 {submissionId, duplicate: true}`. A definite refusal (400, 401, 403) closes the operation so a corrected draft gets a fresh key. An OS `409 already_submitted` is adopted only after the read-back proves it is this project's request.
+
+`GET /api/flightdeck/onboard/:id` returns the stored status to anyone who can read the project; with `?refresh=1`, for the Super Admin only, it reads back `GET /api/inbound/v1/submissions/:id` at most once a minute per send (the credential's 30 requests a minute are shared with the context reads, and a rate limit blocks every path). States: `filed` (Submitted), `promoted` with `{workspaceId, projectId, setupState}` (Linked once confirmed, then Setup in progress and Setup complete), `rejected` with a reason code (`needs-more-info` reopens the draft; any rejection allows a new send with a fresh key). The read-back never carries the reviewer's identity (decision 9); any extra field is dropped, not stored. `GET /api/flightdeck/onboard` returns the stored stages for the projects the caller can see and never reads the OS.
 
 ## Acceptance checks
 
@@ -50,4 +65,4 @@ The current `/api/flightdeck/catalog` returns an authenticated disconnected stat
 5. Timeout after remote success reconciles to the one OS project; origin/slug collisions never attach an unrelated project.
 6. Updating Atlas details cannot overwrite a source link. Repeated source refresh preserves Atlas-owned enrichment.
 7. Empty source progress is labeled “Progress not tracked”; missing TEOA measures are not zero.
-8. Errors preserve drafts; connecting never silently submits them. Only verified OS success displays “Linked.”
+8. Errors preserve drafts; connecting never silently submits them. Only verified OS success displays “Linked.” For the proposal path, that means the OS read-back says `promoted` and `read:context` lists the project.
