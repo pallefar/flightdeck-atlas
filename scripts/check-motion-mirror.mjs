@@ -10,11 +10,19 @@
 // reads the ref as the checkout knows it. It fails when:
 //   - a file's header does not name a commit, or the files name different ones;
 //   - the code below a header differs from that commit (an edit made in Atlas);
-//   - the code differs from [ref] (the OS moved on: copy the files again).
+//   - the code differs from [ref] (the OS moved on: copy the files again);
+//   - lib/motion holds a file that is neither a copy nor one of Atlas's own
+//     (a copy the OS has since removed, left behind), or [ref] has a file that
+//     is neither copied nor listed as not copied (the OS added one).
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 
-const FILES = ["motion.ts", "useMotion.ts", "entrances.ts", "CountUp.tsx", "disclosure.ts", "presence.ts"];
+const FILES = ["motion.ts", "useMotion.ts", "entrances.ts", "disclosure.ts", "presence.ts"];
+/** Atlas's own files in lib/motion (README.md says why). */
+const ATLAS_OWN = ["README.md", "env.d.ts"];
+/** OS files Atlas does not copy: its own README, and TabIndicator.tsx
+ * (Atlas's pill-tab indicator slides in CSS). */
+const NOT_COPIED = ["README.md", "TabIndicator.tsx"];
 const OS_DIR = "flightdeck/web/src/motion";
 const COMMIT = /^\/\/ MIRROR of FlightDeck OS \S+ at commit ([0-9a-f]{40})$/;
 
@@ -65,6 +73,12 @@ for (const file of FILES) {
   else if (current === null) problems.push(`${file}: ${ref} (${refSha.slice(0, 8)}) no longer has it (the OS removed it). Copy the layer again.`);
   else if (body !== current) problems.push(`${file}: ${ref} (${refSha.slice(0, 8)}) has a different version than the copied ${commit.slice(0, 8)}. Copy it again.`);
 }
+for (const file of readdirSync(new URL("../lib/motion/", import.meta.url)))
+  if (!FILES.includes(file) && !ATLAS_OWN.includes(file))
+    problems.push(`${file}: in lib/motion but neither a copy nor one of Atlas's own files (the OS removed it?)`);
+for (const path of git("ls-tree", "--name-only", `${refSha}:${OS_DIR}`).split("\n").filter(Boolean))
+  if (!FILES.includes(path) && !NOT_COPIED.includes(path))
+    problems.push(`${path}: ${ref} (${refSha.slice(0, 8)}) has it, and it is neither copied nor listed as not copied`);
 if (commits.size > 1) problems.push(`the headers name different commits: ${[...commits].join(", ")}`);
 
 if (problems.length) {

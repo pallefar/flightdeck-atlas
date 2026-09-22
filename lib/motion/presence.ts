@@ -1,4 +1,4 @@
-// MIRROR of FlightDeck OS flightdeck/web/src/motion/presence.ts at commit 745733922e001557b6ff727d25110b8dde7cd3f6
+// MIRROR of FlightDeck OS flightdeck/web/src/motion/presence.ts at commit 0bccb8796484cc4b368ed1cbf51ec61489c60704
 // (pallefar FlightDeck OS, branch feat/anime-motion-os). Byte-identical below this header: change the OS copy
 // first and re-copy, so Atlas and the OS keep one motion language. lib/motion/README.md says what Atlas uses.
 /** Close motion for an overlay that has ALREADY unmounted.

@@ -1,4 +1,4 @@
-// MIRROR of FlightDeck OS flightdeck/web/src/motion/entrances.ts at commit 745733922e001557b6ff727d25110b8dde7cd3f6
+// MIRROR of FlightDeck OS flightdeck/web/src/motion/entrances.ts at commit 0bccb8796484cc4b368ed1cbf51ec61489c60704
 // (pallefar FlightDeck OS, branch feat/anime-motion-os). Byte-identical below this header: change the OS copy
 // first and re-copy, so Atlas and the OS keep one motion language. lib/motion/README.md says what Atlas uses.
 /** Page entrances: Atlas's `atlas-arrive` (motion.css:125-150) for every
@@ -13,8 +13,11 @@
  * frame. Among the direct children of `.page`:
  *   - the page heading (`.pagehead`, or a `<header>`) arrives like Atlas's
  *     `.page-heading`; a stat row inside it stays in place;
- *   - a card grid (`.cards`, `.applaunch`, `.dash-widgets`) arrives ITEM BY
- *     ITEM, each card taking the next stagger slot, like Atlas's project cards;
+ *   - a card grid (`.cards`, `.applaunch`) arrives ITEM BY ITEM, each card
+ *     taking the next stagger slot, like Atlas's project cards;
+ *   - the widget grid (`.dash-widgets`: the Dashboard's KEY METRICS band, a
+ *     custom page) renders in place with everything inside it, as Atlas's
+ *     `.metrics` strip does: its tiles are metrics, not project cards;
  *   - everything else (a stat row, a notice, a tab bar, a table, a form, any
  *     other block) renders in place.
  * A wrapper with no visible box of its own is looked through for a heading
@@ -75,9 +78,12 @@ const PAGE = ".page";
 /** The page heading: `.pagehead` on the console pages, a `<header>` in a
  * sub-app (Advantage's). */
 const HEADING = ".pagehead, header";
-/** Card grids: their cards arrive one by one. All pre-existing classes;
- * `.dash-widgets` is the Dashboard's and custom pages' widget grid. */
-const CARDS = ".cards, .applaunch, .dash-widgets";
+/** Card grids: their cards arrive one by one. Pre-existing classes. */
+const CARDS = ".cards, .applaunch";
+/** Drawn in place with everything inside it, even a card grid a widget
+ * renders: the widget grid, the Dashboard's and custom pages' metric tiles,
+ * which Atlas's `.metrics` strip draws from the first frame. */
+const IN_PLACE = ".dash-widgets";
 /** What a filter tab brings in card by card (arriveBlocks): the card grids,
  * and a `.stack` list of rows (Sign's envelopes). */
 const FILTER_LISTS = `${CARDS}, .stack`;
@@ -138,7 +144,7 @@ export function blockUnits(blocks: HTMLElement[], lists: string = CARDS): Entran
   /** `heading`: the slot of the heading being visited, or null outside one. */
   const visit = (children: HTMLElement[], heading: number | null) => {
     for (const child of children) {
-      if (child.matches(STATIC)) continue;
+      if (child.matches(STATIC) || child.matches(IN_PLACE)) continue;
       const inHeading = heading !== null || child.matches(HEADING);
       if (child.matches(lists) && seeThrough(child)) {
         for (const item of elementsOf(child)) if (!holdsStatic(item)) units.push({ el: item, slot: next++, heading: false });

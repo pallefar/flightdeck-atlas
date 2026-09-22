@@ -1,9 +1,9 @@
-// MIRROR of FlightDeck OS flightdeck/web/src/motion/useMotion.ts at commit 745733922e001557b6ff727d25110b8dde7cd3f6
+// MIRROR of FlightDeck OS flightdeck/web/src/motion/useMotion.ts at commit 0bccb8796484cc4b368ed1cbf51ec61489c60704
 // (pallefar FlightDeck OS, branch feat/anime-motion-os). Byte-identical below this header: change the OS copy
 // first and re-copy, so Atlas and the OS keep one motion language. lib/motion/README.md says what Atlas uses.
-/* eslint-disable react-hooks/refs, @typescript-eslint/no-unused-vars -- Atlas's lint runs React Compiler rules the
-   OS does not: the latest-options ref (usePanelMotion) and the lazily made capture API (useDisclosure) are written or
-   read during render on purpose, and `_unused` drops a key from a rest spread. Not changed here, to stay identical. */
+/* eslint-disable react-hooks/refs -- Atlas's lint runs React Compiler rules the OS does not: the latest-options ref
+   (usePanelMotion) and the lazily made capture API (useDisclosure) are written or read during render on purpose.
+   Not changed here, to stay identical. */
 /** React bindings for the motion layer (motion.ts). Every hook runs in a
  * LAYOUT effect: it pulls the element back to its start frame before the
  * browser paints, so no frame of the end state flashes first. Every hook also
@@ -12,7 +12,7 @@
 import { useCallback, useLayoutEffect, useRef, type DependencyList, type RefObject } from "react";
 import { captureDisclosure, playDisclosure, type DisclosureSnapshot } from "./disclosure";
 import { watchEntrances, type EntranceWatch } from "./entrances";
-import { arrive, closePanel, countUp, motionAllowed, openPanel, reenter, slideIndicator, type ArriveOptions, type CountUpOptions, type MotionHandle, type MotionTargets, type PanelSide } from "./motion";
+import { arrive, closePanel, motionAllowed, openPanel, reenter, slideIndicator, type ArriveOptions, type MotionHandle, type MotionTargets, type PanelSide } from "./motion";
 import { exitOnUnmount } from "./presence";
 
 /** atlas-arrive for `ref`, or for the children matching `selector` (staggered),
@@ -30,33 +30,6 @@ export function useArrive(
     return () => handle.cancel();
     // `deps` IS the dependency list. `opts` is read from the render that triggered the run.
   }, deps); // eslint-disable-line react-hooks/exhaustive-deps
-}
-
-/** Count the number rendered inside `ref` up to `value` on mount (from
- * `mountFrom`, default 0, or no count on mount when null), then from the old
- * value to the new one on every change. A non-number value (a "—" placeholder
- * while loading) resets, so the first real number counts up from `mountFrom`. */
-export function useCountUp(
-  ref: RefObject<Element | null>,
-  value: number | null | undefined,
-  opts: Omit<CountUpOptions, "from"> & { mountFrom?: number | null } = {},
-): void {
-  const last = useRef<{ from: number; to: number } | null>(null);
-  useLayoutEffect(() => {
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-      last.current = null;
-      return;
-    }
-    const prev = last.current;
-    // prev.to === value only when the effect re-runs WITHOUT a change, which is
-    // StrictMode's dev double-invoke. Replay the same count rather than dropping it.
-    const from = prev === null ? (opts.mountFrom === undefined ? 0 : opts.mountFrom) : prev.to === value ? prev.from : prev.to;
-    last.current = { from: from ?? value, to: value };
-    if (from === null || from === value) return;
-    const { mountFrom: _unused, ...rest } = opts;
-    const handle = countUp(ref.current, value, { ...rest, from });
-    return () => handle.cancel();
-  }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 const ACTIVE_TAB = '[aria-selected="true"], [aria-current="page"], [aria-pressed="true"], .active';
@@ -127,31 +100,40 @@ export function useEntrances(routeKey: unknown, scopeKey?: unknown): (el: HTMLEl
   return attach;
 }
 
-/** Sidebar-group motion (disclosure.ts) for the items matching `selector`
- * inside `rootRef`. Call `capture()` right before the state update that opens
- * or closes a group; the commit that follows plays it. A capture is used by
- * the very next commit only, and a commit without one plays nothing. Unmount
- * settles whatever is still moving. */
+/** Sidebar-group motion (disclosure.ts) for the blocks matching `selector`
+ * inside `rootRef`: the chevron above a block that opened or closed turns.
+ * Call `capture()` right before the state update that opens or closes a
+ * group; the commit that follows plays it. A capture is used by the very next
+ * commit only, and a commit without one plays nothing. Unmount settles
+ * whatever is still turning. */
 export function useDisclosure(rootRef: RefObject<HTMLElement | null>, opts: { selector: string; chevron?: string }): { capture(): void } {
   const pending = useRef<DisclosureSnapshot | null>(null);
-  const handle = useRef<MotionHandle | null>(null);
+  const running = useRef(new Set<MotionHandle>());
   const api = useRef<{ capture(): void } | null>(null);
   api.current ??= {
     capture() {
       pending.current = captureDisclosure(rootRef.current, opts.selector);
     },
   };
-  // Every commit: consume the capture, if any. Cancelling what still moves
-  // BEFORE measuring puts every item back in its layout slot; the capture
-  // already holds where each one was painted, so the new motion starts there.
+  // Every commit: consume the capture, if any. A chevron still turning from the
+  // last toggle is NOT stopped first: turn() continues it from where it is
+  // painted, so a double click turns it back instead of snapping it a quarter.
   useLayoutEffect(() => {
     const snap = pending.current;
     pending.current = null;
     if (!snap) return;
-    handle.current?.cancel();
-    handle.current = playDisclosure(snap, { chevron: opts.chevron });
+    const handle = playDisclosure(snap, { chevron: opts.chevron });
+    running.current.add(handle);
+    void handle.finished.then(() => running.current.delete(handle));
   });
-  useLayoutEffect(() => () => handle.current?.cancel(), []);
+  useLayoutEffect(
+    () => () => {
+      const all = [...running.current];
+      running.current.clear();
+      for (const h of all) h.cancel();
+    },
+    [],
+  );
   return api.current;
 }
 

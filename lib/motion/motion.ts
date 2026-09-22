@@ -1,4 +1,4 @@
-// MIRROR of FlightDeck OS flightdeck/web/src/motion/motion.ts at commit 745733922e001557b6ff727d25110b8dde7cd3f6
+// MIRROR of FlightDeck OS flightdeck/web/src/motion/motion.ts at commit 0bccb8796484cc4b368ed1cbf51ec61489c60704
 // (pallefar FlightDeck OS, branch feat/anime-motion-os). Byte-identical below this header: change the OS copy
 // first and re-copy, so Atlas and the OS keep one motion language. lib/motion/README.md says what Atlas uses.
 /** The ONE motion layer for the OS, its sub-apps and Studio (owner decision
@@ -51,8 +51,7 @@ export const MOTION = {
     /** Pill-tab indicator slide (motion.css:74). */
     indicator: 450,
     /** Sidebar group chevron turn (navigation.css:299-301, `transform 0.2s ease`).
-     * The OS plays the submenu's unfold and the rows below it over the same
-     * 200ms, so the three move as one. */
+     * The only motion of a group opening or closing: the submenu snaps. */
     disclosure: 200,
     /** Dialog zoom + fade, open and close (components/ui/dialog.tsx:64,
      * `duration-200`). Side panels (drawers, asides) take it too: every Atlas
@@ -65,8 +64,6 @@ export const MOTION = {
     /** Dropdown menu / popover open and close (dropdown-menu.tsx:45,
      * popover.tsx:33): tw-animate-css's default 150ms, `ease`. */
     popover: 150,
-    /** Stat count-up. Atlas has none; chosen a little longer than arrive. */
-    countUp: 600,
     /** How long after a route change or a page mount content that renders
      * still counts as "first load" and arrives (entrances.ts). Atlas's CSS
      * arrives cards whenever they are inserted; the OS stops after this, or at
@@ -77,7 +74,7 @@ export const MOTION = {
   ease: {
     /** CSS `ease`, which atlas-arrive and the dialog use. */
     standard: [0.25, 0.1, 0.25, 1],
-    /** The tab indicator's curve (motion.css:74). The count-up reuses it. */
+    /** The tab indicator's curve (motion.css:74). */
     emphasized: [0.22, 1, 0.36, 1],
     /** `ease-out`, work-surface-enter. */
     out: [0, 0, 0.58, 1],
@@ -443,43 +440,6 @@ export function turn(el: Element | null | undefined, fromDeg: number, opts: { du
   }).handle;
 }
 
-/** A block that has just become visible unfolds from its top edge: scaleY 0 to
- * 1 while fading in, travelling `fromY` px with the header above it when that
- * header moved too. Paired with glide() on everything below it, this reads as
- * a height animation without animating height, which would re-lay out the
- * page on every frame. Ends handed back to the stylesheet. */
-export function unfold(el: Element | null | undefined, opts: { fromY?: number; duration?: number } = {}): MotionHandle {
-  const target = toElements(el)[0];
-  if (!target || !motionAllowed()) return SETTLED;
-  return drive([target], {
-    from: frame({ opacity: 0, sy: 0, y: opts.fromY ?? 0 }),
-    to: REST,
-    unit: "px",
-    origin: "50% 0",
-    duration: opts.duration ?? MOTION.duration.disclosure,
-    ease: EASE.standard,
-    end: "restore",
-    cancelTo: "restore",
-  }).handle;
-}
-
-/** FLIP: an element whose layout slot just moved glides from where it was
- * painted to where it now is. `fromY` is old top minus new top, in px.
- * Translate only. Ends handed back to the stylesheet. */
-export function glide(targets: MotionTargets, fromY: number, opts: { duration?: number } = {}): MotionHandle {
-  const els = toElements(targets);
-  if (els.length === 0 || fromY === 0 || !motionAllowed()) return SETTLED;
-  return drive(els, {
-    from: frame({ y: fromY }),
-    to: REST,
-    unit: "px",
-    duration: opts.duration ?? MOTION.duration.disclosure,
-    ease: EASE.standard,
-    end: "restore",
-    cancelTo: "restore",
-  }).handle;
-}
-
 /** Several handles as one: settles when all have, cancels all. */
 export function allOf(handles: MotionHandle[]): MotionHandle {
   const live = handles.filter((h) => h !== SETTLED);
@@ -666,139 +626,4 @@ export function slideIndicator(indicator: HTMLElement | null | undefined, target
     end: "hold",
     cancelTo: "end",
   }).handle;
-}
-
-export interface CountUpOptions {
-  /** Start value. Default 0. */
-  from?: number;
-  /** Default 600ms. */
-  duration?: number;
-  /** Formats the number part only, e.g. `(n) => n.toLocaleString("de-DE")`.
-   * It gets values rounded to the target's decimals and must reproduce the
-   * rendered number for `to` exactly, or nothing animates. Leave it out and the
-   * helper finds the plain or locale format that reproduces it. */
-  format?: (n: number) => string;
-}
-
-const NUMBER = /[-−]?\d(?:[\d.,'’  ]*\d)?/;
-
-function numericTextNode(el: Element): Text | null {
-  const walk = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-  for (let n = walk.nextNode(); n; n = walk.nextNode()) if (/\d/.test((n as Text).data)) return n as Text;
-  return null;
-}
-
-function decimalsOf(n: number): number {
-  const s = String(n);
-  const i = s.indexOf(".");
-  return i < 0 || /e/i.test(s) ? 0 : Math.min(s.length - i - 1, 6);
-}
-
-const roundTo = (n: number, d: number) => {
-  const f = 10 ** d;
-  return Math.round(n * f) / f || 0; // `|| 0` folds -0, which Intl prints as "-0"
-};
-
-/** A formatter that reproduces `token` for `to`, or null. */
-function matchFormat(token: string, to: number, el: Element, custom?: (n: number) => string): ((n: number) => string) | null {
-  if (custom) {
-    const d = decimalsOf(to);
-    return custom(roundTo(to, d)) === token ? (n) => custom(roundTo(n, d)) : null;
-  }
-  const lang = el.closest("[lang]")?.getAttribute("lang") || undefined;
-  const locales = [...new Set([undefined, lang, "en-US", "de-DE"])];
-  const shapes: Array<(n: number, d: number) => string> = [
-    (n, d) => n.toFixed(d),
-    ...locales.map((loc) => (n: number, d: number) => n.toLocaleString(loc, { minimumFractionDigits: d, maximumFractionDigits: d })),
-  ];
-  for (let d = 0; d <= 3; d++) {
-    for (const shape of shapes) {
-      try {
-        if (shape(roundTo(to, d), d) === token) return (n) => shape(roundTo(n, d), d);
-      } catch {
-        // A malformed lang="" tag makes Intl throw; that shape just doesn't match.
-      }
-    }
-  }
-  return null;
-}
-
-const counting = new WeakMap<Element, MotionHandle>();
-
-/** Count a rendered number up from `from` to `to`. It animates only the text
- * node holding the number, and only when a formatter reproduces the rendered
- * number exactly, so the final text is byte-identical to the render. When
- * anyone else, such as React with a new value, writes that text mid-count, the
- * count stops and leaves their text. cancel() restores the rendered text. */
-export function countUp(el: Element | null | undefined, to: number, opts: CountUpOptions = {}): MotionHandle {
-  const from = opts.from ?? 0;
-  if (!el || !Number.isFinite(to) || !Number.isFinite(from) || from === to) return SETTLED;
-  if (!motionAllowed() || typeof MutationObserver !== "function") return SETTLED;
-  counting.get(el)?.cancel();
-  const node = numericTextNode(el);
-  const original = node?.data ?? "";
-  const m = NUMBER.exec(original);
-  if (!node || !m) return SETTLED;
-  const fmt = matchFormat(m[0], to, el, opts.format);
-  if (!fmt) return SETTLED;
-  const prefix = original.slice(0, m.index);
-  const suffix = original.slice(m.index + m[0].length);
-  const parent = node.parentNode;
-
-  // Watch OUR text node only, and drain the records of our own writes right
-  // after each one. Any record left over is somebody else, e.g. React
-  // committing a new value or a language switch, writing this node. A mutation
-  // record is queued even when the written text is identical, so a new value
-  // that happens to equal an in-between frame is still seen. Changes elsewhere
-  // in `el`, such as a label beside the number, are not ours to react to.
-  // ⚠ The observer hands pending records to its callback in a MICROTASK, long
-  // before the next animation frame. takeRecords() alone would then find
-  // nothing, so the callback has to remember too.
-  let theirs = false;
-  const note = (records: MutationRecord[]) => {
-    if (records.some((r) => r.type === "characterData") || node.parentNode !== parent) theirs = true;
-  };
-  const watch = new MutationObserver(note);
-  watch.observe(node, { characterData: true });
-  if (parent) watch.observe(parent, { childList: true });
-  const foreign = () => {
-    note(watch.takeRecords());
-    return theirs;
-  };
-
-  const proxy = { v: from };
-  let done = false;
-  let anim: ReturnType<typeof animate> | null = null;
-  let handle: MotionHandle | null = null;
-  let resolve: () => void = () => {};
-  const finished = new Promise<void>((r) => (resolve = r));
-
-  const stop = (restore: boolean) => {
-    if (done) return;
-    done = true;
-    anim?.cancel();
-    const overwritten = foreign();
-    watch.disconnect();
-    if (restore && !overwritten && node.data !== original) node.data = original;
-    if (counting.get(el) === handle) counting.delete(el);
-    resolve();
-  };
-  const write = () => {
-    if (done) return;
-    if (foreign()) return stop(false);
-    node.data = prefix + fmt(proxy.v) + suffix;
-    watch.takeRecords();
-  };
-
-  handle = { finished, cancel: () => stop(true) };
-  counting.set(el, handle);
-  write(); // the start number, synchronously
-  anim = animate(proxy, {
-    v: to,
-    duration: Math.max(1, opts.duration ?? MOTION.duration.countUp),
-    ease: EASE.emphasized,
-    onRender: write,
-    onComplete: () => stop(true),
-  });
-  return handle;
 }

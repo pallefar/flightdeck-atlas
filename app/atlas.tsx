@@ -1,12 +1,5 @@
 "use client";
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useState,
-  useRef,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -79,7 +72,6 @@ import AccessManagement from "./access-management";
 import type { AccessProfile } from "@/lib/access-policy";
 import Ideas from "./ideas";
 import AtlasNavigation from "./atlas-navigation";
-import { useCountUp } from "@/lib/motion/useMotion";
 import ProjectManagement from "./project-management";
 import HelpCenter from "./help-center";
 import FeatureHelp from "./feature-help";
@@ -345,12 +337,6 @@ export default function Atlas() {
   }
   const isDark = loaded && theme === "dark";
   const allData = demo ? examples : projects;
-  // Where the stat tiles' numbers come from (see `Metric`).
-  const metricSource: MetricSource = !loaded
-    ? "loading"
-    : demo
-      ? "examples"
-      : "workspace";
   const globeProjects = allData.filter((p) => !p.archived);
   const data = allData.filter((p) =>
     filter === "Archived" ? !!p.archived : !p.archived,
@@ -937,41 +923,31 @@ export default function Atlas() {
                   </span>
                 </div>
                 {settings.dashboard.showMetrics && (
-                  <section
-                    // Another data source is a new set of tiles: they
-                    // show its numbers at once (see `Metric`).
-                    key={metricSource}
-                    className="metrics"
-                    aria-label="Project overview"
-                  >
+                  <section className="metrics" aria-label="Project overview">
                     <Metric
                       label="TOTAL PROJECTS"
-                      source={metricSource}
-                      value={data.length}
+                      value={data.length.toString()}
                       detail="Across your workspace"
                       icon={<Folder />}
                     />
                     <Metric
                       label="IN PROGRESS"
-                      source={metricSource}
-                      value={active}
-                      pad={2}
+                      value={active.toString().padStart(2, "0")}
                       detail="Ideas becoming reality"
                       icon={<Layers3 />}
                     />
                     <Metric
                       label="TASKS COMPLETE"
-                      source={metricSource}
-                      value={done}
-                      pad={2}
+                      value={done.toString().padStart(2, "0")}
                       detail={`Of ${data.reduce((s, p) => s + p.tasks.length, 0)} total tasks`}
                       icon={<Check />}
                     />
                     <Metric
                       label="ON THE MAP"
-                      source={metricSource}
-                      value={data.filter((p) => p.latitude !== null).length}
-                      pad={2}
+                      value={data
+                        .filter((p) => p.latitude !== null)
+                        .length.toString()
+                        .padStart(2, "0")}
                       detail="Projects with a location"
                       icon={<Globe2 />}
                     />
@@ -1316,91 +1292,28 @@ export default function Atlas() {
     </WellbeingProvider>
   );
 }
-/** Where a stat tile's numbers come from. `loading` is the render before
- * `/api/projects` answers (server HTML and hydration show the demo examples
- * then); `examples` is the demo workspace; `workspace` is the user's own
- * projects. */
-type MetricSource = "loading" | "examples" | "workspace";
 function Metric({
   label,
   value,
-  source,
-  pad = 1,
   detail,
   icon,
 }: {
   label: string;
-  value: number;
-  source: MetricSource;
-  /** Zero-pad to this many digits ("04"). */
-  pad?: number;
+  value: string;
   detail: string;
   icon: React.ReactNode;
 }) {
-  const number = useRef<HTMLElement>(null);
-  const format = (n: number) => String(n).padStart(pad, "0");
-  // The shared motion layer's stat count-up (lib/motion): it replays the
-  // rendered number from the old value on every change, and from 0 when the
-  // tile mounts in the browser. It only counts between two numbers of the
-  // same data. A number from another source is not an old value of this one:
-  // the demo examples painted before the load, then a real workspace of 1
-  // project, would count 4 > 3 > 2 > 1. So:
-  // - before the load (`loading`) nothing counts;
-  // - a change of source mounts new tiles (the section is keyed by it), and
-  //   a tile that replaces one showing another source's number shows its own
-  //   at once, as Atlas did before the layer;
-  // - never over a number already on screen: pulling it back to 0 would flash
-  //   it. So not over server-rendered HTML (the hydration pass), and not when
-  //   this tile replaces one still showing its number (`onScreen`, see
-  //   `paintedMetrics`), which counts from that number.
-  const browserMount = useSyncExternalStore(
-    noSubscription,
-    () => true,
-    () => false,
-  );
-  const onScreen = paintedMetrics.get(label);
-  useCountUp(number, source === "loading" ? null : value, {
-    mountFrom: onScreen
-      ? onScreen.source === source
-        ? onScreen.value
-        : null
-      : browserMount
-        ? 0
-        : null,
-    format,
-  });
-  useLayoutEffect(() => {
-    const painted = { value, source };
-    paintedMetrics.set(label, painted);
-    return () => {
-      if (paintedMetrics.get(label) === painted) paintedMetrics.delete(label);
-    };
-  }, [label, value, source]);
   return (
     <div className="metric">
       <div className="metric-label">
         {label}
         {icon}
       </div>
-      <strong ref={number}>{format(value)}</strong>
+      <strong>{value}</strong>
       <span>{detail}</span>
     </div>
   );
 }
-const noSubscription = () => () => {};
-/** The number each mounted stat tile shows, by label, and its source. The
- * shell mounts again once access loads (`WellbeingProvider` is keyed by the
- * signed-in user), so the dashboard's tiles are replaced about 250ms after the
- * page has painted their numbers. The new tile renders before the old one's
- * cleanup runs, so it finds the painted number here. From the same source it
- * counts from it, which is no count when it is the same; from another source
- * (the demo examples painted before a workspace with projects loads) it shows
- * its number at once. A tile that mounts after the dashboard was gone (Today
- * and advisor, then Portfolio) finds nothing and counts from 0. */
-const paintedMetrics = new Map<
-  string,
-  { value: number; source: MetricSource }
->();
 function ProjectForm({
   open,
   project,
