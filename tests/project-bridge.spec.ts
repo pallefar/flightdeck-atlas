@@ -25,6 +25,7 @@ import {
   REVIEW_FIELDS,
   buildOnboardingPayload,
   checklistSuggestions,
+  onboardStagesSchema,
   onboardingEnvelope,
   onboardingSchema,
   onboardingStatusSchema,
@@ -723,6 +724,24 @@ const statusRequest = (refresh = true) =>
   });
 const sendTo = (destinationWorkspaceId: string, revision = 7) =>
   send({ destinationWorkspaceId, revision });
+const closeSend = (body: unknown, headers: Record<string, string> = {}) =>
+  new Request(`${ORIGIN}/api/flightdeck/onboard/${ATLAS_ID}/close`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: ORIGIN,
+      "Sec-Fetch-Site": "same-origin",
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  });
+const listRequest = (refresh: boolean, headers: Record<string, string> = {}) =>
+  new Request(
+    `${ORIGIN}/api/flightdeck/onboard${refresh ? "?refresh=1" : ""}`,
+    {
+      headers: { "Sec-Fetch-Site": "same-origin", ...headers },
+    },
+  );
 
 /** A D1-shaped adapter over node:sqlite with the real onboarding migrations
  * (0004 onwards). */
@@ -795,6 +814,8 @@ function harness(
       "hr-de": structuredClone(os.context.projectsBeforePromotion),
     } as unknown as Record<string, { projects: Record<string, unknown>[] }>,
     calls: [] as string[],
+    /** Other projects the caller can see. */
+    visible: [] as string[],
     submits: [] as OnboardingEnvelope[],
     authorize: 0,
     onSubmit: (async (): Promise<SubmitResult> => ({
@@ -849,7 +870,7 @@ function harness(
       return project && id === project.id ? { project, canEdit: true } : null;
     },
     async visibleProjectIds() {
-      return project ? [project.id] : [];
+      return [...(project ? [project.id] : []), ...fake.visible];
     },
     reader,
     submissions: () => ({
@@ -897,6 +918,38 @@ function harness(
       const response = await route.GET(statusRequest(refresh), ATLAS_ID);
       expect(response.status).toBe(200);
       return onboardingStatusSchema.parse(await response.json());
+    },
+    async list(refresh = true) {
+      const response = await route.LIST(listRequest(refresh));
+      expect(response.status).toBe(200);
+      return onboardStagesSchema.parse(await response.json());
+    },
+    /** Closes the send the caller last saw. */
+    async close(seen: OnboardingStatus) {
+      return route.CLOSE(
+        closeSend({ updatedAt: seen.operation!.updatedAt }),
+        ATLAS_ID,
+      );
+    },
+    /** A filed send of another project, straight into the table. */
+    fileOther(id: string, submissionId: string, checkedAt: string | null) {
+      store.sqlite
+        .prepare(
+          "INSERT INTO atlas_flightdeck_operations (id,atlas_project_id,atlas_revision,idempotency_key,destination_workspace_id,proposed_label,state,submission_id,created_by,updated_at,checked_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        )
+        .run(
+          `op-${id}`,
+          id,
+          1,
+          `key-${id}`,
+          "hr-de",
+          "Other",
+          "filed",
+          submissionId,
+          "user-0",
+          os.receivedAt,
+          checkedAt,
+        );
     },
   };
 }
@@ -1284,6 +1337,246 @@ test("a refused retry after the receipt was never stored keeps the reservation, 
   ]);
 });
 
+test("a retry FlightDeck refuses for good can be closed, and the next send follows what FlightDeck holds instead of filing twice", async () => {
+  const h = harness();
+  h.fake.onSubmit = async () => ({ state: "os_unreachable" });
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  const [reserved] = h.store.ops();
+  // FlightDeck checks the format before it looks at the key, so these exact
+  // bytes are refused on every retry: they were never filed under any key.
+  h.fake.onSubmit = async () => ({ state: "invalid_submission" });
+  for (let i = 0; i < 3; i++) {
+    const retry = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+    expect(retry.status).toBe(502);
+    expect(((await retry.json()) as { error: string }).error).toMatch(
+      /close this unconfirmed send/i,
+    );
+  }
+  // A corrected revision and another destination still wait for this one,
+  // and both refusals say how to close it.
+  h.setProject(readyProject({ revision: 8 }));
+  for (const request of [sendTo("hr-de", 8), sendTo("te-ops", 7)]) {
+    const blocked = await h.route.POST(request, ATLAS_ID);
+    expect(blocked.status).toBe(409);
+    expect(((await blocked.json()) as { error: string }).error).toMatch(
+      /close it/i,
+    );
+  }
+  const stuck = await h.status(false);
+  expect(stuck).toMatchObject({
+    retryPending: true,
+    canClose: true,
+    operation: { state: "reserved", stage: "not-confirmed" },
+  });
+  // The way out: close it. Nothing is sent and the OS is not read.
+  h.fake.calls.length = 0;
+  const closed = await h.close(stuck);
+  expect(closed.status).toBe(200);
+  expect(onboardingStatusSchema.parse(await closed.json())).toMatchObject({
+    operation: { state: "refused", stage: "closed", reasonCode: "abandoned" },
+    canSend: true,
+    retryPending: false,
+    canClose: false,
+    pollable: false,
+    pendingPayload: null,
+  });
+  expect(h.fake.calls).toEqual([]);
+  expect(h.store.ops()).toEqual([
+    expect.objectContaining({
+      id: reserved.id,
+      idempotency_key: reserved.idempotency_key,
+      state: "refused",
+      reason_code: "abandoned",
+      request_body: null,
+    }),
+  ]);
+  // Say FlightDeck did file the first attempt after all: the next send, with
+  // a fresh key, meets its subject lock, and Atlas follows that request once
+  // the read-back proves it is this project's. Nothing is filed twice.
+  h.fake.onSubmit = async () => ({
+    state: "already_submitted",
+    submissionId: os.submissionId,
+    osState: "filed",
+  });
+  const again = await h.route.POST(sendTo("hr-de", 8), ATLAS_ID);
+  expect(again.status).toBe(202);
+  const [, second] = h.store.ops();
+  expect(second).toMatchObject({
+    state: "filed",
+    submission_id: os.submissionId,
+    adopted: 1,
+  });
+  expect(second.idempotency_key).not.toBe(reserved.idempotency_key);
+  expect(h.fake.submits.at(-1)!.payload.idempotencyKey).toBe(
+    second.idempotency_key,
+  );
+  // A send FlightDeck confirmed cannot be closed.
+  const late = await h.close(await h.status(false));
+  expect(late.status).toBe(409);
+  expect(await late.json()).toMatchObject({ code: "not_closable" });
+  expect(h.store.ops()[1]).toMatchObject({ state: "filed" });
+});
+
+test("a reserved request Atlas cannot read can be closed instead of blocking the project for good", async () => {
+  const h = harness();
+  h.fake.onSubmit = async () => ({ state: "os_unreachable" });
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  h.store.sqlite
+    .prepare("UPDATE atlas_flightdeck_operations SET request_body='{'")
+    .run();
+  const unreadable = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  expect(unreadable.status).toBe(409);
+  const body = (await unreadable.json()) as { code: string; error: string };
+  expect(body.code).toBe("pending_send_unreadable");
+  expect(body.error).toMatch(/close this unconfirmed send/i);
+  const seen = await h.status(false);
+  expect(seen.canClose).toBe(true);
+  expect((await h.close(seen)).status).toBe(200);
+  h.fake.onSubmit = async () => ({
+    state: "ok",
+    data: {
+      submissionId: os.otherSubmissionId,
+      receivedAt: os.receivedAt,
+      payloadSha256: os.payloadSha256,
+      duplicate: false,
+    },
+  });
+  expect((await h.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  expect(h.store.ops().map((o) => o.state)).toEqual(["refused", "filed"]);
+});
+
+test("only the Super Admin closes a send, same-origin, and only the send they last saw", async () => {
+  const h = harness();
+  h.fake.onSubmit = async () => ({ state: "os_unreachable" });
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  const seen = await h.status(false);
+  const updatedAt = seen.operation!.updatedAt;
+  const crossSite: Record<string, string>[] = [
+    { Origin: "https://attacker.example" },
+    { Origin: "", "Sec-Fetch-Site": "cross-site" },
+  ];
+  for (const headers of crossSite) {
+    const response = await h.route.CLOSE(
+      closeSend({ updatedAt }, headers),
+      ATLAS_ID,
+    );
+    expect(response.status).toBe(403);
+  }
+  h.as("member-1", false);
+  expect((await h.status(false)).canClose).toBe(false);
+  const member = await h.route.CLOSE(closeSend({ updatedAt }), ATLAS_ID);
+  expect(member.status).toBe(403);
+  expect(await member.json()).toMatchObject({ code: "not_permitted" });
+  h.as("user-1");
+  for (const body of [{}, { updatedAt: "yesterday" }, { updatedAt, x: 1 }])
+    expect(
+      (await h.route.CLOSE(closeSend(body), ATLAS_ID)).status,
+      JSON.stringify(body),
+    ).toBe(400);
+  // A retry since then changed the send: closing what was seen is refused.
+  h.tick(1_000);
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  const stale = await h.close(seen);
+  expect(stale.status).toBe(409);
+  expect(await stale.json()).toMatchObject({ code: "status_changed" });
+  expect(h.store.ops()).toEqual([
+    expect.objectContaining({ state: "reserved" }),
+  ]);
+  // Nothing to close at all.
+  const none = harness();
+  const nothing = await none.route.CLOSE(closeSend({ updatedAt }), ATLAS_ID);
+  expect(nothing.status).toBe(409);
+  expect(await nothing.json()).toMatchObject({ code: "not_closable" });
+});
+
+test("a retry still reaches FlightDeck after its destination was disabled or unshared, so a lost reply can be reconciled", async () => {
+  for (const change of ["disabled", "unshared"] as const) {
+    const h = harness();
+    h.fake.onSubmit = async () => ({ state: "os_unreachable" });
+    await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+    const list = h.fake.workspaces.workspaces as {
+      id: string;
+      enabled: boolean;
+    }[];
+    if (change === "disabled")
+      list.find((w) => w.id === "hr-de")!.enabled = false;
+    else h.fake.workspaces.workspaces = list.filter((w) => w.id !== "hr-de");
+    // The destination was checked when the key was reserved. FlightDeck
+    // answers a known key before it looks at the target, so resending the
+    // same bytes is the only way to learn what it holds.
+    h.fake.calls.length = 0;
+    h.fake.onSubmit = duplicateReceipt;
+    const retry = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+    expect(retry.status, change).toBe(202);
+    expect(h.fake.calls, change).toEqual(["submit"]);
+    expect(h.store.ops(), change).toEqual([
+      expect.objectContaining({
+        state: "filed",
+        submission_id: os.submissionId,
+        destination_workspace_id: "hr-de",
+      }),
+    ]);
+  }
+});
+
+test("a filed send FlightDeck no longer knows can be closed and sent again; one it knows cannot", async () => {
+  const h = harness();
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  h.fake.onRead = async () => ({ state: "not_found" });
+  h.tick(61_000);
+  const lost = await h.status();
+  expect(lost).toMatchObject({
+    canSend: false,
+    canClose: true,
+    operation: { state: "filed", reasonCode: "submission_not_found" },
+  });
+  expect(lost.notice).toMatch(/close this send/i);
+  expect(lost.notice).not.toMatch(/before sending again/i);
+  // FlightDeck knows it again: it can no longer be closed.
+  h.fake.onRead = h.readAs("filed");
+  h.tick(61_000);
+  const known = await h.status();
+  expect(known).toMatchObject({
+    canClose: false,
+    notice: null,
+    operation: { state: "filed", reasonCode: null },
+  });
+  const refused = await h.close(known);
+  expect(refused.status).toBe(409);
+  expect(await refused.json()).toMatchObject({ code: "not_closable" });
+  // Unknown again: closed, then sent again with a fresh key.
+  h.fake.onRead = async () => ({ state: "not_found" });
+  h.tick(61_000);
+  const gone = await h.status();
+  expect((await h.close(gone)).status).toBe(200);
+  expect(h.store.ops()[0]).toMatchObject({
+    state: "refused",
+    reason_code: "abandoned",
+    submission_id: os.submissionId,
+  });
+  expect(await h.status(false)).toMatchObject({
+    pollable: false,
+    canSend: true,
+    operation: { stage: "closed" },
+  });
+  h.fake.onSubmit = async () => ({
+    state: "ok",
+    data: {
+      submissionId: os.otherSubmissionId,
+      receivedAt: os.receivedAt,
+      payloadSha256: os.payloadSha256,
+      duplicate: false,
+    },
+  });
+  expect((await h.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  const [first, second] = h.store.ops();
+  expect(second).toMatchObject({
+    state: "filed",
+    submission_id: os.otherSubmissionId,
+  });
+  expect(second.idempotency_key).not.toBe(first.idempotency_key);
+});
+
 test("an email or phone number outside the summary and success measure is refused before anything is reserved or sent", async () => {
   const base = readyProject().onboarding!;
   const cases: [string, Partial<Project>][] = [
@@ -1655,16 +1948,85 @@ test("definitive OS refusals close the send; an OS subject lock is adopted only 
   });
 });
 
-test("the stage list returns stored states for visible projects without reading the OS", async () => {
+test("the stage list returns stored states for visible projects, and only a Super Admin refresh reads the OS", async () => {
   const h = harness();
   await h.route.POST(sendTo("hr-de"), ATLAS_ID);
   h.fake.calls.length = 0;
-  const response = await h.route.LIST();
+  const response = await h.route.LIST(listRequest(false));
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({
     stages: { [ATLAS_ID]: "submitted" },
+    checked: { [ATLAS_ID]: os.receivedAt },
+    retryAfter: null,
   });
+  // FlightDeck asks for more information. Nobody has the form open.
+  h.fake.onRead = h.readAs("needsMoreInfo");
+  h.tick(5 * 60_000);
+  expect((await h.list(false)).stages[ATLAS_ID]).toBe("submitted");
+  // A member's list never reads the OS, and a refresh is same-origin only.
+  h.as("member-1", false);
+  expect((await h.list(true)).stages[ATLAS_ID]).toBe("submitted");
+  const crossSite = await h.route.LIST(
+    listRequest(true, { "Sec-Fetch-Site": "cross-site" }),
+  );
+  expect(crossSite.status).toBe(403);
   expect(h.fake.calls).toEqual([]);
+  // The Super Admin's list (and the dashboard, which reads it) checks the
+  // send, so every list in Atlas follows FlightDeck.
+  h.as("user-1");
+  const followed = await h.list(true);
+  expect(followed.stages[ATLAS_ID]).toBe("needs-more-info");
+  expect(followed.checked[ATLAS_ID]).toBe("2026-09-22T09:05:00.000Z");
+  expect(h.fake.calls).toEqual([`read:${os.submissionId}`]);
+  h.as("member-1", false);
+  expect((await h.list(false)).stages[ATLAS_ID]).toBe("needs-more-info");
+});
+
+test("a list refresh checks at most two due sends a call, longest unchecked first, each at most every five minutes", async () => {
+  const h = harness({ project: null });
+  const ids = [1, 2, 3, 4, 5].map(
+    (n) => `${n}${n}${n}${n}${n}${n}${n}${n}-2222-4333-8444-555555555555`,
+  );
+  const submission = (n: number) => String(n).repeat(24);
+  // Checked 20, 10, never, 30 minutes ago and just now; the fifth project's
+  // send is not visible to the caller.
+  const checked = [
+    "2026-09-22T08:40:00.000Z",
+    "2026-09-22T08:50:00.000Z",
+    null,
+    "2026-09-22T08:30:00.000Z",
+    "2026-09-22T09:00:00.000Z",
+  ];
+  ids.forEach((id, i) => h.fileOther(id, submission(i + 1), checked[i]));
+  h.fake.visible.push(...ids.slice(0, 4));
+  h.fake.onRead = async (id) => {
+    const r = await h.readAs("filed")();
+    const n = Number(id[0]);
+    return r.state === "ok"
+      ? {
+          ...r,
+          data: { ...r.data, submissionId: id, subject: `atlas-${ids[n - 1]}` },
+        }
+      : r;
+  };
+  const reads = () => h.fake.calls.filter((c) => c.startsWith("read:"));
+  await h.list(true);
+  expect(reads()).toEqual([`read:${submission(3)}`, `read:${submission(4)}`]);
+  await h.list(true);
+  expect(reads().slice(2)).toEqual([
+    `read:${submission(1)}`,
+    `read:${submission(2)}`,
+  ]);
+  // Every visible send was checked within five minutes: nothing is read.
+  await h.list(true);
+  expect(reads()).toHaveLength(4);
+  // A rate limit stops the round and is passed on.
+  h.tick(5 * 60_000);
+  h.fake.onRead = async () => ({ state: "rate_limited", retryAfter: 30 });
+  const busy = await h.list(true);
+  expect(busy.retryAfter).toBe(30);
+  expect(reads()).toHaveLength(5);
+  expect(reads().some((r) => r.endsWith(submission(5)))).toBe(false);
 });
 
 // ── Browser: the To FlightDeck form over the running Atlas ────────────────
@@ -1747,6 +2109,7 @@ function statusBody(
     "needs-more-info": "rejected",
     rejected: "rejected",
     "not-sent": "refused",
+    closed: "refused",
   } as const;
   return {
     operation: stage
@@ -1755,7 +2118,12 @@ function statusBody(
           stage,
           destinationWorkspaceId: "hr-de",
           submittedAt: os.receivedAt,
-          reasonCode: stage === "needs-more-info" ? "needs-more-info" : null,
+          reasonCode:
+            stage === "needs-more-info"
+              ? "needs-more-info"
+              : stage === "closed"
+                ? "abandoned"
+                : null,
           setupState: stage === "setup-in-progress" ? "awaiting-cowork" : null,
           atlasRevision: 2,
           adopted: false,
@@ -1766,7 +2134,9 @@ function statusBody(
     link: null,
     pendingPayload: null,
     canSend:
-      !stage || ["needs-more-info", "rejected", "not-sent"].includes(stage),
+      !stage ||
+      ["needs-more-info", "rejected", "not-sent", "closed"].includes(stage),
+    canClose: false,
     retryPending: false,
     pollable: stage === "submitted" || stage === "linked",
     notice: null,
@@ -1787,6 +2157,13 @@ test("onboarding drafts persist, export, and remove without creating an OS proje
     (
       await request.post(`/api/flightdeck/onboard/${ATLAS_ID}`, {
         data: { destinationWorkspaceId: "hr-de", revision: 1 },
+      })
+    ).status(),
+  ).toBe(401);
+  expect(
+    (
+      await request.post(`/api/flightdeck/onboard/${ATLAS_ID}/close`, {
+        data: { updatedAt: new Date().toISOString() },
       })
     ).status(),
   ).toBe(401);
@@ -1831,7 +2208,12 @@ test("onboarding drafts persist, export, and remove without creating an OS proje
     // import stays disconnected. No response carries the credential.
     const responses = await page.evaluate(async (id) => {
       const status = await fetch(`/api/flightdeck/onboard/${id}`);
-      const list = await fetch("/api/flightdeck/onboard");
+      const list = await fetch("/api/flightdeck/onboard?refresh=1");
+      const close = await fetch(`/api/flightdeck/onboard/${id}/close`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ updatedAt: new Date().toISOString() }),
+      });
       const onboard = await fetch(`/api/flightdeck/onboard/${id}`, {
         method: "POST",
       });
@@ -1846,6 +2228,9 @@ test("onboarding drafts persist, export, and remove without creating an OS proje
         status: status.status,
         statusBody: await status.text(),
         list: list.status,
+        listBody: await list.text(),
+        close: close.status,
+        closeBody: await close.text(),
         onboard: onboard.status,
         onboardBody: await onboard.text(),
         imported: imported.status,
@@ -1854,13 +2239,26 @@ test("onboarding drafts persist, export, and remove without creating an OS proje
     expect(responses).toMatchObject({
       status: 200,
       list: 200,
+      close: 409,
       onboard: 415,
       imported: 503,
     });
+    // Nothing was sent, so there is nothing to close.
+    expect(JSON.parse(responses.closeBody)).toMatchObject({
+      code: "not_closable",
+    });
+    expect(
+      onboardStagesSchema.parse(JSON.parse(responses.listBody)).stages,
+    ).not.toHaveProperty(project.id);
     expect(
       onboardingStatusSchema.parse(JSON.parse(responses.statusBody)),
     ).toMatchObject({ operation: null, link: null });
-    for (const text of [responses.statusBody, responses.onboardBody])
+    for (const text of [
+      responses.statusBody,
+      responses.onboardBody,
+      responses.listBody,
+      responses.closeBody,
+    ])
       expect(text).not.toMatch(/token|bearer|ATLAS_FLIGHTDECK|INBOUND/i);
     await row.getByRole("button", { name: "Remove draft" }).click();
     await expect(row.getByText("Not prepared", { exact: true })).toBeVisible();
@@ -2091,6 +2489,176 @@ test("needs more info reopens the draft for editing and sending again", async ({
     await expect(
       row.getByRole("button", { name: "Send to FlightDeck" }),
     ).toBeEnabled();
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
+test("the Super Admin can close an unconfirmed send from the form, and the draft opens again", async ({
+  page,
+}) => {
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const project = await createProject(page, {
+    name: "Close QA",
+    description: "Summary",
+    benefit: "Measure",
+    functionArea: "HR",
+    onboardingStage: "Ready for FlightDeck",
+    flightdeckDraft: { label: "Close QA", workspaceHint: "" },
+    onboarding: { countryCode: "DE", worksCouncilRelevant: "no" },
+  });
+  const pendingPayload = buildOnboardingPayload({
+    project,
+    destinationWorkspaceId: "hr-de",
+    idempotencyKey: KEY,
+    installationId: "atlas-local",
+    requestedBy: HASH,
+  });
+  let status = statusBody("not-confirmed", {
+    retryPending: true,
+    canSend: true,
+    canClose: true,
+    pendingPayload,
+  });
+  status = {
+    ...status,
+    operation: {
+      ...status.operation!,
+      atlasRevision: project.revision,
+      reasonCode: "invalid_submission",
+    },
+  };
+  const closes: unknown[] = [];
+  const sends: unknown[] = [];
+  await page.route(`**/api/flightdeck/onboard/${project.id}**`, (route) => {
+    const r = route.request();
+    if (r.method() === "POST") {
+      if (new URL(r.url()).pathname.endsWith("/close")) {
+        closes.push(r.postDataJSON());
+        status = statusBody("closed");
+      } else sends.push(r.postDataJSON());
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(status),
+    });
+  });
+  try {
+    await page.reload();
+    await page.getByRole("button", { name: /To FlightDeck/ }).click();
+    const row = page.locator("article.bridge-project", { hasText: "Close QA" });
+    await row.getByRole("button", { name: "Edit draft", exact: true }).click();
+    // Locked while the send is unconfirmed; Retry is the normal way on.
+    await expect(
+      row.getByRole("button", { name: "Save onboarding draft" }),
+    ).toBeDisabled();
+    await row.getByRole("tab", { name: "Review & send" }).click();
+    await expect(row.getByRole("button", { name: "Retry send" })).toBeEnabled();
+    // Closing asks first and says what it means.
+    await row
+      .getByRole("button", { name: "Close this unconfirmed send" })
+      .click();
+    await expect(
+      row.getByText(/if FlightDeck did file it, the next send follows/i),
+    ).toBeVisible();
+    await row.getByRole("button", { name: "Keep it", exact: true }).click();
+    expect(closes).toEqual([]);
+    await row
+      .getByRole("button", { name: "Close this unconfirmed send" })
+      .click();
+    await row
+      .getByRole("button", { name: "Close the send", exact: true })
+      .click();
+    await expect.poll(() => closes).toEqual([{ updatedAt: os.receivedAt }]);
+    expect(sends).toEqual([]);
+    await expect(
+      row.getByText(/closed this unconfirmed send/i).first(),
+    ).toBeVisible();
+    await expect(row.getByText("Send closed", { exact: true })).toBeVisible();
+    await expect(
+      row.getByRole("button", { name: "Close this unconfirmed send" }),
+    ).toHaveCount(0);
+    await expect(
+      row.getByRole("button", { name: "Save onboarding draft" }),
+    ).toBeEnabled();
+    await expect(
+      row.getByRole("region", { name: "What will be sent" }),
+    ).toBeVisible();
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
+test("the To FlightDeck list and the dashboard follow FlightDeck without the form open, and say when it last checked", async ({
+  page,
+}) => {
+  await page.clock.install();
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const project = await createProject(page, {
+    name: "Follow QA",
+    functionArea: "HR",
+    flightdeckDraft: { label: "Follow QA", workspaceHint: "" },
+  });
+  let stage = "submitted";
+  let checkedAt: string | null = null;
+  const lists: string[] = [];
+  await page.route(
+    (url) => url.pathname === "/api/flightdeck/onboard",
+    (route) => {
+      lists.push(route.request().url());
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          stages: { [project.id]: stage },
+          checked: { [project.id]: checkedAt },
+          retryAfter: null,
+        }),
+      });
+    },
+  );
+  const forms: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes(`/api/flightdeck/onboard/${project.id}`))
+      forms.push(r.url());
+  });
+  try {
+    await page.reload();
+    await page.getByRole("button", { name: /To FlightDeck/ }).click();
+    const row = page.locator("article.bridge-project", {
+      hasText: "Follow QA",
+    });
+    await expect(row.getByText("Submitted", { exact: true })).toBeVisible();
+    await expect(
+      row.getByText("Not checked with FlightDeck yet", { exact: true }),
+    ).toBeVisible();
+    // The Super Admin's list asks the server to check FlightDeck.
+    await expect
+      .poll(() => lists.map((u) => new URL(u).search).at(-1))
+      .toBe("?refresh=1");
+    stage = "linked";
+    checkedAt = "2026-09-22T09:05:00.000Z";
+    await page.clock.fastForward(61_000);
+    await expect(row.getByText("Linked", { exact: true })).toBeVisible();
+    await expect(row.getByText(/^Last checked with FlightDeck/)).toBeVisible();
+    stage = "needs-more-info";
+    await page.clock.fastForward(61_000);
+    await expect(
+      row.getByText("Needs more info", { exact: true }),
+    ).toBeVisible();
+    // The form was never opened, and never asked.
+    await expect(row.getByRole("tablist")).toHaveCount(0);
+    expect(forms).toEqual([]);
+    // The dashboard card reads the same list.
+    await page.goto("/");
+    await expect(
+      page.getByText(
+        "Onboarding: 0 sent to FlightDeck, 0 linked, 1 need more info.",
+      ),
+    ).toBeVisible();
   } finally {
     await removeProject(page, project.id);
   }

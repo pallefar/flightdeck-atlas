@@ -1083,6 +1083,17 @@
 .fd-send > p {
   flex-basis: 100%;
 }
+.fd-close,
+.fd-close > [role="group"] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+.fd-close > [role="group"] > p {
+  flex-basis: 100%;
+  margin: 0;
+}
 .advantage-connect {
   display: flex;
   gap: 20px;

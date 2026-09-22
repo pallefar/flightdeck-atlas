@@ -25,8 +25,10 @@ import {
 import { downloadText } from "@/lib/briefing";
 import { useFlightDeckContext } from "./flightdeck-context-switcher";
 import {
+  CHECK_NOTE,
   OnboardingEditor,
   STAGE_LABEL,
+  checkedLine,
   useOnboardingStages,
 } from "./flightdeck-onboarding";
 import type { ContextState } from "@/lib/flightdeck/context";
@@ -119,7 +121,7 @@ export default function FlightDeckConnection({
     [query, setQuery] = useState("");
   const [editing, setEditing] = useState<string | null>(null),
     [message, setMessage] = useState("");
-  const onboarding = useOnboardingStages();
+  const onboarding = useOnboardingStages(superAdmin);
   const [importing, setImporting] = useState<string | null>(null);
   const context = useFlightDeckContext(superAdmin);
   const contextRow =
@@ -377,7 +379,8 @@ export default function FlightDeckConnection({
             Describe an Atlas project for FlightDeck in three steps: Basics,
             FlightDeck details, then Review &amp; send. Saving a draft sends
             nothing. The Atlas Super Admin reviews every field and sends it as a
-            request; an OS admin decides, and nothing is created automatically.
+            request; an OS admin decides, and nothing is created automatically.{" "}
+            {CHECK_NOTE} Each sent project says when it was last checked.
           </p>
           <label className="bridge-search">
             <Search size={16} />
@@ -420,6 +423,13 @@ export default function FlightDeckConnection({
                         ? ` · ${p.flightdeckDraft.workspaceHint || "Choose workspace when connected"}`
                         : " · Atlas only"}
                     </p>
+                    {(stage === "submitted" ||
+                      stage === "linked" ||
+                      stage === "setup-in-progress") && (
+                      <p className="fd-hint">
+                        {checkedLine(onboarding.checked[p.id] ?? null)}
+                      </p>
+                    )}
                   </div>
                   <span
                     className={`status ${stage === "linked" || stage === "setup-in-progress" || stage === "setup-complete" ? "completed" : p.flightdeckDraft || stage ? "planning" : ""}`}

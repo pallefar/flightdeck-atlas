@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { z } from "zod";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -65,7 +66,27 @@ export const STAGE_LABEL: Record<OnboardingStage, string> = {
   "needs-more-info": "Needs more info",
   rejected: "Declined",
   "not-sent": "Not sent",
+  closed: "Send closed",
 };
+/** Stages whose status FlightDeck may still change. */
+const OPEN_STAGES: OnboardingStage[] = [
+  "submitted",
+  "linked",
+  "setup-in-progress",
+];
+const when = (iso: string) =>
+  new Date(iso).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+/** When Atlas last read the send back, for a status that can still change:
+ * Atlas has no background job, so it can be out of date. */
+export const checkedLine = (checkedAt: string | null) =>
+  checkedAt
+    ? `Last checked with FlightDeck: ${when(checkedAt)}`
+    : "Not checked with FlightDeck yet";
+export const CHECK_NOTE =
+  "Atlas checks FlightDeck only while the Atlas Super Admin has Atlas open.";
 const REASON_TEXT: Record<string, string> = {
   os_unreachable: "FlightDeck could not be reached.",
   invalid_response: "FlightDeck answered unexpectedly.",
@@ -84,6 +105,8 @@ const REASON_TEXT: Record<string, string> = {
     "FlightDeck does not publish its instance id yet, so Atlas cannot record the link.",
   link_conflict:
     "That FlightDeck project is already linked elsewhere, so Atlas did not link it.",
+  submission_not_found: "FlightDeck does not know this request.",
+  abandoned: "The Atlas Super Admin closed it before FlightDeck confirmed it.",
   duplicate: "It duplicates another request.",
   "out-of-scope": "It is out of scope for FlightDeck.",
   other: "No reason code was given.",
@@ -201,10 +224,11 @@ async function fetchStatus(projectId: string, refresh: boolean) {
     return null;
   }
 }
-/** Reads the stored status; the Super Admin's view also asks the server to
- * check FlightDeck. At most once a minute, backing off on failures and on
- * FlightDeck's Retry-After: the credential allows 30 requests a minute for
- * everything Atlas does, and the server enforces its own minute too. */
+/** Reads the stored status every minute while it can still change; the
+ * Super Admin's view also asks the server to check FlightDeck. Backs off on
+ * failures and on FlightDeck's Retry-After: the credential allows 30
+ * requests a minute for everything Atlas does, and the server allows one
+ * read-back per send a minute. */
 function useOnboardingStatus(
   projectId: string,
   superAdmin: boolean,
@@ -251,36 +275,67 @@ function useOnboardingStatus(
       live = false;
     };
   }, [projectId, superAdmin, settle]);
+  // Everyone's open form follows the stored status; only the Super Admin's
+  // asks the server to read FlightDeck.
   useEffect(() => {
-    if (!superAdmin || !status?.pollable) return;
+    if (!status?.pollable) return;
     const timer = window.setTimeout(() => {
-      void load(true).then(() => setAttempt((n) => n + 1));
+      void load(superAdmin).then(() => setAttempt((n) => n + 1));
     }, delay.current);
     return () => window.clearTimeout(timer);
   }, [status, attempt, superAdmin, load]);
   return { status, show, failed, load };
 }
 
-export function useOnboardingStages() {
+/** The stored stage of every project the caller can see, and when each send
+ * was last checked, reloaded every minute so the list and the dashboard
+ * follow FlightDeck. The Super Admin's reload asks the server to check a few
+ * due sends first (at most two a call, each at most every five minutes), so
+ * no status waits for someone to open its form. */
+export function useOnboardingStages(superAdmin: boolean) {
   const [stages, setStages] = useState<Record<string, OnboardingStage> | null>(
     null,
   );
+  const [checked, setChecked] = useState<Record<string, string | null>>({});
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let live = true;
-    fetch("/api/flightdeck/onboard", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : Promise.reject(Error("stages"))))
-      .then((body) => {
-        const parsed = onboardStagesSchema.safeParse(body);
-        if (!live) return;
-        if (parsed.success) setStages(parsed.data.stages);
-        else setFailed(true);
-      })
-      .catch(() => live && setFailed(true));
+    let timer: number | undefined;
+    let delay = POLL_MS;
+    const run = async () => {
+      let next: z.infer<typeof onboardStagesSchema> | null = null;
+      try {
+        const response = await fetch(
+          `/api/flightdeck/onboard${superAdmin ? "?refresh=1" : ""}`,
+          { cache: "no-store" },
+        );
+        const parsed = onboardStagesSchema.safeParse(
+          response.ok ? await response.json() : null,
+        );
+        next = parsed.success ? parsed.data : null;
+      } catch {
+        next = null;
+      }
+      if (!live) return;
+      if (next) {
+        setStages(next.stages);
+        setChecked(next.checked);
+        setFailed(false);
+        delay = next.retryAfter
+          ? Math.max(POLL_MS, next.retryAfter * 1000)
+          : POLL_MS;
+      } else {
+        setFailed(true);
+        delay = Math.min(delay * 2, MAX_BACKOFF_MS);
+      }
+      timer = window.setTimeout(() => void run(), delay);
+    };
+    void run();
     return () => {
       live = false;
+      window.clearTimeout(timer);
     };
-  }, []);
+  }, [superAdmin]);
   const mark = useCallback(
     (id: string, stage: OnboardingStage | null) =>
       setStages((current) => {
@@ -291,7 +346,7 @@ export function useOnboardingStages() {
       }),
     [],
   );
-  return { stages, failed, mark };
+  return { stages, checked, failed, mark };
 }
 
 export function OnboardingTimeline({ stage }: { stage: OnboardingStage }) {
@@ -314,9 +369,11 @@ export function OnboardingTimeline({ stage }: { stage: OnboardingStage }) {
 function StatusBanner({
   status,
   workspaces,
+  superAdmin,
 }: {
   status: OnboardingStatus;
   workspaces: OsContextEntry[];
+  superAdmin: boolean;
 }) {
   const op = status.operation;
   if (!op) return null;
@@ -355,13 +412,25 @@ function StatusBanner({
       tone = "warn";
       text = `FlightDeck refused the request. ${reason} Nothing was filed; you can send again once this is fixed.`;
       break;
+    case "closed":
+      tone = "warn";
+      text =
+        "The Atlas Super Admin closed this unconfirmed send, so the draft is open again. If FlightDeck did file it after all, the next send follows that request instead of filing a second one.";
+      break;
   }
+  const open = OPEN_STAGES.includes(op.stage);
   return (
     <div className={`fd-banner ${tone}`}>
       {tone ? <AlertTriangle size={16} /> : <Check size={16} />}
       <p>
         {text.trim()}
         {status.notice && <span className="fd-hint"> {status.notice}</span>}
+        {open && (
+          <span className="fd-hint">
+            {" "}
+            {checkedLine(op.checkedAt)}.{superAdmin ? "" : ` ${CHECK_NOTE}`}
+          </span>
+        )}
       </p>
     </div>
   );
@@ -420,6 +489,8 @@ export function OnboardingEditor({
   const [tab, setTab] = useState<OnboardingTab>("basics");
   const [destination, setDestination] = useState("");
   const [sending, setSending] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
   const [error, setError] = useState("");
   const [newSource, setNewSource] = useState("");
   const [newAccess, setNewAccess] = useState<{
@@ -586,6 +657,47 @@ export function OnboardingEditor({
       setSending(false);
     }
   }
+  /** Closes the send FlightDeck never confirmed (or no longer knows), so
+   * the draft opens again. Names the send this form shows, so a retry or a
+   * new send made meanwhile is never closed by mistake. */
+  async function closeSend() {
+    if (!op) return;
+    setClosing(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `/api/flightdeck/onboard/${encodeURIComponent(project.id)}/close`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ updatedAt: op.updatedAt }),
+        },
+      );
+      const raw: unknown = await response.json().catch(() => null);
+      const ok = onboardingStatusSchema.safeParse(raw);
+      if (response.ok && ok.success) {
+        show(ok.data);
+        setConfirmClose(false);
+        onMessage(
+          "The unconfirmed send is closed and the draft is open again. Nothing was sent to FlightDeck.",
+        );
+        return;
+      }
+      const refused = onboardErrorSchema.safeParse(raw);
+      setError(
+        refused.success
+          ? refused.data.error
+          : "The send could not be closed. Try again.",
+      );
+      if (refused.success && refused.data.status) show(refused.data.status);
+      else void load(false);
+    } catch {
+      setError("The send could not be closed. Try again.");
+      void load(false);
+    } finally {
+      setClosing(false);
+    }
+  }
   // A retry resends the reserved request, so today's draft (its readiness
   // and its text) does not decide whether it can go.
   const sendBlocked = !superAdmin
@@ -658,7 +770,13 @@ export function OnboardingEditor({
       }}
     >
       {op && <OnboardingTimeline stage={op.stage} />}
-      {status && <StatusBanner status={status} workspaces={workspaces} />}
+      {status && (
+        <StatusBanner
+          status={status}
+          workspaces={workspaces}
+          superAdmin={superAdmin}
+        />
+      )}
       {failed && (
         <p className="fd-hint" role="status">
           Onboarding status could not be checked. Atlas will try again.
@@ -1342,6 +1460,47 @@ export function OnboardingEditor({
           {sendBlocked && <span className="fd-hint">{sendBlocked}</span>}
         </div>
       )}
+      {tab === "review" && superAdmin && status?.canClose && (
+        <div className="fd-close">
+          {confirmClose ? (
+            <div role="group" aria-label="Close this unconfirmed send?">
+              <p className="fd-warn" role="note">
+                {retrying
+                  ? "Close this send only when Retry send keeps being refused."
+                  : "Close this send only when the OS admin confirms FlightDeck did not receive it."}{" "}
+                Atlas stops following it and the draft opens again, so you can
+                correct it and send it with a new key. If FlightDeck did file
+                it, the next send follows that request instead of filing a
+                second one.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={closing}
+                onClick={() => void closeSend()}
+              >
+                {closing ? "Closing…" : "Close the send"}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={closing}
+                onClick={() => setConfirmClose(false)}
+              >
+                Keep it
+              </Button>
+            </div>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setConfirmClose(true)}
+            >
+              Close this unconfirmed send
+            </Button>
+          )}
+        </div>
+      )}
       {error && (
         <p className="form-error" role="alert">
           {error}
@@ -1368,8 +1527,14 @@ export function OnboardingEditor({
 }
 
 /** The dashboard card: what is actually live. */
-export function FlightDeckPromo({ onOpen }: { onOpen: () => void }) {
-  const { stages, failed } = useOnboardingStages();
+export function FlightDeckPromo({
+  superAdmin,
+  onOpen,
+}: {
+  superAdmin: boolean;
+  onOpen: () => void;
+}) {
+  const { stages, failed } = useOnboardingStages(superAdmin);
   const values = Object.values(stages ?? {});
   const count = (list: OnboardingStage[]) =>
     values.filter((stage) => list.includes(stage)).length;
@@ -1381,13 +1546,13 @@ export function FlightDeckPromo({ onOpen }: { onOpen: () => void }) {
   ]);
   const linked = count(["linked", "setup-in-progress", "setup-complete"]);
   const moreInfo = count(["needs-more-info"]);
-  const line = failed
-    ? "Onboarding status is unavailable right now."
-    : !stages
-      ? "Checking onboarding status…"
-      : sent || moreInfo
-        ? `Onboarding: ${sent} sent to FlightDeck, ${linked} linked${moreInfo ? `, ${moreInfo} need more info` : ""}.`
-        : "Onboarding: no project sent yet. Prepare one in To FlightDeck.";
+  const line = !stages
+    ? failed
+      ? "Onboarding status is unavailable right now."
+      : "Checking onboarding status…"
+    : sent || moreInfo
+      ? `Onboarding: ${sent} sent to FlightDeck, ${linked} linked${moreInfo ? `, ${moreInfo} need more info` : ""}.`
+      : "Onboarding: no project sent yet. Prepare one in To FlightDeck.";
   return (
     <div className="flightdeck-promo">
       <span className="promo-mark">

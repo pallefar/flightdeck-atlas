@@ -682,6 +682,7 @@ export const onboardingStages = [
   "needs-more-info",
   "rejected",
   "not-sent",
+  "closed",
 ] as const;
 export type OnboardingStage = (typeof onboardingStages)[number];
 export function stageFor(op: {
@@ -707,7 +708,9 @@ export function stageFor(op: {
         ? "needs-more-info"
         : "rejected";
     case "refused":
-      return "not-sent";
+      // Closed by the Atlas Super Admin before FlightDeck confirmed it:
+      // FlightDeck may still hold it, so it is not "Not sent".
+      return op.reasonCode === "abandoned" ? "closed" : "not-sent";
   }
 }
 export const TIMELINE = [
@@ -753,6 +756,9 @@ export const onboardingStatusSchema = z
     pendingPayload: projectOnboardingPayloadSchema.nullable(),
     /** No open request: a (new) send is possible. */
     canSend: z.boolean(),
+    /** Super Admin only: the send is unconfirmed (reserved), or filed but
+     * unknown to FlightDeck, and may be closed so a new send can go. */
+    canClose: z.boolean(),
     /** The last send was not confirmed; a retry reuses its key. */
     retryPending: z.boolean(),
     /** FlightDeck may still change this status. */
@@ -773,4 +779,7 @@ export const onboardErrorSchema = z.object({
 });
 export const onboardStagesSchema = z.object({
   stages: z.record(z.enum(onboardingStages)),
+  /** When Atlas last read each project's send back from FlightDeck. */
+  checked: z.record(isoSchema.nullable()),
+  retryAfter: z.number().int().positive().nullable(),
 });

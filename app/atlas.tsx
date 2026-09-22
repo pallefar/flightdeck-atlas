@@ -1201,6 +1201,7 @@ export default function Atlas() {
                             )}
                           </div>
                           <FlightDeckPromo
+                            superAdmin={!!access?.superAdmin}
                             onOpen={() => navigate("connection")}
                           />
                         </aside>

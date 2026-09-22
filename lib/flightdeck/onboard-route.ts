@@ -13,10 +13,16 @@
 // same-key retry with the ORIGINAL submission whatever the body says ("what
 // was filed stays filed", proposal §8b), so rebuilding the body from an
 // edited project would make Atlas record a revision FlightDeck never got.
+// A retry does not re-check the destination: that was done when the key was
+// reserved, and only a resend can tell whether the earlier attempt landed.
+// When a retry can never succeed (FlightDeck refuses those bytes for good, or
+// no longer knows a filed request), the Super Admin closes the send (CLOSE);
+// the next send's fresh key meets FlightDeck's subject lock if it does hold
+// the project's request, and Atlas follows that request.
 import { z } from "zod";
 import { json, sameOrigin } from "../http";
 import type { Project } from "../projects";
-import type { ContextState } from "./context";
+import { isoSchema, type ContextState } from "./context";
 import {
   chooseContext,
   type ContextReader,
@@ -109,9 +115,19 @@ type LinkRow = {
 
 const SENT: OperationState[] = ["filed", "promoted", "linked"];
 /** Read-backs share the credential's 30 requests a minute with the context
- * reads, so each send is checked at most once a minute, however many tabs
- * ask. */
+ * reads, so the open form checks its send at most once a minute, however
+ * many tabs ask. */
 const POLL_MS = 60_000;
+/** The Super Admin's To FlightDeck list and dashboard check sends too, so a
+ * status moves without anyone opening the form: at most LIST_BATCH sends a
+ * call, each at most every LIST_POLL_MS. Atlas has no background job, so
+ * nothing is checked while no Super Admin has Atlas open. */
+const LIST_POLL_MS = 5 * 60_000;
+const LIST_BATCH = 2;
+/** reason_code of a filed send whose read-back FlightDeck answers 404. */
+const NOT_FOUND = "submission_not_found";
+/** reason_code of a send the Super Admin closed before it was confirmed. */
+const ABANDONED = "abandoned";
 const ATLAS_ID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const sendSchema = z
@@ -120,6 +136,9 @@ const sendSchema = z
     revision: z.number().int().positive(),
   })
   .strict();
+/** Names the send the Super Admin saw, by its last change, so a close never
+ * lands on a send that changed (a retry, a new send) since. */
+const closeSchema = z.object({ updatedAt: isoSchema }).strict();
 
 async function sha256Hex(text: string) {
   const digest = await crypto.subtle.digest(
@@ -204,7 +223,10 @@ const retryRefusals = {
     "FlightDeck refused the request: project onboarding is not enabled for Atlas, or the credential lacks submit:proposal.",
 } as const;
 const KEPT =
-  " An earlier attempt may already have been filed, so Atlas keeps this request and its key. Retry send once FlightDeck accepts requests again: it resends the same request.";
+  " An earlier attempt may already have been filed, so Atlas keeps this request and its key. Retry send once FlightDeck accepts requests again: it resends the same request. If FlightDeck keeps refusing it, close this unconfirmed send and send the project again.";
+/** What closing an unconfirmed send means, for the refusals that need it. */
+const CLOSE_HINT =
+  "Close this unconfirmed send to send the project again: if FlightDeck did file it, the new send follows that request and nothing is filed twice.";
 
 /** The envelope reserved with the key, or null if the row holds none. */
 function reservedEnvelope(op: OperationRow): OnboardingEnvelope | null {
@@ -227,6 +249,13 @@ const isPollable = (op: OperationRow) =>
   op.state === "filed" ||
   op.state === "promoted" ||
   (op.state === "linked" && op.setup_state !== "complete");
+/** A send the Super Admin may close: one FlightDeck never confirmed, or one
+ * it filed but no longer knows. Closing is safe because FlightDeck's subject
+ * lock answers a fresh key for a project it holds with that request's id
+ * (409 already_submitted), which the next send adopts. */
+const isClosable = (op: OperationRow) =>
+  op.state === "reserved" ||
+  (op.state === "filed" && op.reason_code === NOT_FOUND);
 
 async function latestOperation(db: OnboardDb, atlasProjectId: string) {
   // The open send, if any; otherwise the most recent closed one.
@@ -330,12 +359,21 @@ function statusBody(
         ? (reservedEnvelope(op)?.payload ?? null)
         : null,
     canSend: !op || ["reserved", "rejected", "refused"].includes(op.state),
+    canClose: superAdmin && !!op && isClosable(op),
     retryPending: op?.state === "reserved",
     pollable: !!op && isPollable(op),
     notice,
     retryAfter,
   };
 }
+
+/** What one read-back found. `stop`: FlightDeck did not answer (unreachable,
+ * busy, refused), so a list refresh checks no further sends this round. */
+type Check = {
+  notice: string | null;
+  retryAfter: number | null;
+  stop: boolean;
+};
 
 export function createOnboardRoute<A extends OnboardAccess>(
   deps: OnboardDeps<A>,
@@ -577,7 +615,9 @@ export function createOnboardRoute<A extends OnboardAccess>(
         return refuse(
           409,
           "already_submitted",
-          "This project has already been sent to FlightDeck.",
+          isClosable(existing)
+            ? `FlightDeck does not know the earlier send of this project. ${CLOSE_HINT}`
+            : "This project has already been sent to FlightDeck.",
           { status: await currentStatus(db, project.id, true) },
         );
       const reuse = existing?.state === "reserved" ? existing : null;
@@ -590,14 +630,14 @@ export function createOnboardRoute<A extends OnboardAccess>(
           return refuse(
             409,
             "pending_send",
-            `A send to ${reuse.destination_workspace_id} is waiting for FlightDeck to confirm it. Retry that send first.`,
+            `A send to ${reuse.destination_workspace_id} is waiting for FlightDeck to confirm it. Retry that send, or close it, first.`,
             { destinationWorkspaceId: reuse.destination_workspace_id },
           );
         if (revision !== reuse.atlas_revision)
           return refuse(
             409,
             "pending_send_changed",
-            `FlightDeck may already hold revision ${reuse.atlas_revision} of this project. Retry send resends revision ${reuse.atlas_revision} exactly as it was first sent; later edits are not included. Review it and retry.`,
+            `FlightDeck may already hold revision ${reuse.atlas_revision} of this project. Retry send resends revision ${reuse.atlas_revision} exactly as it was first sent; later edits are not included. Review it and retry, or close it to send the current revision.`,
             { atlasRevision: reuse.atlas_revision },
           );
         const stored = reservedEnvelope(reuse);
@@ -605,7 +645,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
           return refuse(
             409,
             "pending_send_unreadable",
-            "Atlas cannot read the request it reserved, so it cannot retry it safely. Nothing was sent. Ask the OS admin whether FlightDeck received it.",
+            `Atlas cannot read the request it reserved, so it cannot retry it safely. Nothing was sent. ${CLOSE_HINT}`,
           );
         envelope = stored;
       } else {
@@ -653,23 +693,29 @@ export function createOnboardRoute<A extends OnboardAccess>(
             { fields },
           );
         envelope = onboardingEnvelope(built.data);
+        // The destination comes from this request only, never from saved
+        // preferences or the planning note, and is re-checked against fresh
+        // OS lists: it must be listed, enabled and readable.
+        const view = await chooseContext(
+          reader,
+          { osWorkspaceId: destinationWorkspaceId },
+          { superAdmin: true },
+        );
+        if (
+          view.state !== "ok" ||
+          view.selected?.osWorkspaceId !== destinationWorkspaceId
+        ) {
+          const state = view.state === "ok" ? "invalid_response" : view.state;
+          const { status, error } = contextRefusals[state];
+          return refuse(status, state, error, {}, view.retryAfter);
+        }
       }
-      // The destination comes from this request only, never from saved
-      // preferences or the planning note, and is re-checked against fresh
-      // OS lists: it must be listed, enabled and readable.
-      const view = await chooseContext(
-        reader,
-        { osWorkspaceId: destinationWorkspaceId },
-        { superAdmin: true },
-      );
-      if (
-        view.state !== "ok" ||
-        view.selected?.osWorkspaceId !== destinationWorkspaceId
-      ) {
-        const state = view.state === "ok" ? "invalid_response" : view.state;
-        const { status, error } = contextRefusals[state];
-        return refuse(status, state, error, {}, view.retryAfter);
-      }
+      // A retry skips that check. Its destination was checked when the key
+      // was reserved, and FlightDeck answers a key it knows before it looks
+      // at the target, so resending these bytes is the only way to learn
+      // whether the earlier attempt was filed, even if the workspace has been
+      // disabled or unshared since. What FlightDeck may create stays an OS
+      // admin's decision (decision 8).
       const stamp = now().toISOString();
       let op: OperationRow;
       if (reuse) {
@@ -734,14 +780,15 @@ export function createOnboardRoute<A extends OnboardAccess>(
     userId: string,
     stamp: string,
   ) {
-    const hold = async (reason: string, notice: string) => {
+    const hold = async (reason: string, notice: string): Promise<Check> => {
       await patch(db, op.id, { reason_code: reason }, ["promoted"]);
-      return { notice, retryAfter: null };
+      return { notice, retryAfter: null, stop: false };
     };
-    const later = (state: string, retryAfter?: number) => ({
+    const later = (state: string, retryAfter?: number): Check => ({
       notice:
         "Atlas could not confirm the project in FlightDeck yet. It will check again.",
       retryAfter: state === "rate_limited" ? (retryAfter ?? null) : null,
+      stop: true,
     });
     const ws = await reader.workspaces();
     if (ws.state !== "ok") return later(ws.state, ws.retryAfter);
@@ -797,7 +844,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
       { state: "linked", reason_code: null, updated_at: stamp },
       ["promoted"],
     );
-    return { notice: null, retryAfter: null };
+    return { notice: null, retryAfter: null, stop: false };
   }
 
   /** One read-back, then whatever it allows: rejected, promoted, linked. */
@@ -808,22 +855,41 @@ export function createOnboardRoute<A extends OnboardAccess>(
     submissions: SubmissionClient,
     installationId: string,
     userId: string,
-  ): Promise<{ notice: string | null; retryAfter: number | null }> {
+  ): Promise<Check> {
     const stamp = now().toISOString();
     const touch = (
       extra: Partial<OperationRow> = {},
       from?: OperationState[],
     ) => patch(db, op.id, { checked_at: stamp, ...extra }, from);
     const read = await submissions.readSubmission(op.submission_id ?? "");
-    if (read.state !== "ok") {
+    if (read.state === "not_found") {
+      // FlightDeck answers 404 for an id it never had and for one that is
+      // not Atlas's. A filed send it does not know may be closed, so a new
+      // send can go (its subject lock catches a request it does hold).
+      if (op.state === "filed") {
+        await touch({ reason_code: NOT_FOUND }, ["filed"]);
+        return {
+          notice:
+            "FlightDeck does not know this request. Ask the OS admin whether it arrived. If it did not, the Atlas Super Admin can close this send and send the project again: if FlightDeck does hold it, the new send follows it.",
+          retryAfter: null,
+          stop: false,
+        };
+      }
       await touch();
       return {
         notice:
-          read.state === "not_found"
-            ? "FlightDeck does not know this request. Ask the OS admin before sending again."
-            : "Atlas could not check FlightDeck just now. It will try again.",
+          "FlightDeck no longer knows this request. Ask the OS admin what happened to it.",
+        retryAfter: null,
+        stop: false,
+      };
+    }
+    if (read.state !== "ok") {
+      await touch();
+      return {
+        notice: "Atlas could not check FlightDeck just now. It will try again.",
         retryAfter:
           read.state === "rate_limited" ? (read.retryAfter ?? null) : null,
+        stop: true,
       };
     }
     const s = read.data;
@@ -833,13 +899,16 @@ export function createOnboardRoute<A extends OnboardAccess>(
         notice:
           "FlightDeck answered for a different request. Nothing was changed.",
         retryAfter: null,
+        stop: false,
       };
     }
     const receipt = {
       received_at: op.received_at ?? s.receivedAt,
       payload_sha256: op.payload_sha256 ?? s.payloadSha256,
+      // FlightDeck knows the request again.
+      ...(op.reason_code === NOT_FOUND ? { reason_code: null } : {}),
     };
-    const none = { notice: null, retryAfter: null };
+    const none: Check = { notice: null, retryAfter: null, stop: false };
     switch (s.state) {
       case "filed":
         await touch(receipt);
@@ -863,6 +932,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
           notice:
             "FlightDeck no longer lists this request as open but did not say what happened. Ask the OS admin.",
           retryAfter: null,
+          stop: false,
         };
       case "promoted": {
         if (!s.promoted) {
@@ -871,6 +941,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
             notice:
               "FlightDeck accepted the request, but its workspace is not shared with Atlas, so Atlas cannot confirm the project.",
             retryAfter: null,
+            stop: false,
           };
         }
         if (op.state === "linked") {
@@ -909,6 +980,35 @@ export function createOnboardRoute<A extends OnboardAccess>(
     }
   }
 
+  /** Claims one read-back of `op`: only one caller (tab, list or form) wins
+   * each `minAge`, so the per-send limit holds however many ask at once. */
+  async function claimCheck(db: OnboardDb, op: OperationRow, minAge: number) {
+    const at = now();
+    if (op.checked_at && at.getTime() - Date.parse(op.checked_at) < minAge)
+      return false;
+    const result = await db
+      .prepare(
+        "UPDATE atlas_flightdeck_operations SET checked_at=? WHERE id=? AND (checked_at IS NULL OR checked_at<=?)",
+      )
+      .bind(
+        at.toISOString(),
+        op.id,
+        new Date(at.getTime() - minAge).toISOString(),
+      )
+      .run();
+    return result.meta.changes > 0;
+  }
+  /** The OS clients for a read-back, or null when FlightDeck is not
+   * configured. */
+  function osClients() {
+    const reader = deps.reader(true);
+    const submissions = deps.submissions();
+    const installationId = deps.installationId();
+    return reader && submissions && installationId
+      ? { reader, submissions, installationId }
+      : null;
+  }
+
   async function GET(request: Request, atlasProjectId: string) {
     const refresh = new URL(request.url).searchParams.get("refresh") === "1";
     // A refresh can contact the OS, so it is same-origin only.
@@ -934,19 +1034,17 @@ export function createOnboardRoute<A extends OnboardAccess>(
         (!op.checked_at ||
           now().getTime() - Date.parse(op.checked_at) >= POLL_MS)
       ) {
-        const reader = deps.reader(true);
-        const submissions = deps.submissions();
-        const installationId = deps.installationId();
-        if (!reader || !submissions || !installationId)
+        const os = osClients();
+        if (!os)
           notice =
             "FlightDeck is not configured, so Atlas cannot check this request.";
-        else
+        else if (await claimCheck(db, op, POLL_MS))
           ({ notice, retryAfter } = await reconcile(
             db,
             op,
-            reader,
-            submissions,
-            installationId,
+            os.reader,
+            os.submissions,
+            os.installationId,
             access.userId,
           ));
       }
@@ -968,34 +1066,79 @@ export function createOnboardRoute<A extends OnboardAccess>(
     }
   }
 
-  /** Stored stages for the projects the caller can see. Never reads the OS. */
-  async function LIST() {
+  /** Stored stages, and when each send was last read back, for the projects
+   * the caller can see. With `?refresh=1` (same-origin, Super Admin only)
+   * it first reads back the sends that are due, longest unchecked first:
+   * at most LIST_BATCH a call, each at most every LIST_POLL_MS, stopping at
+   * the first answer that is not FlightDeck's. That keeps the To FlightDeck
+   * list, the dashboard and every editor's view moving without the form. */
+  async function LIST(request: Request) {
+    const refresh = new URL(request.url).searchParams.get("refresh") === "1";
+    if (refresh && !sameOrigin(request))
+      return json({ error: "Request origin is not allowed." }, 403);
     const auth = await deps.authorize();
     if (auth.error) return auth.error;
+    const { access } = auth;
     try {
-      const visible = new Set(await deps.visibleProjectIds(auth.access));
-      const rows = await deps
-        .db()
+      const visible = new Set(await deps.visibleProjectIds(access));
+      const db = deps.db();
+      let retryAfter: number | null = null;
+      const os = refresh && access.superAdmin ? osClients() : null;
+      if (os) {
+        const due = await db
+          .prepare(
+            "SELECT * FROM atlas_flightdeck_operations WHERE (state IN ('filed','promoted') OR (state='linked' AND (setup_state IS NULL OR setup_state<>'complete'))) AND (checked_at IS NULL OR checked_at<=?) ORDER BY (checked_at IS NOT NULL), checked_at, rowid",
+          )
+          .bind(new Date(now().getTime() - LIST_POLL_MS).toISOString())
+          .all<OperationRow>();
+        let checked = 0;
+        for (const op of due.results) {
+          if (checked >= LIST_BATCH) break;
+          if (!visible.has(op.atlas_project_id)) continue;
+          if (!(await claimCheck(db, op, LIST_POLL_MS))) continue;
+          checked++;
+          const result = await reconcile(
+            db,
+            op,
+            os.reader,
+            os.submissions,
+            os.installationId,
+            access.userId,
+          );
+          if (result.stop) {
+            retryAfter = result.retryAfter;
+            break;
+          }
+        }
+      }
+      const rows = await db
         .prepare(
-          "SELECT atlas_project_id,state,reason_code,setup_state FROM atlas_flightdeck_operations ORDER BY (state IN ('reserved','filed','promoted','linked')), updated_at, rowid",
+          "SELECT atlas_project_id,state,reason_code,setup_state,checked_at FROM atlas_flightdeck_operations ORDER BY (state IN ('reserved','filed','promoted','linked')), updated_at, rowid",
         )
         .bind()
         .all<
           Pick<
             OperationRow,
-            "atlas_project_id" | "state" | "reason_code" | "setup_state"
+            | "atlas_project_id"
+            | "state"
+            | "reason_code"
+            | "setup_state"
+            | "checked_at"
           >
         >();
       const stages: Record<string, OnboardingStage> = {};
+      const checkedAt: Record<string, string | null> = {};
       // Open sends sort last, so they win over older closed ones.
       for (const row of rows.results)
-        if (visible.has(row.atlas_project_id))
+        if (visible.has(row.atlas_project_id)) {
           stages[row.atlas_project_id] = stageFor({
             state: row.state,
             reasonCode: row.reason_code,
             setupState: row.setup_state,
           });
-      return json({ stages });
+          checkedAt[row.atlas_project_id] = row.checked_at;
+        }
+      return json({ stages, checked: checkedAt, retryAfter });
     } catch {
       return refuse(
         503,
@@ -1005,5 +1148,80 @@ export function createOnboardRoute<A extends OnboardAccess>(
     }
   }
 
-  return { POST, GET, LIST };
+  /** Closes a send FlightDeck never confirmed (reserved), or one it filed
+   * but no longer knows, so the project can be sent again. Same-origin,
+   * Atlas Super Admin only, and only the send the caller saw. Nothing is
+   * sent and the OS is not read. The row keeps its key and any receipt;
+   * the reserved body is dropped. The next send takes a fresh key: if
+   * FlightDeck holds this project's request after all, its subject lock
+   * answers 409 already_submitted with that request's id, and Atlas follows
+   * it (settle), so nothing is filed twice. */
+  async function CLOSE(request: Request, atlasProjectId: string) {
+    if (!sameOrigin(request))
+      return json({ error: "Request origin is not allowed." }, 403);
+    const auth = await deps.authorize();
+    if (auth.error) return auth.error;
+    const { access } = auth;
+    if (!access.superAdmin)
+      return refuse(
+        403,
+        "not_permitted",
+        "Only the Atlas Super Admin can close a send to FlightDeck.",
+      );
+    if (!request.headers.get("content-type")?.includes("application/json"))
+      return refuse(
+        415,
+        "unsupported_media_type",
+        "Name the send to close as JSON.",
+      );
+    const raw = await request.text();
+    let parsed;
+    try {
+      parsed = closeSchema.safeParse(raw.length > 500 ? null : JSON.parse(raw));
+    } catch {
+      parsed = null;
+    }
+    if (!parsed?.success)
+      return refuse(400, "invalid_request", "Name the send to close.");
+    try {
+      const loaded = await deps.loadProject(access, atlasProjectId);
+      if (!loaded) return refuse(404, "not_found", "Project not found.");
+      if (!loaded.canEdit)
+        return refuse(403, "not_permitted", "You cannot onboard this project.");
+      const db = deps.db();
+      const op = await latestOperation(db, atlasProjectId);
+      const status = () => currentStatus(db, atlasProjectId, true);
+      if (!op || !isClosable(op))
+        return refuse(
+          409,
+          "not_closable",
+          "There is no unconfirmed send of this project to close.",
+          { status: await status() },
+        );
+      const changed = async () =>
+        refuse(
+          409,
+          "status_changed",
+          "This send changed since you looked at it. Review it again before closing it.",
+          { status: await status() },
+        );
+      if (op.updated_at !== parsed.data.updatedAt) return changed();
+      const done = await db
+        .prepare(
+          "UPDATE atlas_flightdeck_operations SET state='refused',reason_code=?,request_body=NULL,updated_at=? WHERE id=? AND updated_at=? AND (state='reserved' OR (state='filed' AND reason_code=?))",
+        )
+        .bind(ABANDONED, now().toISOString(), op.id, op.updated_at, NOT_FOUND)
+        .run();
+      if (!done.meta.changes) return changed();
+      return json(await status());
+    } catch {
+      return refuse(
+        503,
+        "storage_unavailable",
+        "Onboarding storage is unavailable. Nothing was closed. Try again.",
+      );
+    }
+  }
+
+  return { POST, GET, LIST, CLOSE };
 }
