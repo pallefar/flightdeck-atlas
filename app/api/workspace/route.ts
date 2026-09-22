@@ -11,6 +11,7 @@ import {
   flightdeckApp,
   type AppEntry,
 } from "@/lib/collaboration";
+import { osSelectionSchema } from "@/lib/flightdeck/context";
 export const dynamic = "force-dynamic";
 export async function GET() {
   const a = await authorize("projects.read");
@@ -145,6 +146,18 @@ export async function POST(req: Request) {
         .first();
       const previousFrog = before
         ? JSON.parse(before.data as string).frog
+        : null;
+      // Only /api/flightdeck/context changes the FlightDeck selection, after
+      // validating it against the OS. Other preference saves keep it as is.
+      const previousContext = osSelectionSchema
+        .nullable()
+        .safeParse(
+          before
+            ? (JSON.parse(before.data as string).flightdeckContext ?? null)
+            : null,
+        );
+      data.flightdeckContext = previousContext.success
+        ? previousContext.data
         : null;
       if (
         data.frog &&
