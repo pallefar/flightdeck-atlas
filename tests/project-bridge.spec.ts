@@ -25,21 +25,33 @@ import {
   REVIEW_FIELDS,
   buildOnboardingPayload,
   checklistSuggestions,
+  isDraftLocked,
+  isLockedState,
+  isStatusMoving,
+  lockNote,
+  lockedStages,
+  movingStages,
   onboardStagesSchema,
   onboardingEnvelope,
   onboardingSchema,
   onboardingStatusSchema,
+  operationStates,
   payloadLeafPaths,
   personalDataHint,
   personalDataIn,
   projectOnboardingPayloadSchema,
   readiness,
+  rejectionReasons,
   reviewRows,
+  setupStates,
+  stageFor,
   type OnboardingEnvelope,
+  type OnboardingStage,
   type OnboardingStatus,
 } from "../lib/flightdeck/onboarding";
 import {
   createOnboardRoute,
+  isPollable,
   type OnboardDb,
 } from "../lib/flightdeck/onboard-route";
 
@@ -2147,7 +2159,14 @@ function statusBody(
               : stage === "closed"
                 ? "abandoned"
                 : null,
-          setupState: stage === "setup-in-progress" ? "awaiting-cowork" : null,
+          setupState:
+            stage === "setup-in-progress"
+              ? "awaiting-cowork"
+              : stage === "setup-complete"
+                ? "complete"
+                : stage === "linked"
+                  ? "none"
+                  : null,
           atlasRevision: 2,
           adopted: false,
           updatedAt: os.receivedAt,
@@ -2161,7 +2180,11 @@ function statusBody(
       ["needs-more-info", "rejected", "not-sent", "closed"].includes(stage),
     canClose: false,
     retryPending: false,
-    pollable: stage === "submitted" || stage === "linked",
+    // What the server itself calls pollable: filed, promoted, or linked
+    // before setup is complete.
+    pollable:
+      !!stage &&
+      ["submitted", "linked", "setup-in-progress"].includes(stage as string),
     notice: null,
     retryAfter: null,
     ...extra,
@@ -2470,6 +2493,87 @@ test("the three-tab form prefills Basics, meters readiness, lists every field se
   }
 });
 
+test("a project FlightDeck has created reads as held, not as a draft under review, and cannot be unpicked from the row", async ({
+  page,
+}) => {
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const project = await createProject(page, {
+    name: "Created QA",
+    description: "Summary",
+    benefit: "Measure",
+    functionArea: "HR",
+    onboardingStage: "Ready for FlightDeck",
+    flightdeckDraft: { label: "Created QA", workspaceHint: "hr-de" },
+    onboarding: { countryCode: "DE", worksCouncilRelevant: "no" },
+  });
+  await page.route(
+    (url) => url.pathname === "/api/flightdeck/onboard",
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          stages: { [project.id]: "setup-complete" },
+          checked: { [project.id]: null },
+          retryAfter: null,
+        }),
+      }),
+  );
+  await page.route(`**/api/flightdeck/onboard/${project.id}**`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        statusBody("setup-complete", {
+          link: {
+            workspaceId: "hr-de",
+            osProjectId: "created-qa",
+            linkedAt: os.receivedAt,
+            accessState: "active",
+          },
+        }),
+      ),
+    }),
+  );
+  try {
+    await page.reload();
+    await page.getByRole("button", { name: /To FlightDeck/ }).click();
+    const row = page.locator("article.bridge-project", {
+      hasText: "Created QA",
+    });
+    await expect(
+      row.getByText("Setup complete", { exact: true }),
+    ).toBeVisible();
+    // The project exists in FlightDeck: the row must not offer to drop the
+    // draft it was created from, and must not call reading it "editing".
+    await expect(
+      row.getByRole("button", { name: "Remove draft" }),
+    ).toBeDisabled();
+    await expect(
+      row.getByRole("button", { name: "Remove draft" }),
+    ).toHaveAttribute("title", /linked to a FlightDeck project/i);
+    await expect(
+      row.getByRole("button", { name: "Edit draft", exact: true }),
+    ).toHaveCount(0);
+    await row.getByRole("button", { name: "View status", exact: true }).click();
+    // The form is read-only, and says why instead of leaving it unexplained.
+    await expect(
+      row.getByText(
+        "Linked to FlightDeck project created-qa in HR Germany. FlightDeck holds this project now, so the Atlas draft is kept as it was sent.",
+        { exact: false },
+      ),
+    ).toBeVisible();
+    await row.getByRole("tab", { name: "Basics" }).click();
+    await expect(row.getByLabel("Summary")).toBeDisabled();
+    await expect(
+      row.getByRole("button", { name: "Save onboarding draft" }),
+    ).toBeDisabled();
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
 test("needs more info reopens the draft for editing and sending again", async ({
   page,
 }) => {
@@ -2687,6 +2791,68 @@ test("the To FlightDeck list and the dashboard follow FlightDeck without the for
   }
 });
 
+test("one lock for both surfaces: every state the form locks shows a stage the row locks, with a reason", () => {
+  // The form knows the operation state, the list row knows only the stage.
+  // They must answer the same question the same way for every operation a
+  // status read-back can describe, or the row offers what the form forbids.
+  const reasons = [null, ...rejectionReasons, "abandoned", "os_unreachable"];
+  const setups = [null, ...setupStates];
+  const produced = new Set<OnboardingStage>();
+  for (const state of operationStates)
+    for (const setupState of setups)
+      for (const reasonCode of reasons) {
+        const stage = stageFor({ state, reasonCode, setupState });
+        if (isLockedState(state)) produced.add(stage);
+        expect({
+          state,
+          setupState,
+          reasonCode,
+          locked: isDraftLocked(stage),
+          // A locked stage always says why; an open one never claims to.
+          reason: !!lockNote(stage),
+        }).toEqual({
+          state,
+          setupState,
+          reasonCode,
+          locked: isLockedState(state),
+          reason: isLockedState(state),
+        });
+      }
+  // The derived list, pinned: a new branch in stageFor() has to be answered
+  // here and in LOCK_NOTE rather than quietly unlocking a row.
+  expect([...lockedStages].sort()).toEqual([
+    "linked",
+    "not-confirmed",
+    "setup-complete",
+    "setup-in-progress",
+    "submitted",
+  ]);
+  expect([...lockedStages].sort()).toEqual([...produced].sort());
+  // Saying when Atlas last checked is a smaller set than being locked: a
+  // status that can still move on its own is always a locked draft.
+  for (const stage of movingStages) expect(isDraftLocked(stage)).toBe(true);
+  expect(movingStages.some((s) => !lockedStages.includes(s))).toBe(false);
+  // And that smaller set is the server's own: the row promises "last
+  // checked" for exactly the sends the server still reads back.
+  for (const state of operationStates)
+    for (const setupState of setups)
+      expect({
+        state,
+        setupState,
+        moving: isStatusMoving(
+          stageFor({ state, reasonCode: null, setupState }),
+        ),
+      }).toEqual({
+        state,
+        setupState,
+        moving: isPollable({ state, setup_state: setupState }),
+      });
+  // "FlightDeck is reviewing this" is never said of a created project.
+  expect(lockNote("setup-complete")).toMatch(/linked to a FlightDeck project/i);
+  expect(lockNote("not-confirmed")).toMatch(/not confirmed/i);
+  expect(lockNote("needs-more-info")).toBe("");
+});
+
 test("the list cannot remove a draft FlightDeck is still reviewing, and offers the status instead", async ({
   page,
 }) => {
@@ -2719,39 +2885,52 @@ test("the list cannot remove a draft FlightDeck is still reviewing, and offers t
       hasText: "Locked Row QA",
     });
     await expect(row.getByText("Submitted", { exact: true })).toBeVisible();
-    // The form calls the draft locked while FlightDeck reviews it; the row
-    // outside the form must not be the way around that promise. Removing it
-    // would drop the name FlightDeck is reviewing and empty the draft a
-    // "Needs more info" reopens.
     const remove = row.getByRole("button", { name: "Remove draft" });
-    await expect(remove).toBeVisible();
-    await expect(remove).toBeDisabled();
-    await expect(remove).toHaveAttribute(
-      "title",
-      /FlightDeck is reviewing this request/,
-    );
-    await expect(
-      row.getByRole("button", { name: "Edit draft", exact: true }),
-    ).toHaveCount(0);
-    await expect(
-      row.getByRole("button", { name: "View status", exact: true }),
-    ).toBeEnabled();
-    // Read-only export is untouched.
-    await expect(
-      row.getByRole("button", { name: "Export draft" }),
-    ).toBeEnabled();
+    const edit = row.getByRole("button", { name: "Edit draft", exact: true });
+    const status = row.getByRole("button", {
+      name: "View status",
+      exact: true,
+    });
+    // The form calls the draft locked for every state FlightDeck may hold —
+    // unconfirmed, under review, linked and set up — and the row outside the
+    // form must not be the way around that promise. Removing it would drop
+    // the name FlightDeck is reviewing, break Export draft, drop the project
+    // from this tab's count, and empty the draft a "Needs more info" reopens.
+    for (const [locked, label] of [
+      ["not-confirmed", "Not confirmed"],
+      ["submitted", "Submitted"],
+      ["linked", "Linked"],
+      ["setup-in-progress", "Setup in progress"],
+      ["setup-complete", "Setup complete"],
+    ] as const) {
+      stage = locked;
+      await page.clock.fastForward(61_000);
+      await expect(row.getByText(label, { exact: true })).toBeVisible();
+      await expect(remove).toBeVisible();
+      await expect(remove).toBeDisabled();
+      // And it says why, in words true of that stage.
+      await expect(remove).toHaveAttribute("title", lockNote(locked));
+      await expect(edit).toHaveCount(0);
+      await expect(status).toBeEnabled();
+      // Read-only export is untouched.
+      await expect(
+        row.getByRole("button", { name: "Export draft" }),
+      ).toBeEnabled();
+    }
     // Once FlightDeck hands it back, the row is the owner's again.
-    stage = "needs-more-info";
-    await page.clock.fastForward(61_000);
-    await expect(
-      row.getByText("Needs more info", { exact: true }),
-    ).toBeVisible();
-    await expect(
-      row.getByRole("button", { name: "Remove draft" }),
-    ).toBeEnabled();
-    await expect(
-      row.getByRole("button", { name: "Edit draft", exact: true }),
-    ).toBeEnabled();
+    for (const [open, label] of [
+      ["needs-more-info", "Needs more info"],
+      ["rejected", "Declined"],
+      ["not-sent", "Not sent"],
+      ["closed", "Send closed"],
+    ] as const) {
+      stage = open;
+      await page.clock.fastForward(61_000);
+      await expect(row.getByText(label, { exact: true })).toBeVisible();
+      await expect(remove).toBeEnabled();
+      await expect(edit).toBeEnabled();
+      await expect(status).toHaveCount(0);
+    }
   } finally {
     await removeProject(page, project.id);
   }

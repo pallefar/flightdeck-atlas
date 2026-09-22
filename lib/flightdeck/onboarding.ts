@@ -713,6 +713,62 @@ export function stageFor(op: {
       return op.reasonCode === "abandoned" ? "closed" : "not-sent";
   }
 }
+/** The operation states in which FlightDeck may hold this request, so the
+ * draft must stay exactly as it was sent: the form locks itself, and nothing
+ * outside the form (the list row's own buttons) may edit or drop it either. */
+export const lockedStates = [
+  "reserved",
+  "filed",
+  "promoted",
+  "linked",
+] as const satisfies readonly OperationState[];
+export const isLockedState = (state: OperationState) =>
+  (lockedStates as readonly OperationState[]).includes(state);
+/** Every stage a locked state can show. Derived from stageFor(), not typed
+ * out a second time: the form knows the operation state and the row knows
+ * only the stage, and the two surfaces must never disagree about what is
+ * locked. Locked states never branch on reasonCode, but it is varied here
+ * too so a later branch cannot slip past. */
+export const lockedStages: readonly OnboardingStage[] = [
+  ...new Set(
+    lockedStates.flatMap((state) =>
+      [null, ...setupStates].flatMap((setupState) =>
+        [null, ...rejectionReasons, "abandoned"].map((reasonCode) =>
+          stageFor({ state, reasonCode, setupState }),
+        ),
+      ),
+    ),
+  ),
+];
+export const isDraftLocked = (stage: OnboardingStage | null | undefined) =>
+  !!stage && lockedStages.includes(stage);
+/** Why the draft is locked, one sentence per locked stage: the row's tooltip
+ * and the form's banner say the same thing, and "FlightDeck is reviewing it"
+ * is never claimed of a project FlightDeck has already created. */
+export const LOCK_NOTE: Partial<Record<OnboardingStage, string>> = {
+  "not-confirmed":
+    "FlightDeck has not confirmed this send yet. Retry or close it before the draft can change.",
+  submitted:
+    "FlightDeck is reviewing this request. The draft stays as it was sent until FlightDeck answers.",
+  linked: "FlightDeck holds this project. The draft stays as it was sent.",
+  "setup-in-progress":
+    "FlightDeck holds this project. The draft stays as it was sent.",
+  "setup-complete":
+    "This project is linked to a FlightDeck project. The draft stays as it was sent.",
+};
+export const lockNote = (stage: OnboardingStage | null | undefined) =>
+  (stage && LOCK_NOTE[stage]) || "";
+/** Stages Atlas still reads back from FlightDeck (the server's own pollable
+ * set, as stages): the status can change with nobody here doing anything, so
+ * these are the ones that say when Atlas last checked. Every one of them is
+ * locked; being locked does not make a status move. */
+export const movingStages: readonly OnboardingStage[] = [
+  "submitted",
+  "linked",
+  "setup-in-progress",
+];
+export const isStatusMoving = (stage: OnboardingStage | null | undefined) =>
+  !!stage && movingStages.includes(stage);
 export const TIMELINE = [
   { stage: "submitted", label: "Submitted" },
   { stage: "linked", label: "Linked" },

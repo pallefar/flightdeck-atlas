@@ -27,12 +27,15 @@ import { useFlightDeckContext } from "./flightdeck-context-switcher";
 import {
   CHECK_NOTE,
   OnboardingEditor,
-  SEND_OPEN_NOTE,
   STAGE_LABEL,
   checkedLine,
-  isSendOpen,
   useOnboardingStages,
 } from "./flightdeck-onboarding";
+import {
+  isDraftLocked,
+  isStatusMoving,
+  lockNote,
+} from "@/lib/flightdeck/onboarding";
 import type { ContextState } from "@/lib/flightdeck/context";
 const contextStatus: Record<
   ContextState | "check_failed" | "checking",
@@ -408,12 +411,14 @@ export default function FlightDeckConnection({
           )}
           {filtered.map((p) => {
             const stage = onboarding.stages?.[p.id];
-            // While FlightDeck is reviewing a send, the form locks the draft
-            // and says so. The row must keep that promise: removing the draft
+            // While FlightDeck may hold a send, the form locks the draft and
+            // says so. The row must keep that promise: removing the draft
             // here would drop the name FlightDeck is reviewing, break Export
             // draft, drop the project from this tab's count, and leave a
-            // later "Needs more info" reopening an empty draft.
-            const sendOpen = isSendOpen(stage);
+            // later "Needs more info" reopening an empty draft. Both surfaces
+            // read the same predicate off the same stage, so neither can
+            // offer what the other forbids.
+            const locked = isDraftLocked(stage);
             return (
               <article className="bridge-project" key={p.id}>
                 <div className="bridge-row">
@@ -429,11 +434,11 @@ export default function FlightDeckConnection({
                       {p.functionArea || p.category}
                       {p.flightdeckDraft
                         ? ` · ${p.flightdeckDraft.workspaceHint || "Choose workspace when connected"}`
-                        : " · Atlas only"}
+                        : locked
+                          ? " · With FlightDeck"
+                          : " · Atlas only"}
                     </p>
-                    {(stage === "submitted" ||
-                      stage === "linked" ||
-                      stage === "setup-in-progress") && (
+                    {isStatusMoving(stage) && (
                       <p className="fd-hint">
                         {checkedLine(onboarding.checked[p.id] ?? null)}
                       </p>
@@ -471,7 +476,7 @@ export default function FlightDeckConnection({
                         setMessage("");
                       }}
                     >
-                      {sendOpen
+                      {locked
                         ? "View status"
                         : p.flightdeckDraft
                           ? "Edit draft"
@@ -513,8 +518,8 @@ export default function FlightDeckConnection({
                         </Button>
                         <button
                           className="text-link"
-                          disabled={busy || p.canEdit === false || sendOpen}
-                          title={sendOpen ? SEND_OPEN_NOTE : undefined}
+                          disabled={busy || p.canEdit === false || locked}
+                          title={locked ? lockNote(stage) : undefined}
                           onClick={async () => {
                             const saved = await onSave(
                               { ...p, flightdeckDraft: null },

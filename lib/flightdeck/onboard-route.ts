@@ -245,7 +245,10 @@ function reservedEnvelope(op: OperationRow): OnboardingEnvelope | null {
   }
 }
 
-const isPollable = (op: OperationRow) =>
+/** A send Atlas still reads back from FlightDeck. The list row says when
+ * each of these was last checked, through movingStages: the test pins the
+ * two together so the stage list cannot drift from this one. */
+export const isPollable = (op: Pick<OperationRow, "state" | "setup_state">) =>
   op.state === "filed" ||
   op.state === "promoted" ||
   (op.state === "linked" && op.setup_state !== "complete");

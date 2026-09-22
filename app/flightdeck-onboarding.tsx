@@ -28,6 +28,8 @@ import {
   countryName,
   fieldLabel,
   headcountBands,
+  isDraftLocked,
+  lockNote,
   onboardErrorSchema,
   onboardStagesSchema,
   onboardingStatusSchema,
@@ -56,7 +58,6 @@ const MAX_BACKOFF_MS = 15 * 60_000;
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const PREVIEW_KEY = "00000000-0000-4000-8000-000000000000";
 const PREVIEW_HASH = "0".repeat(64);
-const LOCKED_STATES = ["reserved", "filed", "promoted", "linked"];
 export const STAGE_LABEL: Record<OnboardingStage, string> = {
   "not-confirmed": "Not confirmed",
   submitted: "Submitted",
@@ -68,18 +69,6 @@ export const STAGE_LABEL: Record<OnboardingStage, string> = {
   "not-sent": "Not sent",
   closed: "Send closed",
 };
-/** Stages whose status FlightDeck may still change. While a send is open the
- * form locks the draft, so everything outside the form that could edit or
- * drop it (the list row's own buttons) must be gated on this too. */
-const OPEN_STAGES: OnboardingStage[] = [
-  "submitted",
-  "linked",
-  "setup-in-progress",
-];
-export const isSendOpen = (stage: OnboardingStage | undefined | null) =>
-  !!stage && OPEN_STAGES.includes(stage);
-export const SEND_OPEN_NOTE =
-  "FlightDeck is reviewing this request. The draft stays as it was sent until FlightDeck answers.";
 const when = (iso: string) =>
   new Date(iso).toLocaleString(undefined, {
     dateStyle: "medium",
@@ -393,7 +382,7 @@ function StatusBanner({
   switch (op.stage) {
     case "not-confirmed":
       tone = "warn";
-      text = `FlightDeck has not confirmed this send yet. ${reason} Retry send sends the same request again, with the same key, so it can never be filed twice.`;
+      text = `FlightDeck has not confirmed this send yet. ${reason} Retry send sends the same request again, with the same key, so it can never be filed twice. The draft stays as it was sent until this send is confirmed or closed.`;
       break;
     case "submitted":
       text = `${op.adopted ? "FlightDeck already held a request for this project, and Atlas now follows it." : `Sent for review${where ? ` to ${where}` : ""}.`} An OS admin decides; nothing is created automatically. The draft is locked while FlightDeck reviews it. ${reason}`;
@@ -401,9 +390,11 @@ function StatusBanner({
     case "linked":
     case "setup-in-progress":
     case "setup-complete":
-      text = status.link
-        ? `Linked to FlightDeck project ${status.link.osProjectId} in ${workspaces.find((w) => w.id === status.link!.workspaceId)?.label || status.link.workspaceId}.`
-        : "Linked to a FlightDeck project.";
+      text = `${
+        status.link
+          ? `Linked to FlightDeck project ${status.link.osProjectId} in ${workspaces.find((w) => w.id === status.link!.workspaceId)?.label || status.link.workspaceId}.`
+          : "Linked to a FlightDeck project."
+      } FlightDeck holds this project now, so the Atlas draft is kept as it was sent.`;
       break;
     case "needs-more-info":
       tone = "warn";
@@ -424,7 +415,9 @@ function StatusBanner({
         "The Atlas Super Admin closed this unconfirmed send, so the draft is open again. If FlightDeck did file it after all, the next send follows that request instead of filing a second one.";
       break;
   }
-  const open = isSendOpen(op.stage);
+  // "Last checked" belongs to a status that can still change on its own,
+  // which the server itself decides (pollable) — not to every locked draft.
+  const open = status.pollable;
   return (
     <div className={`fd-banner ${tone}`}>
       {tone ? <AlertTriangle size={16} /> : <Check size={16} />}
@@ -519,8 +512,10 @@ export function OnboardingEditor({
 
   // An open send (reserved, filed, promoted or linked) locks the draft; the
   // readiness meter and "What will be sent" describe a send still to make,
-  // so they give way to what FlightDeck holds, or what Retry resends.
-  const locked = !!op && LOCKED_STATES.includes(op.state);
+  // so they give way to what FlightDeck holds, or what Retry resends. The
+  // list row reads the same predicate off the same stage, so the form and the
+  // row cannot disagree about whether the draft may still change.
+  const locked = isDraftLocked(op?.stage);
   const retrying = !!status?.retryPending;
   const sent = locked && !retrying;
   const target = locked ? op?.destinationWorkspaceId || "" : destination;
