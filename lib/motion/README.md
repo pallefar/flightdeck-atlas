@@ -40,7 +40,7 @@ again).
 
 | Where | Helper | What it does |
 |---|---|---|
-| Dashboard stat tiles (`app/atlas.tsx`, `Metric`) | `useCountUp` | The four numbers (projects, in progress, tasks complete, on the map) count up over 600ms. A tile counts from 0 when it mounts in the browser, and from the old value when its value changes. Zero padding is kept on every frame (`"03"`). The last frame is byte-identical to the render. A tile hydrated from server HTML does not count: its number is already on screen. |
+| Dashboard stat tiles (`app/atlas.tsx`, `Metric`) | `useCountUp` | The four numbers (projects, in progress, tasks complete, on the map) count up over 600ms. A tile counts from 0 when it mounts in the browser (Portfolio again after another view), and from the old value when its value changes. Zero padding is kept on every frame (`"03"`). The last frame is byte-identical to the render. A number already on screen is never pulled back: a tile hydrated from server HTML does not count, and nor does a tile that replaces one still showing its number. That happens on every page load: the shell mounts again once access loads (`WellbeingProvider` is keyed by the signed-in user), and the new tile finds the old one's number in `paintedMetrics`. |
 | Sidebar groups (`app/atlas-navigation.tsx`) | `useDisclosure` | Opening a group unfolds its links from their top edge (scaleY and fade), and the groups and help link below glide to their new place (FLIP, translate only). All of it takes 200ms `ease`, the timing of the chevron's CSS turn. A closed group disappears at once, as before. User toggles animate. So does a group that opens because you navigated somewhere else (the command menu, a project card). A group does not animate when it opens at mount, from stored groups, or from a `?view=` link while the workspace loads. The chevron is not passed to the helper, so its turn stays Atlas's CSS transition. |
 
 ## What stays in CSS (not duplicated)
@@ -104,9 +104,10 @@ wired to this layer.
 `tests/motion.spec.ts` (Playwright, real Chrome) covers:
 
 - **Count-up:**
-  - counts from 0, rises monotonically with its padding kept, and ends byte-identical to the
-    motion-off render;
-  - counts again when a tile remounts;
+  - on a page load, never pulls a painted number back (sampled every frame, through the shell's
+    second mount), and ends byte-identical to the motion-off render;
+  - counts from 0 when a tile mounts again, rising monotonically with its padding kept, and ends
+    byte-identical to the motion-off render;
   - under reduced motion or automation, never writes the number.
 - **Sidebar groups:**
   - unfold, glide down on open and glide up on close, ending on markup identical to the motion-off

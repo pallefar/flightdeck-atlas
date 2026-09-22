@@ -48,6 +48,69 @@ const writes = (page: Page) =>
     (window as unknown as { __writes: Write[] }).__writes.slice(),
   );
 
+type NumberFrame = { nums: Record<string, string>; node: number };
+
+/** Samples what the stat numbers SHOW on every frame, from the first frame
+ * on, keeping each change. Unlike the write log, this also sees a tile being
+ * replaced by a new one (a new text node), and `node` numbers each <strong>
+ * seen, so a remount shows as a new node. */
+async function sampleNumbers(page: Page) {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __frames: NumberFrame[] };
+    w.__frames = [];
+    const ids = new WeakMap<Element, number>();
+    let mounts = 0;
+    const tick = () => {
+      const tiles = [...document.querySelectorAll(".metrics .metric")];
+      const nums: Record<string, string> = {};
+      for (const tile of tiles)
+        nums[tile.querySelector(".metric-label")?.textContent?.trim() ?? ""] =
+          tile.querySelector("strong")?.textContent ?? "";
+      const strong = tiles[0]?.querySelector("strong");
+      if (strong && !ids.has(strong)) ids.set(strong, ++mounts);
+      const node = strong ? ids.get(strong)! : 0;
+      const last = w.__frames.at(-1);
+      if (
+        !last ||
+        last.node !== node ||
+        JSON.stringify(last.nums) !== JSON.stringify(nums)
+      )
+        w.__frames.push({ nums, node });
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
+const numberFrames = (page: Page) =>
+  page.evaluate(() =>
+    (window as unknown as { __frames: NumberFrame[] }).__frames.slice(),
+  );
+
+/** How many different <strong> nodes the sampler has seen (0 before any). */
+const tileMounts = async (page: Page) =>
+  new Set((await numberFrames(page)).map((f) => f.node).filter(Boolean)).size;
+
+/** Each tile's shown text, frame by frame, is a zero-padded number that never
+ * drops and never passes the rendered one, and ends on it. */
+function expectOnlyRises(
+  seen: string[],
+  tile: { label: string; text: string },
+) {
+  const width = tile.text.length;
+  const final = Number(tile.text);
+  const trail = `${tile.label}: ${seen.join(" > ")}`;
+  let last = -1;
+  for (const text of seen) {
+    // Zero padding kept on every frame ("03" on a padded tile).
+    expect(text, trail).toMatch(new RegExp(`^\\d{${width}}$`));
+    expect(Number(text), trail).toBeGreaterThanOrEqual(last);
+    expect(Number(text), trail).toBeLessThanOrEqual(final);
+    last = Number(text);
+  }
+  expect(seen.at(-1), trail).toBe(tile.text);
+}
+
 async function numbers(page: Page) {
   const tiles = page.locator(".metrics .metric");
   await expect(tiles).toHaveCount(4);
@@ -98,39 +161,32 @@ async function settled(page: Page, target: { text: string }[]) {
 }
 
 test.describe("with motion (a browser not under automation)", () => {
-  test("the dashboard stats count up from 0 and end on the rendered text", async ({
+  test("a page load never pulls a painted number back, and ends on the rendered text", async ({
     motionPage: page,
   }) => {
     const target = await renderedWithoutMotion(page);
+    await sampleNumbers(page);
     await recordNumberWrites(page);
     await page.goto("/");
     expect(await page.evaluate(() => navigator.webdriver)).toBe(false);
+    // The shell mounts again once it knows who is signed in
+    // (WellbeingProvider is keyed by the user), so the tiles the server
+    // painted are replaced while the page loads. That second mount used to
+    // count from 0 under a number already on screen.
+    await expect.poll(() => tileMounts(page)).toBeGreaterThan(1);
     await settled(page, target);
 
-    const seen = await writes(page);
+    const frames = await numberFrames(page);
     for (const tile of target) {
-      const values = seen.filter((w) => w.label === tile.label);
-      const final = Number(tile.text);
-      if (final === 0) {
-        // 0 to 0 is no count: nothing may be written.
-        expect(values).toEqual([]);
-        continue;
-      }
-      // One count per page load: the shell mounts its dashboard once it
-      // knows who is signed in, and Atlas's CSS arrive replays on that mount
-      // too. The server-rendered tile never counts, so the numbers only ever
-      // rise: a second count would drop back to 0.
-      const width = tile.text.length;
-      expect(values[0]?.text).toBe("0".padStart(width, "0"));
-      let last = 0;
-      for (const v of values) {
-        // Zero padding kept on every frame ("03" on a padded tile).
-        expect(v.text).toMatch(new RegExp(`^\\d{${width}}$`));
-        expect(Number(v.text)).toBeGreaterThanOrEqual(last);
-        expect(Number(v.text)).toBeLessThanOrEqual(final);
-        last = Number(v.text);
-      }
-      expect(values.at(-1)?.text).toBe(tile.text);
+      const seen = frames
+        .map((f) => f.nums[tile.label])
+        .filter((text): text is string => text !== undefined);
+      expectOnlyRises(seen, tile);
+      // A number the server painted stays as it is: no count at all.
+      if (seen[0] === tile.text)
+        expect(
+          (await writes(page)).filter((w) => w.label === tile.label),
+        ).toEqual([]);
     }
     // Byte-identical to the motion-off render: no style attribute, no extra node.
     expect(await numbers(page)).toEqual(target);
@@ -155,9 +211,14 @@ test.describe("with motion (a browser not under automation)", () => {
     const again = (await writes(page)).slice(before);
     for (const tile of target.filter((t) => Number(t.text) > 0)) {
       const values = again.filter((w) => w.label === tile.label);
+      // A tile that mounts in the browser counts from 0, and only rises.
       expect(values[0]?.text).toBe("0".padStart(tile.text.length, "0"));
-      expect(values.at(-1)?.text).toBe(tile.text);
+      expectOnlyRises(
+        values.map((v) => v.text),
+        tile,
+      );
     }
+    // Byte-identical to the motion-off render: no style attribute, no extra node.
     expect(await numbers(page)).toEqual(target);
   });
 
@@ -166,11 +227,17 @@ test.describe("with motion (a browser not under automation)", () => {
   }) => {
     const target = await renderedWithoutMotion(page);
     await page.emulateMedia({ reducedMotion: "reduce" });
+    await sampleNumbers(page);
     await recordNumberWrites(page);
     await page.goto("/");
     await expect(page.locator(".nav-item").first()).toBeEnabled();
+    await expect.poll(() => tileMounts(page)).toBeGreaterThan(1);
     await page.waitForTimeout(1200);
     expect(await writes(page)).toEqual([]);
+    // Every frame, through the shell's second mount, shows the final numbers.
+    const shown = Object.fromEntries(target.map((t) => [t.label, t.text]));
+    for (const frame of await numberFrames(page))
+      if (frame.node) expect(frame.nums).toEqual(shown);
     expect(await numbers(page)).toEqual(target);
   });
 });

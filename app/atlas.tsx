@@ -2,6 +2,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useState,
   useRef,
   useSyncExternalStore,
@@ -1317,14 +1318,27 @@ function Metric({
   const format = (n: number) => String(n).padStart(pad, "0");
   // The shared motion layer's stat count-up (lib/motion): it replays the
   // rendered number from the old value on every change, and from 0 when the
-  // tile mounts in the browser. Not over server-rendered HTML: that number is
-  // already on screen, and pulling it back to 0 would flash it.
+  // tile mounts in the browser. Never over a number already on screen:
+  // pulling it back to 0 would flash it. So not over server-rendered HTML
+  // (the hydration pass), and not when this tile replaces one still showing
+  // its number (`onScreen`, see `paintedMetrics`).
   const browserMount = useSyncExternalStore(
     noSubscription,
     () => true,
     () => false,
   );
-  useCountUp(number, value, { mountFrom: browserMount ? 0 : null, format });
+  const onScreen = paintedMetrics.get(label)?.value;
+  useCountUp(number, value, {
+    mountFrom: onScreen ?? (browserMount ? 0 : null),
+    format,
+  });
+  useLayoutEffect(() => {
+    const painted = { value };
+    paintedMetrics.set(label, painted);
+    return () => {
+      if (paintedMetrics.get(label) === painted) paintedMetrics.delete(label);
+    };
+  }, [label, value]);
   return (
     <div className="metric">
       <div className="metric-label">
@@ -1337,6 +1351,14 @@ function Metric({
   );
 }
 const noSubscription = () => () => {};
+/** The number each mounted stat tile shows, by label. The shell mounts again
+ * once access loads (`WellbeingProvider` is keyed by the signed-in user), so
+ * the dashboard's tiles are replaced about 250ms after the page has painted
+ * their numbers. The new tile renders before the old one's cleanup runs, so it
+ * finds the number here and counts from it, which is no count when it is the
+ * same. A tile that mounts after the dashboard was gone (Today and advisor,
+ * then Portfolio) finds nothing and counts from 0. */
+const paintedMetrics = new Map<string, { value: number }>();
 function ProjectForm({
   open,
   project,
