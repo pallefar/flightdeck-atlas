@@ -183,6 +183,24 @@ test("context transport sends only the bearer credential and maps every OS outco
       "workspaces",
     ),
   ).toMatchObject({ state: "ok", data: { instanceId: "os-7c1e2f0a9b3d4c5e" } });
+  // Its format is a guess Atlas has never seen the OS make, so the value is
+  // taken as opaque: a shape Atlas did not predict must not fail the whole
+  // response and black out the context switcher.
+  expect(
+    await outcome(
+      () =>
+        jsonResponse(200, {
+          integrationId: "atlas",
+          instanceId: "te-ops:9f2c@flightdeck.local",
+          workspaces: fixture().workspaces,
+          generatedAt: at,
+        }),
+      "workspaces",
+    ),
+  ).toMatchObject({
+    state: "ok",
+    data: { instanceId: "te-ops:9f2c@flightdeck.local" },
+  });
   // Strict DTOs: forbidden or unknown fields reject the whole response.
   expect(
     await outcome(

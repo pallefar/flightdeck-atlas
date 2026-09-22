@@ -27,8 +27,10 @@ import { useFlightDeckContext } from "./flightdeck-context-switcher";
 import {
   CHECK_NOTE,
   OnboardingEditor,
+  SEND_OPEN_NOTE,
   STAGE_LABEL,
   checkedLine,
+  isSendOpen,
   useOnboardingStages,
 } from "./flightdeck-onboarding";
 import type { ContextState } from "@/lib/flightdeck/context";
@@ -406,6 +408,12 @@ export default function FlightDeckConnection({
           )}
           {filtered.map((p) => {
             const stage = onboarding.stages?.[p.id];
+            // While FlightDeck is reviewing a send, the form locks the draft
+            // and says so. The row must keep that promise: removing the draft
+            // here would drop the name FlightDeck is reviewing, break Export
+            // draft, drop the project from this tab's count, and leave a
+            // later "Needs more info" reopening an empty draft.
+            const sendOpen = isSendOpen(stage);
             return (
               <article className="bridge-project" key={p.id}>
                 <div className="bridge-row">
@@ -463,7 +471,11 @@ export default function FlightDeckConnection({
                         setMessage("");
                       }}
                     >
-                      {p.flightdeckDraft ? "Edit draft" : "Prepare onboarding"}
+                      {sendOpen
+                        ? "View status"
+                        : p.flightdeckDraft
+                          ? "Edit draft"
+                          : "Prepare onboarding"}
                     </Button>
                     {p.flightdeckDraft && (
                       <>
@@ -501,7 +513,8 @@ export default function FlightDeckConnection({
                         </Button>
                         <button
                           className="text-link"
-                          disabled={busy || p.canEdit === false}
+                          disabled={busy || p.canEdit === false || sendOpen}
+                          title={sendOpen ? SEND_OPEN_NOTE : undefined}
                           onClick={async () => {
                             const saved = await onSave(
                               { ...p, flightdeckDraft: null },

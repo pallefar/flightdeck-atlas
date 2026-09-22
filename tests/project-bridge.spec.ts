@@ -680,17 +680,40 @@ test("one rate limit covers the whole credential: context reads, submits and rea
   expect(calls).toEqual(["read"]);
 });
 
-test("read:context accepts the new OS instanceId first and still rejects any other new key", async () => {
+test("read:context accepts any OS instanceId value it has not seen, and still rejects any other new key", async () => {
   const { instanceId, ...without } = os.context.workspaces;
   expect(instanceId).toBe(os.context.instanceId);
   expect(
     osWorkspacesResponseSchema.safeParse(os.context.workspaces).success,
   ).toBe(true);
   expect(osWorkspacesResponseSchema.safeParse(without).success).toBe(true);
+  // Atlas has never seen the OS mint an instance id, so its format is a
+  // guess. A guess that turns out wrong must degrade onboarding only (the
+  // link is held, see "no link without the OS instanceId"), never take the
+  // whole read:context response — and with it the context switcher — down.
+  for (const odd of [
+    "flightdeck.local",
+    "te-ops:9f2c",
+    "OS 12",
+    "../etc",
+    "0f1e2d3c-4b5a-6789-abcd-ef0123456789",
+  ]) {
+    const client = createContextClient(config, {
+      fetch: async () =>
+        jsonResponse(200, { ...os.context.workspaces, instanceId: odd }),
+    });
+    expect(await client.workspaces()).toMatchObject({
+      state: "ok",
+      data: { instanceId: odd },
+    });
+  }
+  // An unknown KEY, a non-string id, an empty id or an absurd length still
+  // rejects: the DTO stays strict about shape, only not about the value.
   for (const bad of [
     { ...os.context.workspaces, root: "/srv/te-ops" },
-    { ...os.context.workspaces, instanceId: "../etc" },
     { ...os.context.workspaces, instanceId: "" },
+    { ...os.context.workspaces, instanceId: 7 },
+    { ...os.context.workspaces, instanceId: "x".repeat(129) },
   ])
     expect(osWorkspacesResponseSchema.safeParse(bad).success).toBe(false);
   const client = createContextClient(config, {
@@ -2659,6 +2682,76 @@ test("the To FlightDeck list and the dashboard follow FlightDeck without the for
         "Onboarding: 0 sent to FlightDeck, 0 linked, 1 need more info.",
       ),
     ).toBeVisible();
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
+test("the list cannot remove a draft FlightDeck is still reviewing, and offers the status instead", async ({
+  page,
+}) => {
+  await page.clock.install();
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const project = await createProject(page, {
+    name: "Locked Row QA",
+    functionArea: "HR",
+    flightdeckDraft: { label: "Locked Row QA", workspaceHint: "hr-de" },
+  });
+  let stage = "submitted";
+  await page.route(
+    (url) => url.pathname === "/api/flightdeck/onboard",
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          stages: { [project.id]: stage },
+          checked: { [project.id]: null },
+          retryAfter: null,
+        }),
+      }),
+  );
+  try {
+    await page.reload();
+    await page.getByRole("button", { name: /To FlightDeck/ }).click();
+    const row = page.locator("article.bridge-project", {
+      hasText: "Locked Row QA",
+    });
+    await expect(row.getByText("Submitted", { exact: true })).toBeVisible();
+    // The form calls the draft locked while FlightDeck reviews it; the row
+    // outside the form must not be the way around that promise. Removing it
+    // would drop the name FlightDeck is reviewing and empty the draft a
+    // "Needs more info" reopens.
+    const remove = row.getByRole("button", { name: "Remove draft" });
+    await expect(remove).toBeVisible();
+    await expect(remove).toBeDisabled();
+    await expect(remove).toHaveAttribute(
+      "title",
+      /FlightDeck is reviewing this request/,
+    );
+    await expect(
+      row.getByRole("button", { name: "Edit draft", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      row.getByRole("button", { name: "View status", exact: true }),
+    ).toBeEnabled();
+    // Read-only export is untouched.
+    await expect(
+      row.getByRole("button", { name: "Export draft" }),
+    ).toBeEnabled();
+    // Once FlightDeck hands it back, the row is the owner's again.
+    stage = "needs-more-info";
+    await page.clock.fastForward(61_000);
+    await expect(
+      row.getByText("Needs more info", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      row.getByRole("button", { name: "Remove draft" }),
+    ).toBeEnabled();
+    await expect(
+      row.getByRole("button", { name: "Edit draft", exact: true }),
+    ).toBeEnabled();
   } finally {
     await removeProject(page, project.id);
   }

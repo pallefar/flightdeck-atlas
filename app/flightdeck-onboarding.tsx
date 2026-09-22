@@ -68,12 +68,18 @@ export const STAGE_LABEL: Record<OnboardingStage, string> = {
   "not-sent": "Not sent",
   closed: "Send closed",
 };
-/** Stages whose status FlightDeck may still change. */
+/** Stages whose status FlightDeck may still change. While a send is open the
+ * form locks the draft, so everything outside the form that could edit or
+ * drop it (the list row's own buttons) must be gated on this too. */
 const OPEN_STAGES: OnboardingStage[] = [
   "submitted",
   "linked",
   "setup-in-progress",
 ];
+export const isSendOpen = (stage: OnboardingStage | undefined | null) =>
+  !!stage && OPEN_STAGES.includes(stage);
+export const SEND_OPEN_NOTE =
+  "FlightDeck is reviewing this request. The draft stays as it was sent until FlightDeck answers.";
 const when = (iso: string) =>
   new Date(iso).toLocaleString(undefined, {
     dateStyle: "medium",
@@ -418,7 +424,7 @@ function StatusBanner({
         "The Atlas Super Admin closed this unconfirmed send, so the draft is open again. If FlightDeck did file it after all, the next send follows that request instead of filing a second one.";
       break;
   }
-  const open = OPEN_STAGES.includes(op.stage);
+  const open = isSendOpen(op.stage);
   return (
     <div className={`fd-banner ${tone}`}>
       {tone ? <AlertTriangle size={16} /> : <Check size={16} />}

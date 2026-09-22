@@ -10,11 +10,16 @@ export const osIdSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,254}$/);
 const integrationIdSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/);
 export const isoSchema = z.string().datetime({ offset: true });
 /** The OS's stable instance id (proposal §8b decision 10): generated once in
- * the te-ops setting `instance.id`, never written by a route. Accepted
- * before the OS sends it so that adding it cannot break the strict DTO. */
-export const osInstanceIdSchema = z
-  .string()
-  .regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/);
+ * the te-ops setting `instance.id`, never written by a route. Accepted before
+ * the OS sends it so that adding it cannot break the strict DTO — which is
+ * only true if the value is taken as opaque. Atlas has never seen the OS mint
+ * one, so any guessed format would be a guess that, inside this strict DTO,
+ * would fail the WHOLE read:context response (context-client turns a parse
+ * failure into `invalid_response`) and black out the context switcher for
+ * everyone. Atlas only ever stores it and compares it for equality, so the
+ * bound is a sanity bound, not a format. Onboarding does the use-site check:
+ * confirmLink holds the send with `instance_unknown` when it is missing. */
+export const osInstanceIdSchema = z.string().min(1).max(128);
 const entrySchema = z
   .object({
     id: osIdSchema,
