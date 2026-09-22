@@ -13,7 +13,7 @@ motion that has to run in JavaScript.
 
 `motion.ts`, `useMotion.ts`, `entrances.ts`, `CountUp.tsx`, `disclosure.ts` and `presence.ts` are
 copies of the OS's `flightdeck/web/src/motion/` at commit
-`99d641f1871069e35ea3ed411f20d427ea5d75fc` (FlightDeck OS, branch `feat/anime-motion-os`). Each
+`745733922e001557b6ff727d25110b8dde7cd3f6` (FlightDeck OS, branch `feat/anime-motion-os`). Each
 starts with a header naming that commit and is byte-identical below it. `useMotion.ts` also carries
 an `eslint-disable` line for React Compiler rules that Atlas's lint runs and the OS's does not.
 `disclosure.ts` and `presence.ts` are copied because `useMotion.ts` imports them.
@@ -27,8 +27,14 @@ an `eslint-disable` line for React Compiler rules that Atlas's lint runs and the
   Without that line Tailwind would add them to Atlas's stylesheet.
 
 **To update:** change the OS copy first. Then copy each file again, keep the header and set its
-commit, and rerun `tests/motion.spec.ts`. Never edit the code below a header here, or the two apps
-stop sharing one motion language.
+commit, and rerun `tests/motion.spec.ts` and the check below. Never edit the code below a header
+here, or the two apps stop sharing one motion language.
+
+**To check the mirror:** `node scripts/check-motion-mirror.mjs <FlightDeck OS checkout> [ref]`
+(`ref` defaults to `origin/feat/anime-motion-os`; `git fetch` that checkout first). It fails when a
+file's code differs from the commit its header names (an edit made here), when the headers name
+different commits, or when the OS's `ref` has a different version of a file (the OS moved on: copy
+again).
 
 ## What Atlas animates with it
 

@@ -1,4 +1,4 @@
-// MIRROR of FlightDeck OS flightdeck/web/src/motion/presence.ts at commit 99d641f1871069e35ea3ed411f20d427ea5d75fc
+// MIRROR of FlightDeck OS flightdeck/web/src/motion/presence.ts at commit 745733922e001557b6ff727d25110b8dde7cd3f6
 // (pallefar FlightDeck OS, branch feat/anime-motion-os). Byte-identical below this header: change the OS copy
 // first and re-copy, so Atlas and the OS keep one motion language. lib/motion/README.md says what Atlas uses.
 /** Close motion for an overlay that has ALREADY unmounted.
@@ -52,7 +52,7 @@ const RELOADS = "iframe, embed, object, video, audio";
 const MAX_NODES = 4000;
 
 /** The longest a ghost may stay, whatever its motion does. */
-const CEILING = MOTION.duration.sheetIn + 300;
+const CEILING = MOTION.duration.dialog + 300;
 
 /** Is `root` the kind of element a ghost can be made of? Read before React
  * removes it. */

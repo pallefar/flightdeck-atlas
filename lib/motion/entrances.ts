@@ -1,4 +1,4 @@
-// MIRROR of FlightDeck OS flightdeck/web/src/motion/entrances.ts at commit 99d641f1871069e35ea3ed411f20d427ea5d75fc
+// MIRROR of FlightDeck OS flightdeck/web/src/motion/entrances.ts at commit 745733922e001557b6ff727d25110b8dde7cd3f6
 // (pallefar FlightDeck OS, branch feat/anime-motion-os). Byte-identical below this header: change the OS copy
 // first and re-copy, so Atlas and the OS keep one motion language. lib/motion/README.md says what Atlas uses.
 /** Page entrances: Atlas's `atlas-arrive` (motion.css:125-150) for every
@@ -6,26 +6,28 @@
  * element that hosts the routed page (App.tsx's `.main-col` and the
  * standalone shell), so no page carries its own entrance code.
  *
- * WHAT ARRIVES. Atlas arrives the page heading (500ms) and each project card
- * (450ms, staggered 45ms, the 4th onwards sharing the 135ms slot). The OS
- * applies that to the direct children of `.page`:
- *   - `.pagehead` arrives like Atlas's `.page-heading`;
- *   - a stat row, card grid, launcher grid or stack arrives ITEM BY ITEM,
- *     each item taking the next stagger slot, like Atlas's project cards;
- *   - any other block arrives as one unit, in its own slot.
- * A wrapper with no visible box of its own that holds such a group is looked
- * through: its other children share the wrapper's slot, which moves them
- * exactly as moving the wrapper would, and the group inside still arrives
- * item by item. A box that is visible (a card) always moves as a whole, or
- * its frame would stand still while its content rose.
+ * WHAT ARRIVES is what Atlas arrives, and nothing more. Atlas moves only
+ * `.dashboard > .page-heading` (500ms) and `.project-grid > .project-card`
+ * (450ms, staggered 45ms, the 4th onwards sharing the 135ms slot); its
+ * metrics strip, notices and filter bar are drawn in place from the first
+ * frame. Among the direct children of `.page`:
+ *   - the page heading (`.pagehead`, or a `<header>`) arrives like Atlas's
+ *     `.page-heading`; a stat row inside it stays in place;
+ *   - a card grid (`.cards`, `.applaunch`, `.dash-widgets`) arrives ITEM BY
+ *     ITEM, each card taking the next stagger slot, like Atlas's project cards;
+ *   - everything else (a stat row, a notice, a tab bar, a table, a form, any
+ *     other block) renders in place.
+ * A wrapper with no visible box of its own is looked through for a heading
+ * or a card grid. A box that is visible (a card, a panel) stays in place with
+ * everything inside it, so no frame stands still while its content rises.
  *
  * WHEN. Whatever is on the page when the watcher starts, when a new `.page`
  * is inserted (a route change) or when the route key changes, arrives. So
  * does content inserted during the following MOTION.duration.entranceWindow:
- * that is "first load", the tiles and cards a page renders once its fetch
- * answers. The window closes at the first pointer or key input, which also
- * settles anything still moving, so a click never lands on a moving target
- * and nothing a user action reveals later jumps.
+ * that is "first load", the cards a page renders once its fetch answers.
+ * The window closes at the first pointer or key input, which also settles
+ * anything still moving, so a click never lands on a moving target and
+ * nothing a user action reveals later jumps.
  *
  * WHAT IS LEFT ALONE: an element with its own CSS animation (inline styles
  * cannot beat a running CSS animation, so the two would fight), a fixed or
@@ -35,9 +37,21 @@
  * pin the overlay inside the arriving box for the length of the motion.
  *
  * A static surface (motion.ts STATIC, `data-motion="static"`) never moves:
- * it is no unit, a see-through wrapper around it is looked through so the
- * rest of the wrapper still arrives, and a visible box holding it stays put
- * with it.
+ * it is no unit, a card holding one stays put with it, and a page that
+ * re-arrives as a whole (a workspace switch) moves in its parts around it.
+ *
+ * A TAB SWITCH swaps the panel, as Atlas's studio tabs do: Atlas re-keys
+ * `.studio-panel` on a tab change (work-studio.tsx:318), so the new panel
+ * plays `studio-enter`. When a click on a button of a page's tab bar (`.tabs`,
+ * or Settings' `.setnav`) replaces what the blocks after the bar show (the
+ * old tab's content leaves, the new tab's comes), those blocks swap in as one
+ * unit (motion.ts swapIn: 6px, 250ms) before the new content paints. The bar
+ * itself and everything above it stay. A click that replaces nothing below the
+ * bar plays nothing: not the tab already shown, not one that only adds a line
+ * beside the bar (Ops' "refreshing…"), and not content that lands after the
+ * click's frame (a fetch answering). A bar whose component plays its own
+ * motion for the switch (Sign's filter tabs and wizard steps) carries
+ * OWN_MOTION and is left to it. No page carries code for this.
  *
  * A VIEW CHANGE is a route change too. A sub-app that switches views on a
  * query parameter while its `.page` element stays (Advantage's `?focus=`,
@@ -48,19 +62,32 @@
  * `.page` itself keeps its stylesheet `pageIn` animation whenever this layer
  * does not run (reduced motion, automation, the kill switch). When it does
  * run, it switches `pageIn` off on that one page with an inline
- * `animation: none` before the first paint, because the page rising under
- * its own arriving children would double every movement. */
-import { MOTION, allOf, arrive, holdsStatic, motionAllowed, motionSupported, reenter, STATIC, type MotionHandle } from "./motion";
+ * `animation: none` before the first paint: the page rising as a whole
+ * would move everything Atlas draws in place, and double every movement of
+ * its arriving heading and cards. */
+import { MOTION, allOf, arrive, holdsStatic, motionAllowed, motionSupported, reenter, STATIC, swapIn, type MotionHandle } from "./motion";
 import { GHOST_ATTR } from "./presence";
 
 /** Names a page's current view (see the file comment). */
 export const VIEW_ATTR = "data-motion-view";
 
 const PAGE = ".page";
-const HEADING = ".pagehead";
-/** Containers whose children arrive one by one. All pre-existing classes;
+/** The page heading: `.pagehead` on the console pages, a `<header>` in a
+ * sub-app (Advantage's). */
+const HEADING = ".pagehead, header";
+/** Card grids: their cards arrive one by one. All pre-existing classes;
  * `.dash-widgets` is the Dashboard's and custom pages' widget grid. */
-const GROUP = ".statrow, .cards, .applaunch, .dash-widgets, .stack";
+const CARDS = ".cards, .applaunch, .dash-widgets";
+/** What a filter tab brings in card by card (arriveBlocks): the card grids,
+ * and a `.stack` list of rows (Sign's envelopes). */
+const FILTER_LISTS = `${CARDS}, .stack`;
+/** Stays in place even inside an arriving heading, as Atlas's metrics do. */
+const STILL = ".statrow";
+/** A page's tab bar: its buttons switch what the blocks after it show. */
+const TAB_BAR = ".tabs, .setnav";
+/** A tab bar whose component plays its own motion when it switches
+ * (arriveBlocks, swapIn): the watcher's panel swap leaves it alone. */
+export const OWN_MOTION = '[data-motion="own"]';
 /** An open overlay: the Overlay component's roots (App.tsx's Esc handler asks
  * the same question with the same classes) or any ARIA dialog. */
 const OVERLAY = '.overlay-backdrop, .overlay-aside, [role="dialog"], [aria-modal="true"]';
@@ -101,28 +128,46 @@ export function entranceUnits(page: Element): EntranceUnit[] {
 }
 
 /** The units of a run of sibling blocks, by the same rules as a page's
- * children. `entranceUnits` is this over a page's children; `arriveBlocks`
- * uses it for the part of a page below a tab bar. */
-export function blockUnits(blocks: HTMLElement[]): EntranceUnit[] {
+ * children: the heading, and the items of every `lists` container (by
+ * default the card grids). `entranceUnits` is this over a page's children;
+ * `arriveBlocks` uses it, with FILTER_LISTS, for the part of a page below a
+ * filter tab bar. */
+export function blockUnits(blocks: HTMLElement[], lists: string = CARDS): EntranceUnit[] {
   const units: EntranceUnit[] = [];
   let next = 0;
-  const visit = (children: HTMLElement[], shared: number | null, heading: boolean) => {
+  /** `heading`: the slot of the heading being visited, or null outside one. */
+  const visit = (children: HTMLElement[], heading: number | null) => {
     for (const child of children) {
-      const inHeading = heading || child.matches(HEADING);
       if (child.matches(STATIC)) continue;
-      if (child.matches(GROUP) && seeThrough(child)) {
-        // Items are cards, even inside a heading (Inbox's stat row): the card timing.
+      const inHeading = heading !== null || child.matches(HEADING);
+      if (child.matches(lists) && seeThrough(child)) {
         for (const item of elementsOf(child)) if (!holdsStatic(item)) units.push({ el: item, slot: next++, heading: false });
-      } else if ((child.querySelector(GROUP) || child.querySelector(STATIC)) && seeThrough(child)) {
-        visit(elementsOf(child), shared ?? next++, inHeading);
-      } else if (child.querySelector(STATIC) === null) {
-        units.push({ el: child, slot: shared ?? next++, heading: inHeading });
+      } else if (inHeading && child.matches(STILL)) {
+        continue;
+      } else if (seeThrough(child) && (child.querySelector(lists) || child.querySelector(HEADING) || (inHeading && (child.querySelector(STILL) || child.querySelector(STATIC))))) {
+        // Looked through: a heading's parts share its slot, so they move as the heading would.
+        visit(elementsOf(child), inHeading ? (heading ?? next++) : null);
+      } else if (inHeading && !holdsStatic(child)) {
+        units.push({ el: child, slot: heading ?? next++, heading: true });
       }
-      // else: a visible box holding a static surface stays put, surface and all.
+      // else: it renders in place. A visible box holding a static surface stays put, surface and all.
     }
   };
-  visit(blocks, null, false);
+  visit(blocks, null);
   return units;
+}
+
+/** The parts of `el` that can move around the static surface it holds: each
+ * child that holds none, looking through a see-through child that does. A
+ * visible box holding one stays put with it. For a page re-arriving as a
+ * whole (reenter), which moves every part, not only Atlas's arrivals. */
+function partsAround(el: Element): HTMLElement[] {
+  const parts: HTMLElement[] = [];
+  for (const child of elementsOf(el)) {
+    if (!holdsStatic(child)) parts.push(child);
+    else if (!child.matches(STATIC) && seeThrough(child)) parts.push(...partsAround(child));
+  }
+  return parts;
 }
 
 export interface EntranceStep {
@@ -182,12 +227,14 @@ export function siblingsAfter(el: Element | null | undefined): HTMLElement[] {
 /** Atlas's CSS arrives every card that is INSERTED, with the nth-child
  * stagger, so a filter tab that brings other cards brings them arriving. This
  * is that for `blocks` (typically siblingsAfter(the tab bar)), by the page
- * rules: a see-through list's items one by one in stagger slots, anything
- * else as one unit, and nothing the page watcher would leave alone. For a
- * change the person made, when the page's own entrance window is closed. */
+ * rules: the items of a see-through card grid or `.stack` list one by one in
+ * stagger slots; any other block renders in place, as does anything the page
+ * watcher would leave alone. For a change the person made, when the page's
+ * own entrance window is closed. A bar whose component calls this carries
+ * OWN_MOTION, so the watcher's panel swap leaves it to this. */
 export function arriveBlocks(blocks: HTMLElement[]): MotionHandle {
   if (blocks.length === 0 || !motionAllowed()) return allOf([]);
-  return allOf(arriveUnits(blockUnits(blocks)));
+  return allOf(arriveUnits(blockUnits(blocks, FILTER_LISTS)));
 }
 
 /** The outermost `.page` at or above `el`, inside `root`. */
@@ -248,6 +295,47 @@ export function watchEntrances(root: HTMLElement, opts: { window?: number } = {}
     }
   };
 
+  /** Atlas's studio-enter for the blocks a tab switch changed, as one unit. */
+  const swap = (blocks: HTMLElement[]) => {
+    const fold = doc.defaultView?.innerHeight ?? Infinity;
+    const handle = swapIn(blocks.filter((el) => movable(el) && el.getBoundingClientRect().top < fold));
+    running.add(handle);
+    void handle.finished.then(() => running.delete(handle));
+  };
+
+  /** The tab bar a click has just landed on, until the frame after the click. */
+  let clicked: HTMLElement | null = null;
+  const onClick = (e: Event) => {
+    const tab = e.target instanceof Element ? e.target.closest("button") : null;
+    const bar = tab?.parentElement ?? null;
+    if (!bar || !bar.matches(TAB_BAR) || bar.matches(OWN_MOTION) || !root.contains(bar)) return;
+    clicked = bar;
+    requestAnimationFrame(() => {
+      if (clicked === bar) clicked = null;
+    });
+  };
+
+  /** The blocks after the clicked bar, when `records` swapped what they show; else []. */
+  const switchedPanel = (records: MutationRecord[]): HTMLElement[] => {
+    const bar = clicked;
+    if (!bar || !bar.isConnected) return [];
+    const panel = siblingsAfter(bar);
+    // A switch REPLACES what the panel shows: the old tab's content leaves as
+    // the new tab's comes. A click that only adds beside the bar (Ops' window
+    // tabs show a "refreshing…" line under the Refresh button next to them;
+    // the data changes when the fetch answers) is no switch.
+    let left = false;
+    let came = false;
+    for (const r of records) {
+      if (r.type !== "childList" || !(r.target === bar.parentElement || panel.some((p) => p.contains(r.target)))) continue;
+      left ||= r.removedNodes.length > 0;
+      came ||= r.addedNodes.length > 0;
+    }
+    if (!left || !came) return [];
+    clicked = null;
+    return panel;
+  };
+
   const enterPage = (page: HTMLElement) => {
     // Before the first paint: pageIn would lift the whole page under its arriving children.
     page.style.setProperty("animation", "none");
@@ -255,6 +343,7 @@ export function watchEntrances(root: HTMLElement, opts: { window?: number } = {}
   };
 
   const observer = new MutationObserver((records) => {
+    const swapped = switchedPanel(records);
     const added: HTMLElement[] = [];
     const fresh = new Set<HTMLElement>();
     for (const r of records) {
@@ -270,6 +359,8 @@ export function watchEntrances(root: HTMLElement, opts: { window?: number } = {}
       // A ghost (presence.ts) is a closed overlay playing its exit, not new content.
       for (const n of Array.from(r.addedNodes)) if (n instanceof HTMLElement && n.isConnected && !n.hasAttribute(GHOST_ATTR)) added.push(n);
     }
+    // A switch that also brought a new page or view: that entrance plays instead.
+    if (swapped.length > 0 && motionAllowed() && ![...fresh].some((p) => p.contains(swapped[0]!))) swap(swapped);
     if (added.length === 0 && fresh.size === 0) return;
     // An overlay opening inside something still arriving: settle first, or the
     // moving ancestor would hold the overlay's fixed box for the rest of the motion.
@@ -287,7 +378,8 @@ export function watchEntrances(root: HTMLElement, opts: { window?: number } = {}
     for (const page of fresh) enterPage(page);
     for (const [page, nodes] of touched) {
       if (fresh.has(page)) continue;
-      play(entranceUnits(page).filter((u) => nodes.some((n) => n === u.el || n.contains(u.el))));
+      // What the swap already moves does not also arrive on its own.
+      play(entranceUnits(page).filter((u) => !swapped.some((b) => b.contains(u.el)) && nodes.some((n) => n === u.el || n.contains(u.el))));
     }
   });
 
@@ -301,6 +393,7 @@ export function watchEntrances(root: HTMLElement, opts: { window?: number } = {}
   observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: [VIEW_ATTR], attributeOldValue: true });
   doc.addEventListener("pointerdown", onInput, true);
   doc.addEventListener("keydown", onInput, true);
+  doc.addEventListener("click", onClick, true);
 
   return {
     open,
@@ -315,7 +408,7 @@ export function watchEntrances(root: HTMLElement, opts: { window?: number } = {}
         // A pageIn still playing would override the inline frames; this replaces it.
         page.style.setProperty("animation", "none");
         // A page holding a static surface moves in its parts, around the surface.
-        const handle = reenter(holdsStatic(page) ? entranceUnits(page).map((u) => u.el) : page);
+        const handle = reenter(holdsStatic(page) ? partsAround(page) : page);
         running.add(handle);
         void handle.finished.then(() => running.delete(handle));
       }
@@ -326,6 +419,8 @@ export function watchEntrances(root: HTMLElement, opts: { window?: number } = {}
       observer.disconnect();
       doc.removeEventListener("pointerdown", onInput, true);
       doc.removeEventListener("keydown", onInput, true);
+      doc.removeEventListener("click", onClick, true);
+      clicked = null;
       settle();
     },
   };

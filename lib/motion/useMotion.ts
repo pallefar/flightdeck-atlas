@@ -1,4 +1,4 @@
-// MIRROR of FlightDeck OS flightdeck/web/src/motion/useMotion.ts at commit 99d641f1871069e35ea3ed411f20d427ea5d75fc
+// MIRROR of FlightDeck OS flightdeck/web/src/motion/useMotion.ts at commit 745733922e001557b6ff727d25110b8dde7cd3f6
 // (pallefar FlightDeck OS, branch feat/anime-motion-os). Byte-identical below this header: change the OS copy
 // first and re-copy, so Atlas and the OS keep one motion language. lib/motion/README.md says what Atlas uses.
 /* eslint-disable react-hooks/refs, @typescript-eslint/no-unused-vars -- Atlas's lint runs React Compiler rules the
@@ -156,7 +156,7 @@ export function useDisclosure(rootRef: RefObject<HTMLElement | null>, opts: { se
 }
 
 export interface PanelMotionOptions {
-  /** How it moves: a sheet's edge, "center" for a dialog, "below"/"above" for
+  /** How it moves: a side panel's edge, "center" for a dialog, "below"/"above" for
    * a menu or popover (see openPanel). Read when the element mounts, and again
    * when it unmounts. */
   side: PanelSide;

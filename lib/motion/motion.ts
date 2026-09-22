@@ -1,4 +1,4 @@
-// MIRROR of FlightDeck OS flightdeck/web/src/motion/motion.ts at commit 99d641f1871069e35ea3ed411f20d427ea5d75fc
+// MIRROR of FlightDeck OS flightdeck/web/src/motion/motion.ts at commit 745733922e001557b6ff727d25110b8dde7cd3f6
 // (pallefar FlightDeck OS, branch feat/anime-motion-os). Byte-identical below this header: change the OS copy
 // first and re-copy, so Atlas and the OS keep one motion language. lib/motion/README.md says what Atlas uses.
 /** The ONE motion layer for the OS, its sub-apps and Studio (owner decision
@@ -54,10 +54,10 @@ export const MOTION = {
      * The OS plays the submenu's unfold and the rows below it over the same
      * 200ms, so the three move as one. */
     disclosure: 200,
-    /** Sheet open / close (components/ui/sheet.tsx:63, `duration-500` / `duration-300`). */
-    sheetIn: 500,
-    sheetOut: 300,
-    /** Dialog zoom + fade (components/ui/dialog.tsx:64, `duration-200`). */
+    /** Dialog zoom + fade, open and close (components/ui/dialog.tsx:64,
+     * `duration-200`). Side panels (drawers, asides) take it too: every Atlas
+     * overlay is a Dialog. Its sheet.tsx is imported only by ui/sidebar.tsx,
+     * which nothing imports, so no Atlas page ever shows a sheet. */
     dialog: 200,
     /** The dimmed backdrop's fade (dialog.tsx:42, sheet.tsx:39). It has no
      * duration class, so it runs tw-animate-css's default 150ms. */
@@ -65,7 +65,7 @@ export const MOTION = {
     /** Dropdown menu / popover open and close (dropdown-menu.tsx:45,
      * popover.tsx:33): tw-animate-css's default 150ms, `ease`. */
     popover: 150,
-    /** Stat count-up. Atlas has none; chosen to sit between arrive and sheet. */
+    /** Stat count-up. Atlas has none; chosen a little longer than arrive. */
     countUp: 600,
     /** How long after a route change or a page mount content that renders
      * still counts as "first load" and arrives (entrances.ts). Atlas's CSS
@@ -79,11 +79,6 @@ export const MOTION = {
     standard: [0.25, 0.1, 0.25, 1],
     /** The tab indicator's curve (motion.css:74). The count-up reuses it. */
     emphasized: [0.22, 1, 0.36, 1],
-    /** The sheet's curve: its `ease-in-out` class is Tailwind v4's
-     * `--ease-in-out: cubic-bezier(0.4, 0, 0.2, 1)` (tailwindcss/theme.css),
-     * which tw-animate-css reads through `--tw-ease`. Not CSS's own
-     * `ease-in-out` (0.42, 0, 0.58, 1). */
-    inOut: [0.4, 0, 0.2, 1],
     /** `ease-out`, work-surface-enter. */
     out: [0, 0, 0.58, 1],
   },
@@ -97,6 +92,10 @@ export const MOTION = {
     swap: 6,
     /** Dialog starts at 95% (zoom-in-95). Menus and popovers too. */
     dialogScale: 0.95,
+    /** A side panel fades in from this many px towards its edge, in the
+     * dialog's 200ms: about what zoom-in-95 moves the edges of a 400-500px
+     * dialog, without zooming a panel that is pinned to an edge. */
+    sheetTravel: 20,
     /** A menu or popover drops in from 8px towards its trigger
      * (slide-in-from-top-2: 2 x the 4px spacing unit). Its exit has no slide. */
     popoverDrop: 8,
@@ -117,7 +116,6 @@ export const MOTION = {
 const EASE = {
   standard: cubicBezier(...MOTION.ease.standard),
   emphasized: cubicBezier(...MOTION.ease.emphasized),
-  inOut: cubicBezier(...MOTION.ease.inOut),
   out: cubicBezier(...MOTION.ease.out),
 };
 
@@ -498,7 +496,8 @@ export function allOf(handles: MotionHandle[]): MotionHandle {
 export type PanelSide = "right" | "left" | "top" | "bottom" | "center" | "below" | "above";
 
 export interface PanelOptions {
-  /** Which edge a sheet slides from; "center" for a dialog (fade + 95% zoom);
+  /** Which edge a side panel comes in from (fade + a 20px travel, in Atlas's
+   * dialog timing); "center" for a dialog (fade + 95% zoom);
    * "below" / "above" for a menu or popover that opens under / over its
    * trigger (fade + 95% zoom + an 8px drop, Atlas dropdown-menu.tsx:45).
    * Default "right". */
@@ -543,8 +542,6 @@ interface PanelMotion {
   close: number;
   ease: EasingFunction;
   origin?: string;
-  /** Does the panel fade itself (a dialog, a popover) or only move (a sheet)? */
-  fades: boolean;
 }
 
 /** `carried`: a containing backdrop does the fading, so the panel's own
@@ -566,11 +563,13 @@ function panelMotion(side: PanelSide, el: Styled, carried: boolean, want?: strin
       close: d,
       ease: EASE.standard,
       ...(origin ? { origin } : {}),
-      fades: true,
     };
   }
-  const offset = { right: { x: 100 }, left: { x: -100 }, bottom: { y: 100 }, top: { y: -100 } }[side];
-  return { enter: frame(offset), exit: frame(offset), unit: "%", open: MOTION.duration.sheetIn, close: MOTION.duration.sheetOut, ease: EASE.inOut, fades: false };
+  // A side panel: Atlas's dialog timing and fade, with a short travel from its edge instead of the zoom.
+  const t = MOTION.distance.sheetTravel;
+  const offset = { right: { x: t }, left: { x: -t }, bottom: { y: t }, top: { y: -t } }[side];
+  const d = MOTION.duration.dialog;
+  return { enter: frame({ opacity: o, ...offset }), exit: frame({ opacity: o, ...offset }), unit: "px", open: d, close: d, ease: EASE.standard };
 }
 
 function backdropOf(opts: PanelOptions, panel: Styled): { el: Styled; carries: boolean } | null {
@@ -585,7 +584,7 @@ function paintedFrame(el: Styled, unit: "px" | "%"): Frame | null {
   return r && r.unit === unit ? r.current() : null;
 }
 
-/** Slide a sheet in from its edge, zoom a dialog in, or drop a popover open.
+/** Fade a side panel in from its edge, zoom a dialog in, or drop a popover open.
  * Ends, and cancels, to the stylesheet's state. */
 export function openPanel(el: Element | null | undefined, opts: PanelOptions = {}): MotionHandle {
   const panel = toElements(el)[0];
@@ -594,9 +593,9 @@ export function openPanel(el: Element | null | undefined, opts: PanelOptions = {
   const m = panelMotion(opts.side ?? "right", panel, backdrop?.carries ?? false, opts.origin);
   const main = drive([panel], { from: m.enter, to: REST, unit: m.unit, duration: m.open, ease: m.ease, origin: m.origin, end: "restore", cancelTo: "restore" }).handle;
   if (!backdrop) return main;
-  // A carried dialog fades with its backdrop, so the backdrop takes the
-  // dialog's own 200ms; a sheet does not fade, so its backdrop keeps 150ms.
-  const duration = backdrop.carries && m.fades ? m.open : MOTION.duration.backdrop;
+  // A carried panel fades with its backdrop, so the backdrop takes the
+  // panel's own duration; a sibling backdrop fades in its own 150ms.
+  const duration = backdrop.carries ? m.open : MOTION.duration.backdrop;
   const fade = drive([backdrop.el], { from: frame({ opacity: 0 }), to: REST, unit: "px", duration, ease: EASE.standard, end: "restore", cancelTo: "restore" }).handle;
   return both(main, fade);
 }
@@ -616,8 +615,8 @@ export function closePanel(el: Element | null | undefined, opts: PanelOptions & 
   }
   const backdrop = backdropOf(opts, panel);
   const m = panelMotion(opts.side ?? "right", panel, backdrop?.carries ?? false, opts.origin);
-  // A carried panel fades out with its backdrop over its whole exit, so a
-  // sheet stays visible while it slides away. A sibling backdrop takes 150ms.
+  // A carried panel fades out with its backdrop over its whole exit. A
+  // sibling backdrop takes 150ms.
   const fadeFor = backdrop?.carries ? m.close : Math.min(MOTION.duration.backdrop, m.close);
   const fade = backdrop
     ? drive([backdrop.el], { from: paintedFrame(backdrop.el, "px") ?? REST, to: frame({ opacity: 0 }), unit: "px", duration: fadeFor, ease: EASE.standard, end: "hold", cancelTo: "restore" }).handle
