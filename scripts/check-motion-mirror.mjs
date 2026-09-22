@@ -38,6 +38,15 @@ if (!osCheckout) {
 }
 const git = (...args) => execFileSync("git", ["-C", osCheckout, ...args], { encoding: "utf8", maxBuffer: 1 << 24 });
 const refSha = git("rev-parse", `${ref}^{commit}`).trim();
+/** A file of the OS layer at a commit, or null when that commit has no such
+ * file (the OS removed or renamed it). */
+function osFile(sha, file) {
+  try {
+    return execFileSync("git", ["-C", osCheckout, "show", `${sha}:${OS_DIR}/${file}`], { encoding: "utf8", maxBuffer: 1 << 24, stdio: ["ignore", "pipe", "ignore"] });
+  } catch {
+    return null;
+  }
+}
 
 const problems = [];
 const commits = new Set();
@@ -49,8 +58,12 @@ for (const file of FILES) {
     continue;
   }
   commits.add(commit);
-  if (body !== git("show", `${commit}:${OS_DIR}/${file}`)) problems.push(`${file}: differs from ${commit.slice(0, 8)}, the commit its header names (edited in Atlas?)`);
-  else if (body !== git("show", `${refSha}:${OS_DIR}/${file}`)) problems.push(`${file}: ${ref} (${refSha.slice(0, 8)}) has a different version than the copied ${commit.slice(0, 8)}. Copy it again.`);
+  const copied = osFile(commit, file);
+  const current = osFile(refSha, file);
+  if (copied === null) problems.push(`${file}: ${commit.slice(0, 8)}, the commit its header names, has no such file`);
+  else if (body !== copied) problems.push(`${file}: differs from ${commit.slice(0, 8)}, the commit its header names (edited in Atlas?)`);
+  else if (current === null) problems.push(`${file}: ${ref} (${refSha.slice(0, 8)}) no longer has it (the OS removed it). Copy the layer again.`);
+  else if (body !== current) problems.push(`${file}: ${ref} (${refSha.slice(0, 8)}) has a different version than the copied ${commit.slice(0, 8)}. Copy it again.`);
 }
 if (commits.size > 1) problems.push(`the headers name different commits: ${[...commits].join(", ")}`);
 
