@@ -7,5 +7,8 @@ declare namespace Cloudflare {
     ATLAS_FLIGHTDECK_URL?: string;
     /** OS inbound machine credential (read:context). Server-only secret. */
     ATLAS_FLIGHTDECK_INBOUND_TOKEN?: string;
+    /** Slug that scopes Atlas's FlightDeck link records. Optional; unset
+     * means "atlas-local". Set once, before the first send. */
+    ATLAS_INSTALLATION_ID?: string;
   }
 }

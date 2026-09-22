@@ -850,7 +850,11 @@ test("the live context route stays same-origin, signed-in and free of the creden
   await expect(
     page.getByText("Workspace & project context:", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByText("Not connected", { exact: true })).toBeVisible();
+  // Import stays disconnected; onboarding and the context have their own rows.
+  await expect(
+    page.getByText("Import from FlightDeck:", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Not enabled", { exact: true })).toBeVisible();
   const results = await page.evaluate(async () => {
     const get = await fetch("/api/flightdeck/context");
     const put = await fetch("/api/flightdeck/context", {

@@ -1,0 +1,171 @@
+{
+  "_about": "OS responses for the project-onboarding kind, recorded from the contract (onboarding plan §4.2, §4.3, §4.6; public-inbound-http-api proposal §8b) because W1 is not deployed yet. Replace with a live capture once the OS ships the kind; the tests read this file, never a running OS.",
+  "submissionId": "0a1b2c3d4e5f60718293a4b5",
+  "otherSubmissionId": "ffeeddccbbaa998877665544",
+  "payloadSha256": "5d41402abc4b2a76b9719d911017c592aa5f1b1c1c7c2a6f0b1c2d3e4f5a6b7c",
+  "receivedAt": "2026-09-22T09:00:00.000Z",
+  "submit": {
+    "accepted": {
+      "status": 202,
+      "body": {
+        "submissionId": "0a1b2c3d4e5f60718293a4b5",
+        "state": "filed",
+        "receivedAt": "2026-09-22T09:00:00.000Z",
+        "payloadSha256": "5d41402abc4b2a76b9719d911017c592aa5f1b1c1c7c2a6f0b1c2d3e4f5a6b7c",
+        "payloadBytes": 1432,
+        "note": "filed for human review — Flightdeck has applied nothing and has not interpreted the payload"
+      }
+    },
+    "duplicate": {
+      "status": 200,
+      "body": { "submissionId": "0a1b2c3d4e5f60718293a4b5", "duplicate": true }
+    },
+    "alreadySubmitted": {
+      "status": 409,
+      "body": {
+        "code": "already_submitted",
+        "submissionId": "0a1b2c3d4e5f60718293a4b5",
+        "state": "filed"
+      }
+    },
+    "invalid": {
+      "status": 400,
+      "body": {
+        "error": "invalid submission",
+        "issues": [{ "path": ["payload"], "message": "Unrecognized key" }]
+      }
+    },
+    "scopeMissing": {
+      "status": 403,
+      "body": {
+        "error": "credential lacks the submit:proposal scope",
+        "reason": "scope-missing"
+      }
+    },
+    "unauthorized": {
+      "status": 401,
+      "body": { "error": "invalid credential" }
+    },
+    "rateLimited": {
+      "status": 429,
+      "headers": { "Retry-After": "12" },
+      "body": { "error": "too many requests", "retryAfterSeconds": 12 }
+    }
+  },
+  "readBack": {
+    "base": {
+      "submissionId": "0a1b2c3d4e5f60718293a4b5",
+      "integrationId": "atlas",
+      "kind": "project-onboarding",
+      "receivedAt": "2026-09-22T09:00:00.000Z",
+      "payloadSha256": "5d41402abc4b2a76b9719d911017c592aa5f1b1c1c7c2a6f0b1c2d3e4f5a6b7c",
+      "payloadBytes": 1432,
+      "fieldNames": [
+        "atlasProjectId",
+        "atlasRevision",
+        "cowork",
+        "facts",
+        "idempotencyKey",
+        "installationId",
+        "profile",
+        "progress",
+        "requestedBy",
+        "schema",
+        "target"
+      ]
+    },
+    "filed": { "state": "filed" },
+    "promoted": {
+      "state": "promoted",
+      "outcome": {
+        "workspaceId": "hr-de",
+        "projectId": "payroll-rollout",
+        "setupState": "none"
+      }
+    },
+    "promotedNotShared": { "state": "promoted" },
+    "setupInProgress": {
+      "state": "promoted",
+      "outcome": {
+        "workspaceId": "hr-de",
+        "projectId": "payroll-rollout",
+        "setupState": "awaiting-cowork"
+      }
+    },
+    "setupComplete": {
+      "state": "promoted",
+      "outcome": {
+        "workspaceId": "hr-de",
+        "projectId": "payroll-rollout",
+        "setupState": "complete"
+      }
+    },
+    "needsMoreInfo": {
+      "state": "rejected",
+      "outcome": { "reasonCode": "needs-more-info" }
+    },
+    "outOfScope": {
+      "state": "rejected",
+      "outcome": { "reasonCode": "out-of-scope" }
+    },
+    "notFound": { "status": 404, "body": { "error": "no such submission" } }
+  },
+  "context": {
+    "instanceId": "os-7c1e2f0a9b3d4c5e",
+    "workspaces": {
+      "integrationId": "atlas",
+      "instanceId": "os-7c1e2f0a9b3d4c5e",
+      "workspaces": [
+        {
+          "id": "te-ops",
+          "label": "TE Operations",
+          "enabled": true,
+          "isDefault": true
+        },
+        {
+          "id": "archive",
+          "label": "Archive",
+          "enabled": false,
+          "isDefault": false
+        },
+        {
+          "id": "hr-de",
+          "label": "HR Germany",
+          "enabled": true,
+          "isDefault": false
+        }
+      ],
+      "generatedAt": "2026-09-22T09:00:00.000Z"
+    },
+    "projectsBeforePromotion": {
+      "workspaceId": "hr-de",
+      "projects": [
+        {
+          "id": "general",
+          "label": "General",
+          "enabled": true,
+          "isDefault": true
+        }
+      ],
+      "generatedAt": "2026-09-22T09:00:00.000Z"
+    },
+    "projectsAfterPromotion": {
+      "workspaceId": "hr-de",
+      "projects": [
+        {
+          "id": "general",
+          "label": "General",
+          "enabled": true,
+          "isDefault": true
+        },
+        {
+          "id": "payroll-rollout",
+          "label": "Payroll rollout",
+          "enabled": true,
+          "isDefault": false
+        }
+      ],
+      "generatedAt": "2026-09-22T09:05:00.000Z"
+    }
+  }
+}

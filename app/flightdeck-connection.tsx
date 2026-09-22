@@ -24,6 +24,11 @@ import {
 } from "@/lib/flightdeck/bridge";
 import { downloadText } from "@/lib/briefing";
 import { useFlightDeckContext } from "./flightdeck-context-switcher";
+import {
+  OnboardingEditor,
+  STAGE_LABEL,
+  useOnboardingStages,
+} from "./flightdeck-onboarding";
 import type { ContextState } from "@/lib/flightdeck/context";
 const contextStatus: Record<
   ContextState | "check_failed" | "checking",
@@ -113,9 +118,8 @@ export default function FlightDeckConnection({
     [error, setError] = useState(""),
     [query, setQuery] = useState("");
   const [editing, setEditing] = useState<string | null>(null),
-    [label, setLabel] = useState(""),
-    [workspace, setWorkspace] = useState(""),
     [message, setMessage] = useState("");
+  const onboarding = useOnboardingStages();
   const [importing, setImporting] = useState<string | null>(null);
   const context = useFlightDeckContext(superAdmin);
   const contextRow =
@@ -209,22 +213,35 @@ export default function FlightDeckConnection({
         </p>
       </div>
       <div className="connection-status">
+        <span className="status planning">
+          {superAdmin ? "Proposal only" : "Super Admin sends"}
+        </span>
+        <p>
+          <strong>Onboarding to FlightDeck:</strong> the Atlas Super Admin can
+          send a prepared project to FlightDeck for review. It files a request
+          only: an OS admin decides, and nothing is created automatically.
+          FlightDeck must have project onboarding enabled for Atlas.
+        </p>
+      </div>
+      <div className="connection-status">
         <span
           className={`status ${catalog?.connected ? "in-progress" : "planning"}`}
         >
           {catalog?.connected
             ? "Connected"
             : loading
-              ? "Checking connection"
+              ? "Checking"
               : catalog
-                ? "Not connected"
-                : "Connection unavailable"}
+                ? "Not enabled"
+                : "Unavailable"}
         </span>
         <p>
-          <strong>Project import &amp; onboarding:</strong>{" "}
+          <strong>Import from FlightDeck:</strong>{" "}
           {catalog?.connected
             ? "Projects shown here are filtered by your FlightDeck access."
-            : catalog?.reason || "Checking the FlightDeck connection."}
+            : catalog
+              ? "not enabled. OS projects cannot be imported into Atlas until delegated sign-in and per-project access exist."
+              : "Checking whether import is available."}
         </p>
         <Button
           variant="outline"
@@ -357,9 +374,10 @@ export default function FlightDeckConnection({
             Prepare for FlightDeck
           </h2>
           <p className="hub-muted">
-            Save a proposed OS name and destination now. When connected, you’ll
-            choose an authorized workspace and review before creating the OS
-            project. Saving a draft sends nothing to FlightDeck.
+            Describe an Atlas project for FlightDeck in three steps: Basics,
+            FlightDeck details, then Review &amp; send. Saving a draft sends
+            nothing. The Atlas Super Admin reviews every field and sends it as a
+            request; an OS admin decides, and nothing is created automatically.
           </p>
           <label className="bridge-search">
             <Search size={16} />
@@ -383,159 +401,118 @@ export default function FlightDeckConnection({
           {!!local.length && !filtered.length && (
             <p className="hub-empty">No Atlas projects match this search.</p>
           )}
-          {filtered.map((p) => (
-            <article className="bridge-project" key={p.id}>
-              <div className="bridge-row">
-                <div>
-                  <button
-                    className="bridge-project-name"
-                    onClick={() => onOpen(p)}
+          {filtered.map((p) => {
+            const stage = onboarding.stages?.[p.id];
+            return (
+              <article className="bridge-project" key={p.id}>
+                <div className="bridge-row">
+                  <div>
+                    <button
+                      className="bridge-project-name"
+                      onClick={() => onOpen(p)}
+                    >
+                      {p.name}
+                      <ArrowUpRight size={14} />
+                    </button>
+                    <p>
+                      {p.functionArea || p.category}
+                      {p.flightdeckDraft
+                        ? ` · ${p.flightdeckDraft.workspaceHint || "Choose workspace when connected"}`
+                        : " · Atlas only"}
+                    </p>
+                  </div>
+                  <span
+                    className={`status ${stage === "linked" || stage === "setup-in-progress" || stage === "setup-complete" ? "completed" : p.flightdeckDraft || stage ? "planning" : ""}`}
                   >
-                    {p.name}
-                    <ArrowUpRight size={14} />
-                  </button>
-                  <p>
-                    {p.functionArea || p.category}
-                    {p.flightdeckDraft
-                      ? ` · ${p.flightdeckDraft.workspaceHint || "Choose workspace when connected"}`
-                      : " · Atlas only"}
-                  </p>
+                    {stage
+                      ? STAGE_LABEL[stage]
+                      : p.flightdeckDraft
+                        ? "Draft prepared"
+                        : "Not prepared"}
+                  </span>
                 </div>
-                <span
-                  className={`status ${p.flightdeckDraft ? "planning" : ""}`}
-                >
-                  {p.flightdeckDraft ? "Draft prepared" : "Not prepared"}
-                </span>
-              </div>
-              {editing === p.id ? (
-                <form
-                  className="bridge-draft"
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    const saved = await onSave(
-                      {
-                        ...p,
-                        flightdeckDraft: {
-                          label: label.trim(),
-                          workspaceHint: workspace.trim(),
-                        },
-                      },
-                      p,
-                    );
-                    if (saved) {
-                      setEditing(null);
-                      setMessage(
-                        "Onboarding draft saved in Atlas. Nothing has been sent to FlightDeck.",
-                      );
-                    }
-                  }}
-                >
-                  <label>
-                    Proposed OS project name
-                    <Input
-                      required
-                      maxLength={100}
-                      value={label}
-                      onChange={(e) => setLabel(e.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Preferred workspace (optional)
-                    <Input
-                      maxLength={100}
-                      placeholder="e.g. Operations Europe"
-                      value={workspace}
-                      onChange={(e) => setWorkspace(e.target.value)}
-                    />
-                  </label>
-                  <p className="hub-muted">
-                    This is a planning note. Workspace permissions will be
-                    checked when connected.
-                  </p>
+                {editing === p.id ? (
+                  <OnboardingEditor
+                    project={p}
+                    superAdmin={superAdmin}
+                    busy={busy}
+                    workspaces={superAdmin ? context.workspaces : []}
+                    contextState={superAdmin ? context.state : null}
+                    onSave={onSave}
+                    onClose={() => setEditing(null)}
+                    onMessage={setMessage}
+                    onStage={onboarding.mark}
+                  />
+                ) : (
                   <div className="bridge-actions">
-                    <Button disabled={busy || !label.trim()} type="submit">
-                      Save onboarding draft
-                    </Button>
                     <Button
                       variant="outline"
-                      type="button"
-                      disabled={busy}
-                      onClick={() => setEditing(null)}
+                      disabled={busy || p.canEdit === false}
+                      onClick={() => {
+                        setEditing(p.id);
+                        setMessage("");
+                      }}
                     >
-                      Cancel
+                      {p.flightdeckDraft ? "Edit draft" : "Prepare onboarding"}
                     </Button>
-                  </div>
-                </form>
-              ) : (
-                <div className="bridge-actions">
-                  <Button
-                    variant="outline"
-                    disabled={busy || p.canEdit === false}
-                    onClick={() => {
-                      setEditing(p.id);
-                      setLabel(p.flightdeckDraft?.label || p.name);
-                      setWorkspace(p.flightdeckDraft?.workspaceHint || "");
-                    }}
-                  >
-                    {p.flightdeckDraft ? "Edit draft" : "Prepare onboarding"}
-                  </Button>
-                  {p.flightdeckDraft && (
-                    <>
-                      <Button
-                        variant="outline"
-                        onClick={async () => {
-                          try {
-                            const current = await freshProject(p.id);
-                            if (!current.flightdeckDraft)
-                              throw Error(
-                                "This onboarding draft is no longer available.",
+                    {p.flightdeckDraft && (
+                      <>
+                        <Button
+                          variant="outline"
+                          onClick={async () => {
+                            try {
+                              const current = await freshProject(p.id);
+                              if (!current.flightdeckDraft)
+                                throw Error(
+                                  "This onboarding draft is no longer available.",
+                                );
+                              downloadText(
+                                `flightdeck-draft-${current.id}.md`,
+                                [
+                                  `# FlightDeck onboarding draft: ${current.flightdeckDraft!.label}`,
+                                  `Atlas project: ${current.name}`,
+                                  `Atlas ID: ${current.id}`,
+                                  `Preferred workspace: ${current.flightdeckDraft!.workspaceHint || "To select"}`,
+                                  `Description: ${current.description}`,
+                                  `Function: ${current.functionArea || current.category}`,
+                                  `Sponsor: ${current.sponsor || "To confirm"}`,
+                                  `Success measure: ${current.benefit || "To define"}`,
+                                  "",
+                                  "Prepared in Atlas. Not submitted to FlightDeck. Workspace access and final project details must be reviewed before creation.",
+                                ].join("\n\n"),
                               );
-                            downloadText(
-                              `flightdeck-draft-${current.id}.md`,
-                              [
-                                `# FlightDeck onboarding draft: ${current.flightdeckDraft!.label}`,
-                                `Atlas project: ${current.name}`,
-                                `Atlas ID: ${current.id}`,
-                                `Preferred workspace: ${current.flightdeckDraft!.workspaceHint || "To select"}`,
-                                `Description: ${current.description}`,
-                                `Function: ${current.functionArea || current.category}`,
-                                `Sponsor: ${current.sponsor || "To confirm"}`,
-                                `Success measure: ${current.benefit || "To define"}`,
-                                "",
-                                "Prepared in Atlas. Not submitted to FlightDeck. Workspace access and final project details must be reviewed before creation.",
-                              ].join("\n\n"),
+                            } catch (e) {
+                              setError((e as Error).message);
+                            }
+                          }}
+                        >
+                          <Download size={14} />
+                          Export draft
+                        </Button>
+                        <button
+                          className="text-link"
+                          disabled={busy || p.canEdit === false}
+                          onClick={async () => {
+                            const saved = await onSave(
+                              { ...p, flightdeckDraft: null },
+                              p,
                             );
-                          } catch (e) {
-                            setError((e as Error).message);
-                          }
-                        }}
-                      >
-                        <Download size={14} />
-                        Export draft
-                      </Button>
-                      <button
-                        className="text-link"
-                        disabled={busy || p.canEdit === false}
-                        onClick={async () => {
-                          const saved = await onSave(
-                            { ...p, flightdeckDraft: null },
-                            p,
-                          );
-                          if (saved)
-                            setMessage(
-                              "Onboarding draft removed. Your Atlas project is unchanged.",
-                            );
-                        }}
-                      >
-                        <X size={14} />
-                        Remove draft
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-            </article>
-          ))}
+                            if (saved)
+                              setMessage(
+                                "Onboarding draft removed. Your Atlas project is unchanged.",
+                              );
+                          }}
+                        >
+                          <X size={14} />
+                          Remove draft
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </article>
+            );
+          })}
         </section>
       )}
       <section className="hub-card advantage-connect">

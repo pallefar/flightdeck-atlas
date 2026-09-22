@@ -98,6 +98,11 @@ export function recordChanges(
           ? "FlightDeck onboarding draft prepared or updated"
           : "FlightDeck onboarding draft removed",
       );
+    if (
+      JSON.stringify(fields.onboarding ?? null) !==
+      JSON.stringify(previous.onboarding ?? null)
+    )
+      add("project", "FlightDeck onboarding details updated");
     for (const old of previous.tasks)
       if (!fields.tasks.some((t) => t.id === old.id))
         add("task-removed", `Removed task: ${old.title}`, old.id);

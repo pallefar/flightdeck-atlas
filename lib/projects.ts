@@ -11,6 +11,7 @@ import {
   reviewSnapshotSchema,
   automationSchema,
 } from "./work-model";
+import { onboardingSchema } from "./flightdeck/onboarding";
 export const validDate = (s: string) =>
   /^\d{4}-\d{2}-\d{2}$/.test(s) &&
   Number.isFinite(Date.parse(`${s}T12:00:00Z`)) &&
@@ -166,6 +167,8 @@ export const projectSchema = z
     onboardingStage: z
       .enum(["Discovery", "Pilot", "Ready for FlightDeck", "Rolled out"])
       .optional(),
+    /** FlightDeck details for onboarding (lib/flightdeck/onboarding.ts). */
+    onboarding: onboardingSchema.optional(),
   })
   .refine(
     (p) => (p.latitude === null) === (p.longitude === null),

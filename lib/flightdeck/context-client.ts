@@ -19,6 +19,17 @@ import {
   type OsSelection,
   type OsWorkspacesResponse,
 } from "./context";
+import {
+  SUBMISSION_ID_RE,
+  ONBOARDING_KIND,
+  onboardingEnvelopeSchema,
+  osAlreadySubmittedSchema,
+  osSubmitAcceptedSchema,
+  osSubmitDuplicateSchema,
+  parseSubmissionStatus,
+  type OnboardingEnvelope,
+  type OsSubmissionStatus,
+} from "./onboarding";
 
 export type ContextConfig = { baseUrl: string; token: string };
 export type ContextFailure = {
@@ -87,26 +98,33 @@ async function readJson(response: Response): Promise<unknown> {
   return JSON.parse(text);
 }
 
-export function createContextClient(
-  config: ContextConfig,
-  options: { fetch?: Fetcher; timeoutMs?: number } = {},
-): ContextReader {
+type ClientOptions = { fetch?: Fetcher; timeoutMs?: number };
+type Exchange = (
+  path: string,
+  init: { method: "GET" | "POST"; body?: string },
+) => Promise<
+  | { state: "answered"; response: Response; body: unknown }
+  | { state: "os_unreachable" }
+>;
+/** The one place Atlas talks to the OS. Only the bearer credential, Accept
+ * and (for a POST) Content-Type are sent: no cookies, no X-Workspace-Id, no
+ * browser identity. The OS pins these routes to te-ops (§8b decision 3). */
+function exchanger(config: ContextConfig, options: ClientOptions): Exchange {
   const send: Fetcher = options.fetch || ((url, init) => fetch(url, init));
   const timeoutMs = options.timeoutMs ?? TIMEOUT_MS;
-  async function get(
-    path: string,
-    notFound: boolean,
-  ): Promise<{ state: "ok"; body: unknown } | ContextFailure> {
+  return async (path, init) => {
     let response: Response;
     try {
-      // Only the bearer credential and Accept header are sent: no cookies,
-      // no X-Workspace-Id, no browser identity.
       response = await send(config.baseUrl + path, {
-        method: "GET",
+        method: init.method,
         headers: {
           Authorization: `Bearer ${config.token}`,
           Accept: "application/json",
+          ...(init.body === undefined
+            ? {}
+            : { "Content-Type": "application/json" }),
         },
+        ...(init.body === undefined ? {} : { body: init.body }),
         cache: "no-store",
         redirect: "manual",
         signal: AbortSignal.timeout(timeoutMs),
@@ -122,6 +140,24 @@ export function createContextClient(
         return { state: "os_unreachable" };
       body = null;
     }
+    return { state: "answered", response, body };
+  };
+}
+const isJson = (response: Response) =>
+  !!response.headers.get("content-type")?.includes("application/json");
+
+export function createContextClient(
+  config: ContextConfig,
+  options: ClientOptions = {},
+): ContextReader {
+  const exchange = exchanger(config, options);
+  async function get(
+    path: string,
+    notFound: boolean,
+  ): Promise<{ state: "ok"; body: unknown } | ContextFailure> {
+    const answer = await exchange(path, { method: "GET" });
+    if (answer.state !== "answered") return answer;
+    const { response, body } = answer;
     if (response.status === 401 || response.status === 403)
       return { state: "unauthorized" };
     if (response.status === 429)
@@ -141,11 +177,7 @@ export function createContextClient(
       osWorkspaceDisabledSchema.safeParse(body).success
     )
       return { state: "workspace_disabled" };
-    if (
-      response.status !== 200 ||
-      !response.headers.get("content-type")?.includes("application/json") ||
-      body === null
-    )
+    if (response.status !== 200 || !isJson(response) || body === null)
       return { state: "invalid_response" };
     return { state: "ok", body };
   }
@@ -295,3 +327,177 @@ export function createCachedReader(
   };
 }
 const RATE_LIMIT_KEY = "rate-limit";
+
+// ── submit:proposal — the project-onboarding kind (plan §4.3, §4.6) ───────
+
+export const SUBMISSIONS_PATH = "/api/inbound/v1/submissions";
+type TransportFailure = {
+  state:
+    | "os_unreachable"
+    | "unauthorized"
+    | "refused"
+    | "rate_limited"
+    | "invalid_response";
+  retryAfter?: number;
+};
+export type SubmitReceipt = {
+  submissionId: string;
+  receivedAt: string | null;
+  payloadSha256: string | null;
+  duplicate: boolean;
+};
+/** `os_unreachable` and `invalid_response` after a POST mean "not known":
+ * the OS may have filed it. Only `invalid_submission`, `unauthorized` and
+ * `refused` are definite refusals made before anything was filed. */
+export type SubmitResult =
+  | { state: "ok"; data: SubmitReceipt }
+  | { state: "invalid_submission" }
+  | {
+      state: "already_submitted";
+      submissionId: string | null;
+      osState: string | null;
+    }
+  | TransportFailure;
+export type ReadSubmissionResult =
+  | { state: "ok"; data: OsSubmissionStatus }
+  | { state: "not_found" }
+  | TransportFailure;
+export interface SubmissionClient {
+  submit(envelope: OnboardingEnvelope): Promise<SubmitResult>;
+  readSubmission(submissionId: string): Promise<ReadSubmissionResult>;
+}
+
+function refusal(response: Response, body: unknown): TransportFailure | null {
+  if (response.status === 401) return { state: "unauthorized" };
+  // Missing submit:proposal scope, or the kind is not enabled for Atlas
+  // (INBOUND_PROJECT_ONBOARDING_ENABLED and inbound.api.integrationKinds).
+  if (response.status === 403) return { state: "refused" };
+  if (response.status === 429)
+    return {
+      state: "rate_limited",
+      retryAfter: retryAfterFrom(response, body),
+    };
+  return null;
+}
+
+export function createSubmissionClient(
+  config: ContextConfig,
+  options: ClientOptions = {},
+): SubmissionClient {
+  const exchange = exchanger(config, options);
+  return {
+    async submit(envelope) {
+      // Checked before sending: a payload outside the allowlist never leaves.
+      const checked = onboardingEnvelopeSchema.safeParse(envelope);
+      if (!checked.success) return { state: "invalid_submission" };
+      const answer = await exchange(SUBMISSIONS_PATH, {
+        method: "POST",
+        body: JSON.stringify(checked.data),
+      });
+      if (answer.state !== "answered") return answer;
+      const { response, body } = answer;
+      const refused = refusal(response, body);
+      if (refused) return refused;
+      if (response.status === 400) return { state: "invalid_submission" };
+      if (!isJson(response)) return { state: "invalid_response" };
+      if (response.status === 409) {
+        const lock = osAlreadySubmittedSchema.safeParse(body);
+        return lock.success
+          ? {
+              state: "already_submitted",
+              submissionId: lock.data.submissionId ?? null,
+              osState: lock.data.state ?? null,
+            }
+          : { state: "invalid_response" };
+      }
+      if (response.status === 202) {
+        const filed = osSubmitAcceptedSchema.safeParse(body);
+        return filed.success
+          ? {
+              state: "ok",
+              data: {
+                submissionId: filed.data.submissionId,
+                receivedAt: filed.data.receivedAt,
+                payloadSha256: filed.data.payloadSha256,
+                duplicate: false,
+              },
+            }
+          : { state: "invalid_response" };
+      }
+      if (response.status === 200) {
+        // Same idempotency key again: the OS returns the original id.
+        const again = osSubmitDuplicateSchema.safeParse(body);
+        return again.success
+          ? {
+              state: "ok",
+              data: {
+                submissionId: again.data.submissionId,
+                receivedAt: again.data.receivedAt ?? null,
+                payloadSha256: again.data.payloadSha256 ?? null,
+                duplicate: true,
+              },
+            }
+          : { state: "invalid_response" };
+      }
+      return { state: "invalid_response" };
+    },
+    async readSubmission(submissionId) {
+      if (!SUBMISSION_ID_RE.test(submissionId)) return { state: "not_found" };
+      const answer = await exchange(`${SUBMISSIONS_PATH}/${submissionId}`, {
+        method: "GET",
+      });
+      if (answer.state !== "answered") return answer;
+      const { response, body } = answer;
+      const refused = refusal(response, body);
+      if (refused) return refused;
+      if (
+        response.status === 404 &&
+        body &&
+        typeof body === "object" &&
+        (body as { error?: unknown }).error === "no such submission"
+      )
+        return { state: "not_found" };
+      if (response.status !== 200 || !isJson(response))
+        return { state: "invalid_response" };
+      const status = parseSubmissionStatus(body);
+      // A read-back for another submission or kind is never substituted.
+      return status &&
+        status.submissionId === submissionId &&
+        status.kind === ONBOARDING_KIND
+        ? { state: "ok", data: status }
+        : { state: "invalid_response" };
+    },
+  };
+}
+
+/** Submits and read-backs spend the same 30-a-minute credential as the
+ * context reads, so they honour (and record) the same rate limit. */
+export function createGuardedSubmissions(
+  client: SubmissionClient,
+  cache: Map<string, { until: number; value?: ContextResult<unknown> }>,
+  options: { now?: () => number } = {},
+): SubmissionClient {
+  const now = options.now || Date.now;
+  async function guard<T extends { state: string }>(
+    load: () => Promise<T>,
+  ): Promise<T | { state: "rate_limited"; retryAfter: number }> {
+    const started = now();
+    const blocked = cache.get(RATE_LIMIT_KEY);
+    if (blocked && blocked.until > started)
+      return {
+        state: "rate_limited",
+        retryAfter: Math.max(1, Math.ceil((blocked.until - started) / 1000)),
+      };
+    const value = await load();
+    if (value.state === "rate_limited")
+      cache.set(RATE_LIMIT_KEY, {
+        until:
+          now() + ((value as { retryAfter?: number }).retryAfter ?? 60) * 1000,
+      });
+    return value;
+  }
+  return {
+    submit: (envelope) => guard(() => client.submit(envelope)),
+    readSubmission: (id) => guard(() => client.readSubmission(id)),
+  };
+}

@@ -1,37 +1,19 @@
-import { env } from "cloudflare:workers";
 import { authorize } from "@/lib/access";
 import { database } from "@/lib/server-projects";
-import {
-  createCachedReader,
-  createContextClient,
-  readContextConfig,
-  type ContextResult,
-} from "@/lib/flightdeck/context-client";
 import {
   createContextRoute,
   preferenceSelectionStore,
 } from "@/lib/flightdeck/context-route";
+import { osReader } from "@/lib/flightdeck/os-server";
 export const dynamic = "force-dynamic";
 
 // Read-only FlightDeck OS workspace/project context; the handlers and their
-// rules live in lib/flightdeck/context-route.ts. Import/onboard stay
-// disconnected (see ../import, ../onboard).
-const cache = new Map<
-  string,
-  { until: number; value?: ContextResult<unknown> }
->();
-
+// rules live in lib/flightdeck/context-route.ts. Onboarding (../onboard)
+// shares this route's OS reader and rate-limit cache; import stays
+// disconnected (../import).
 const route = createContextRoute({
   authorize: () => authorize("projects.read"),
-  reader(fresh) {
-    const config = readContextConfig({
-      url: env.ATLAS_FLIGHTDECK_URL,
-      token: env.ATLAS_FLIGHTDECK_INBOUND_TOKEN,
-    });
-    return config
-      ? createCachedReader(createContextClient(config), cache, { fresh })
-      : null;
-  },
+  reader: osReader,
   store: preferenceSelectionStore(database),
 });
 

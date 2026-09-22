@@ -1,0 +1,1255 @@
+"use client";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  ArrowUpRight,
+  Check,
+  Layers3,
+  Plus,
+  Send,
+  Sparkles,
+  X,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import type { Project, ProjectFields } from "@/lib/projects";
+import { functions } from "@/lib/opportunities";
+import type { OsContextEntry } from "@/lib/flightdeck/context";
+import {
+  ISO_COUNTRY_CODES,
+  NEVER_SENT,
+  TIMELINE,
+  accessLevels,
+  buildOnboardingPayload,
+  checklistSuggestions,
+  countryName,
+  headcountBands,
+  onboardErrorSchema,
+  onboardStagesSchema,
+  onboardingStatusSchema,
+  personalDataHint,
+  readiness,
+  reviewRows,
+  type OnboardingDraft,
+  type OnboardingStage,
+  type OnboardingStatus,
+  type OnboardingTab,
+} from "@/lib/flightdeck/onboarding";
+
+// The To FlightDeck form: Basics (prefilled from the Atlas project), the
+// FlightDeck details, and Review & send, which lists every field that will
+// travel. Sending files a request for an OS admin to review; nothing is
+// created automatically. The browser only ever talks to Atlas's own
+// /api/flightdeck/onboard routes.
+const TABS: { id: OnboardingTab; label: string }[] = [
+  { id: "basics", label: "Basics" },
+  { id: "details", label: "FlightDeck details" },
+  { id: "review", label: "Review & send" },
+];
+const POLL_MS = 60_000;
+const MAX_BACKOFF_MS = 15 * 60_000;
+const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const PREVIEW_KEY = "00000000-0000-4000-8000-000000000000";
+const PREVIEW_HASH = "0".repeat(64);
+const LOCKED_STATES = ["reserved", "filed", "promoted", "linked"];
+export const STAGE_LABEL: Record<OnboardingStage, string> = {
+  "not-confirmed": "Not confirmed",
+  submitted: "Submitted",
+  linked: "Linked",
+  "setup-in-progress": "Setup in progress",
+  "setup-complete": "Setup complete",
+  "needs-more-info": "Needs more info",
+  rejected: "Declined",
+  "not-sent": "Not sent",
+};
+const REASON_TEXT: Record<string, string> = {
+  os_unreachable: "FlightDeck could not be reached.",
+  invalid_response: "FlightDeck answered unexpectedly.",
+  rate_limited: "FlightDeck was busy.",
+  already_submitted: "FlightDeck already holds a request for this project.",
+  invalid_submission: "FlightDeck rejected the request format.",
+  unauthorized: "FlightDeck refused Atlas's credential.",
+  refused:
+    "Project onboarding is not enabled for Atlas in FlightDeck, or Atlas's credential lacks submit:proposal.",
+  invalid_payload: "Some details were not in the agreed format.",
+  project_not_visible:
+    "FlightDeck accepted it and is creating the project; Atlas is waiting to see it listed.",
+  destination_not_shared:
+    "FlightDeck accepted it into a workspace that is not shared with Atlas, so Atlas cannot confirm it.",
+  instance_unknown:
+    "FlightDeck does not publish its instance id yet, so Atlas cannot record the link.",
+  link_conflict:
+    "That FlightDeck project is already linked elsewhere, so Atlas did not link it.",
+  duplicate: "It duplicates another request.",
+  "out-of-scope": "It is out of scope for FlightDeck.",
+  other: "No reason code was given.",
+};
+const COUNTRIES = ISO_COUNTRY_CODES.map((code) => ({
+  code,
+  name: countryName(code),
+})).sort((a, b) => a.name.localeCompare(b.name));
+const HEADCOUNT_LABEL: Record<(typeof headcountBands)[number], string> = {
+  "<50": "Fewer than 50",
+  "50-249": "50 to 249",
+  "250+": "250 or more",
+  unknown: "Unknown",
+};
+const slugify = (text: string) =>
+  text
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+/, "")
+    .slice(0, 64)
+    .replace(/-+$/, "");
+
+type Draft = {
+  label: string;
+  workspaceHint: string;
+  functionArea: string;
+  category: string;
+  description: string;
+  benefit: string;
+  status: ProjectFields["status"];
+  priority: "" | "High" | "Normal" | "Low";
+  dueDate: string;
+  location: string;
+  ready: boolean;
+  onboarding: OnboardingDraft;
+};
+const draftFrom = (p: Project): Draft => ({
+  label: p.flightdeckDraft?.label ?? p.name,
+  workspaceHint: p.flightdeckDraft?.workspaceHint ?? "",
+  functionArea: p.functionArea ?? "",
+  category: p.category,
+  description: p.description,
+  benefit: p.benefit ?? "",
+  status: p.status,
+  priority: p.priority ?? "",
+  dueDate: p.dueDate,
+  location: p.location,
+  ready: p.onboardingStage === "Ready for FlightDeck",
+  onboarding: structuredClone(p.onboarding ?? {}),
+});
+function cleanOnboarding(o: OnboardingDraft): OnboardingDraft {
+  const roles = Object.fromEntries(
+    Object.entries(o.ownerRoles ?? {})
+      .map(([role, title]) => [role, (title ?? "").trim()])
+      .filter(([, title]) => title),
+  );
+  return {
+    ...(o.proposedProjectId ? { proposedProjectId: o.proposedProjectId } : {}),
+    ...(o.countryCode ? { countryCode: o.countryCode } : {}),
+    ...(o.worksCouncilRelevant
+      ? { worksCouncilRelevant: o.worksCouncilRelevant }
+      : {}),
+    ...(o.legalEntity?.trim() ? { legalEntity: o.legalEntity.trim() } : {}),
+    ...(o.headcountBand ? { headcountBand: o.headcountBand } : {}),
+    ...(Object.keys(roles).length ? { ownerRoles: roles } : {}),
+    ...(o.dataSources?.length ? { dataSources: o.dataSources } : {}),
+    ...(o.accessRequested?.length
+      ? { accessRequested: o.accessRequested }
+      : {}),
+    ...(o.coworkRequested ? { coworkRequested: true } : {}),
+  };
+}
+/** Keeps an optional field absent when it was absent and is still empty,
+ * so an unchanged save records no "details updated" history entry. */
+const optional = (value: string, before: string | undefined) =>
+  value === "" && before === undefined ? undefined : value;
+function fieldsFrom(p: Project, d: Draft): ProjectFields {
+  return {
+    ...p,
+    flightdeckDraft: {
+      label: d.label.trim(),
+      workspaceHint: d.workspaceHint.trim(),
+    },
+    functionArea: optional(d.functionArea, p.functionArea),
+    category: d.category,
+    description: d.description,
+    benefit: optional(d.benefit, p.benefit),
+    status: d.status,
+    priority: d.priority || undefined,
+    dueDate: d.dueDate,
+    location: d.location,
+    // Unticking "Ready" steps back one stage rather than leaving onboarding.
+    onboardingStage: d.ready
+      ? "Ready for FlightDeck"
+      : p.onboardingStage === "Ready for FlightDeck"
+        ? "Pilot"
+        : p.onboardingStage,
+    onboarding: cleanOnboarding(d.onboarding),
+  };
+}
+
+async function fetchStatus(projectId: string, refresh: boolean) {
+  try {
+    const response = await fetch(
+      `/api/flightdeck/onboard/${encodeURIComponent(projectId)}${refresh ? "?refresh=1" : ""}`,
+      { cache: "no-store" },
+    );
+    const parsed = onboardingStatusSchema.safeParse(
+      await response.json().catch(() => null),
+    );
+    return response.ok && parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+/** Reads the stored status; the Super Admin's view also asks the server to
+ * check FlightDeck. At most once a minute, backing off on failures and on
+ * FlightDeck's Retry-After: the credential allows 30 requests a minute for
+ * everything Atlas does, and the server enforces its own minute too. */
+function useOnboardingStatus(
+  projectId: string,
+  superAdmin: boolean,
+  onStage: (id: string, stage: OnboardingStage | null) => void,
+) {
+  const [status, setStatus] = useState<OnboardingStatus | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const delay = useRef(POLL_MS);
+  const show = useCallback(
+    (next: OnboardingStatus) => {
+      setStatus(next);
+      onStage(projectId, next.operation?.stage ?? null);
+    },
+    [projectId, onStage],
+  );
+  const settle = useCallback(
+    (next: OnboardingStatus | null) => {
+      if (!next) {
+        delay.current = Math.min(delay.current * 2, MAX_BACKOFF_MS);
+        setFailed(true);
+        return;
+      }
+      delay.current = next.retryAfter
+        ? Math.max(POLL_MS, next.retryAfter * 1000)
+        : next.notice
+          ? Math.min(delay.current * 2, MAX_BACKOFF_MS)
+          : POLL_MS;
+      setFailed(false);
+      show(next);
+    },
+    [show],
+  );
+  const load = useCallback(
+    (refresh: boolean) => fetchStatus(projectId, refresh).then(settle),
+    [projectId, settle],
+  );
+  useEffect(() => {
+    let live = true;
+    void fetchStatus(projectId, superAdmin).then((next) => {
+      if (live) settle(next);
+    });
+    return () => {
+      live = false;
+    };
+  }, [projectId, superAdmin, settle]);
+  useEffect(() => {
+    if (!superAdmin || !status?.pollable) return;
+    const timer = window.setTimeout(() => {
+      void load(true).then(() => setAttempt((n) => n + 1));
+    }, delay.current);
+    return () => window.clearTimeout(timer);
+  }, [status, attempt, superAdmin, load]);
+  return { status, show, failed, load };
+}
+
+export function useOnboardingStages() {
+  const [stages, setStages] = useState<Record<string, OnboardingStage> | null>(
+    null,
+  );
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    fetch("/api/flightdeck/onboard", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(Error("stages"))))
+      .then((body) => {
+        const parsed = onboardStagesSchema.safeParse(body);
+        if (!live) return;
+        if (parsed.success) setStages(parsed.data.stages);
+        else setFailed(true);
+      })
+      .catch(() => live && setFailed(true));
+    return () => {
+      live = false;
+    };
+  }, []);
+  const mark = useCallback(
+    (id: string, stage: OnboardingStage | null) =>
+      setStages((current) => {
+        const next = { ...(current ?? {}) };
+        if (stage) next[id] = stage;
+        else delete next[id];
+        return next;
+      }),
+    [],
+  );
+  return { stages, failed, mark };
+}
+
+export function OnboardingTimeline({ stage }: { stage: OnboardingStage }) {
+  const current = TIMELINE.findIndex((step) => step.stage === stage);
+  return (
+    <ol className="fd-timeline" aria-label="FlightDeck status">
+      {TIMELINE.map((step, i) => (
+        <li
+          key={step.stage}
+          className={current >= 0 && i < current ? "done" : ""}
+          aria-current={i === current ? "step" : undefined}
+        >
+          {step.label}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function StatusBanner({
+  status,
+  workspaces,
+}: {
+  status: OnboardingStatus;
+  workspaces: OsContextEntry[];
+}) {
+  const op = status.operation;
+  if (!op) return null;
+  const reason = op.reasonCode ? REASON_TEXT[op.reasonCode] || "" : "";
+  const where = op.destinationWorkspaceId
+    ? workspaces.find((w) => w.id === op.destinationWorkspaceId)?.label ||
+      op.destinationWorkspaceId
+    : "";
+  let tone = "",
+    text = "";
+  switch (op.stage) {
+    case "not-confirmed":
+      tone = "warn";
+      text = `FlightDeck has not confirmed this send yet. ${reason} Retry send sends the same request again, with the same key, so it can never be filed twice.`;
+      break;
+    case "submitted":
+      text = `Sent for review${where ? ` to ${where}` : ""}. An OS admin decides; nothing is created automatically. The draft is locked while FlightDeck reviews it. ${reason}`;
+      break;
+    case "linked":
+    case "setup-in-progress":
+    case "setup-complete":
+      text = status.link
+        ? `Linked to FlightDeck project ${status.link.osProjectId} in ${workspaces.find((w) => w.id === status.link!.workspaceId)?.label || status.link.workspaceId}.`
+        : "Linked to a FlightDeck project.";
+      break;
+    case "needs-more-info":
+      tone = "warn";
+      text =
+        "FlightDeck asked for more information. The draft is open again: update it, save, and send again.";
+      break;
+    case "rejected":
+      tone = "warn";
+      text = `FlightDeck declined this request. ${reason} The draft is open again.`;
+      break;
+    case "not-sent":
+      tone = "warn";
+      text = `FlightDeck refused the request. ${reason} Nothing was filed; you can send again once this is fixed.`;
+      break;
+  }
+  return (
+    <div className={`fd-banner ${tone}`}>
+      {tone ? <AlertTriangle size={16} /> : <Check size={16} />}
+      <p>
+        {text.trim()}
+        {status.notice && <span className="fd-hint"> {status.notice}</span>}
+      </p>
+    </div>
+  );
+}
+
+function Hint({ text }: { text: string }) {
+  const hint = personalDataHint(text);
+  return hint ? (
+    <span className="fd-warn" role="note">
+      {hint}
+    </span>
+  ) : null;
+}
+
+export function OnboardingEditor({
+  project,
+  superAdmin,
+  busy,
+  workspaces,
+  contextState,
+  onSave,
+  onClose,
+  onMessage,
+  onStage,
+}: {
+  project: Project;
+  superAdmin: boolean;
+  busy: boolean;
+  workspaces: OsContextEntry[];
+  contextState: string | null;
+  onSave: (
+    fields: ProjectFields,
+    existing?: Project,
+  ) => Promise<Project | null>;
+  onClose: () => void;
+  onMessage: (message: string) => void;
+  onStage: (id: string, stage: OnboardingStage | null) => void;
+}) {
+  const [draft, setDraft] = useState(() => draftFrom(project));
+  const [dirty, setDirty] = useState(false);
+  const [tab, setTab] = useState<OnboardingTab>("basics");
+  const [destination, setDestination] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const [newSource, setNewSource] = useState("");
+  const [newAccess, setNewAccess] = useState<{
+    system: string;
+    level: (typeof accessLevels)[number];
+  }>({ system: "", level: "read" });
+  const pendingFocus = useRef<string | null>(null);
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const { status, show, failed, load } = useOnboardingStatus(
+    project.id,
+    superAdmin,
+    onStage,
+  );
+  const op = status?.operation ?? null;
+  useEffect(() => {
+    if (!pendingFocus.current) return;
+    document.getElementById(pendingFocus.current)?.focus();
+    pendingFocus.current = null;
+  }, [tab]);
+
+  const locked = !!op && LOCKED_STATES.includes(op.state);
+  const retrying = !!status?.retryPending;
+  const target = retrying ? op?.destinationWorkspaceId || "" : destination;
+  const preview = useMemo(
+    () => ({ ...project, ...fieldsFrom(project, draft) }),
+    [project, draft],
+  );
+  const ready = readiness(preview, target || null);
+  const suggestions = locked ? [] : checklistSuggestions(preview);
+  const rows = reviewRows(
+    buildOnboardingPayload({
+      project: preview,
+      destinationWorkspaceId: target,
+      idempotencyKey: PREVIEW_KEY,
+      installationId: "atlas-local",
+      requestedBy: PREVIEW_HASH,
+    }),
+  );
+  const slugOk =
+    !draft.onboarding.proposedProjectId ||
+    SLUG_RE.test(draft.onboarding.proposedProjectId);
+  const selectable = workspaces.filter((w) => w.enabled);
+
+  const set = <K extends keyof Draft>(key: K, value: Draft[K]) => {
+    setDraft((d) => ({ ...d, [key]: value }));
+    setDirty(true);
+  };
+  const setDetail = <K extends keyof OnboardingDraft>(
+    key: K,
+    value: OnboardingDraft[K],
+  ) => {
+    setDraft((d) => ({ ...d, onboarding: { ...d.onboarding, [key]: value } }));
+    setDirty(true);
+  };
+  const setRole = (role: "process" | "data" | "support", value: string) =>
+    setDetail("ownerRoles", { ...draft.onboarding.ownerRoles, [role]: value });
+  function goTo(next: OnboardingTab, field: string) {
+    if (next === tab) document.getElementById(field)?.focus();
+    else {
+      pendingFocus.current = field;
+      setTab(next);
+    }
+  }
+  function applySuggestions() {
+    setDraft((d) => {
+      const next = {
+        ...d,
+        onboarding: {
+          ...d.onboarding,
+          ownerRoles: { ...d.onboarding.ownerRoles },
+        },
+      };
+      for (const s of suggestions) {
+        if (s.field === "functionArea") next.functionArea = s.value;
+        else if (s.field === "summary") next.description = s.value;
+        else if (s.field === "successMeasure") next.benefit = s.value;
+        else
+          next.onboarding.ownerRoles[
+            s.field.slice("ownerRoles.".length) as
+              "process" | "data" | "support"
+          ] = s.value;
+      }
+      return next;
+    });
+    setDirty(true);
+  }
+  async function save() {
+    setError("");
+    const saved = await onSave(fieldsFrom(project, draft), project);
+    if (saved) {
+      setDirty(false);
+      onMessage(
+        "Onboarding draft saved in Atlas. Nothing has been sent to FlightDeck.",
+      );
+    }
+  }
+  async function send() {
+    if (!target) return;
+    setSending(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `/api/flightdeck/onboard/${encodeURIComponent(project.id)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            destinationWorkspaceId: target,
+            revision: project.revision,
+          }),
+        },
+      );
+      const raw: unknown = await response.json().catch(() => null);
+      const ok = onboardingStatusSchema.safeParse(raw);
+      if (response.ok && ok.success) {
+        show(ok.data);
+        onMessage(
+          "Sent to FlightDeck for review. Nothing is created until an OS admin accepts it.",
+        );
+        return;
+      }
+      const refused = onboardErrorSchema.safeParse(raw);
+      setError(
+        refused.success
+          ? refused.data.error
+          : "The send could not be completed. Try again.",
+      );
+      if (refused.success && refused.data.status) show(refused.data.status);
+      else void load(false);
+    } catch {
+      setError("The send could not be completed. Try again.");
+      void load(false);
+    } finally {
+      setSending(false);
+    }
+  }
+  const sendBlocked = !superAdmin
+    ? "Only the Atlas Super Admin can send a project to FlightDeck."
+    : status && !status.canSend
+      ? "This project has already been sent to FlightDeck."
+      : dirty
+        ? "Save the draft first: FlightDeck receives the saved version."
+        : !ready.ready
+          ? `Complete the required details first (${ready.done} of ${ready.total}).`
+          : "";
+
+  const field = (
+    id: string,
+    label: string,
+    control: React.ReactNode,
+    extra?: React.ReactNode,
+    wide = false,
+  ) => (
+    <div className={`fd-field${wide ? " fd-wide" : ""}`}>
+      <label htmlFor={id}>{label}</label>
+      {control}
+      {extra}
+    </div>
+  );
+  const onTabKey = (e: React.KeyboardEvent, index: number) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    const next =
+      TABS[
+        (index + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length
+      ];
+    setTab(next.id);
+    tabRefs.current[next.id]?.focus();
+  };
+
+  return (
+    <form
+      className="fd-onboard"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void save();
+      }}
+    >
+      {op && <OnboardingTimeline stage={op.stage} />}
+      {status && <StatusBanner status={status} workspaces={workspaces} />}
+      {failed && (
+        <p className="fd-hint" role="status">
+          Onboarding status could not be checked. Atlas will try again.
+        </p>
+      )}
+      <div
+        role="tablist"
+        aria-label="FlightDeck onboarding"
+        className="filter-tabs fd-onboard-tabs"
+      >
+        {TABS.map((t, i) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            id={`fd-tab-${t.id}`}
+            ref={(el) => {
+              tabRefs.current[t.id] = el;
+            }}
+            aria-selected={tab === t.id}
+            aria-controls={`fd-panel-${t.id}`}
+            tabIndex={tab === t.id ? 0 : -1}
+            className={tab === t.id ? "chosen" : ""}
+            onClick={() => setTab(t.id)}
+            onKeyDown={(e) => onTabKey(e, i)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div className="fd-readiness">
+        <div
+          className="fd-meter-row"
+          role="meter"
+          aria-label="Required FlightDeck details"
+          aria-valuemin={0}
+          aria-valuemax={ready.total}
+          aria-valuenow={ready.done}
+          aria-valuetext={`${ready.done} of ${ready.total} required`}
+        >
+          <span>
+            {ready.done} of {ready.total} required
+          </span>
+          <span className="fd-meter" aria-hidden="true">
+            <span style={{ width: `${(ready.done / ready.total) * 100}%` }} />
+          </span>
+        </div>
+        {!ready.ready && (
+          <ul className="fd-missing" aria-label="Missing details">
+            {ready.items
+              .filter((item) => !item.done)
+              .map((item) => (
+                <li key={item.key}>
+                  {item.key === "destination" && !superAdmin ? (
+                    <span className="fd-hint">
+                      {item.label} (chosen by the Atlas Super Admin)
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="text-link"
+                      onClick={() => goTo(item.tab, item.field)}
+                    >
+                      {item.label}
+                    </button>
+                  )}
+                </li>
+              ))}
+          </ul>
+        )}
+      </div>
+      {!!suggestions.length && (
+        <div className="fd-suggest">
+          <p>
+            <Sparkles size={15} /> From the onboarding checklist
+          </p>
+          <ul>
+            {suggestions.map((s) => (
+              <li key={s.field}>
+                <strong>
+                  {s.value.length > 80 ? `${s.value.slice(0, 79)}…` : s.value}
+                </strong>{" "}
+                <span className="fd-hint">for “{s.source}”</span>
+              </li>
+            ))}
+          </ul>
+          <Button type="button" variant="outline" onClick={applySuggestions}>
+            Apply checklist suggestions
+          </Button>
+        </div>
+      )}
+      <fieldset
+        disabled={locked || busy}
+        id={`fd-panel-${tab}`}
+        role="tabpanel"
+        aria-labelledby={`fd-tab-${tab}`}
+      >
+        {tab === "basics" && (
+          <div className="fd-grid">
+            {field(
+              "fd-label",
+              "Proposed OS project name",
+              <Input
+                id="fd-label"
+                required
+                maxLength={100}
+                value={draft.label}
+                onChange={(e) => set("label", e.target.value)}
+              />,
+            )}
+            {field(
+              "fd-workspace-note",
+              "Preferred workspace (optional)",
+              <Input
+                id="fd-workspace-note"
+                maxLength={100}
+                placeholder="e.g. Operations Europe"
+                value={draft.workspaceHint}
+                onChange={(e) => set("workspaceHint", e.target.value)}
+              />,
+              <span className="fd-hint">
+                A planning note for people. It is never sent and never chooses
+                the destination.
+              </span>,
+            )}
+            {field(
+              "fd-function",
+              "Function area",
+              <>
+                <Input
+                  id="fd-function"
+                  list="fd-functions"
+                  maxLength={80}
+                  value={draft.functionArea}
+                  onChange={(e) => set("functionArea", e.target.value)}
+                />
+                <datalist id="fd-functions">
+                  {functions.map((f) => (
+                    <option key={f} value={f} />
+                  ))}
+                </datalist>
+              </>,
+            )}
+            {field(
+              "fd-category",
+              "Category",
+              <Input
+                id="fd-category"
+                required
+                maxLength={60}
+                value={draft.category}
+                onChange={(e) => set("category", e.target.value)}
+              />,
+            )}
+            {field(
+              "fd-summary",
+              "Summary",
+              <Textarea
+                id="fd-summary"
+                maxLength={1500}
+                rows={4}
+                value={draft.description}
+                onChange={(e) => set("description", e.target.value)}
+              />,
+              <>
+                <span className="fd-hint">
+                  Context for the OS reviewer. Never put into a prompt.
+                </span>
+                <Hint text={draft.description} />
+              </>,
+              true,
+            )}
+            {field(
+              "fd-success",
+              "Success measure",
+              <Textarea
+                id="fd-success"
+                maxLength={500}
+                rows={2}
+                value={draft.benefit}
+                onChange={(e) => set("benefit", e.target.value)}
+              />,
+              <Hint text={draft.benefit} />,
+              true,
+            )}
+            {field(
+              "fd-status",
+              "Status",
+              <select
+                id="fd-status"
+                className="fd-select"
+                value={draft.status}
+                onChange={(e) =>
+                  set("status", e.target.value as Draft["status"])
+                }
+              >
+                {["In progress", "Planning", "On hold", "Completed"].map(
+                  (s) => (
+                    <option key={s}>{s}</option>
+                  ),
+                )}
+              </select>,
+            )}
+            {field(
+              "fd-priority",
+              "Priority",
+              <select
+                id="fd-priority"
+                className="fd-select"
+                value={draft.priority}
+                onChange={(e) =>
+                  set("priority", e.target.value as Draft["priority"])
+                }
+              >
+                <option value="">Not set</option>
+                {["High", "Normal", "Low"].map((p) => (
+                  <option key={p}>{p}</option>
+                ))}
+              </select>,
+            )}
+            {field(
+              "fd-target",
+              "Target date",
+              <Input
+                id="fd-target"
+                type="date"
+                value={draft.dueDate}
+                onChange={(e) => set("dueDate", e.target.value)}
+              />,
+            )}
+            {field(
+              "fd-site",
+              "Site",
+              <Input
+                id="fd-site"
+                maxLength={100}
+                value={draft.location}
+                onChange={(e) => set("location", e.target.value)}
+              />,
+            )}
+          </div>
+        )}
+        {tab === "details" && (
+          <div className="fd-grid">
+            {field(
+              "fd-project-id",
+              "Proposed OS project id (optional)",
+              <Input
+                id="fd-project-id"
+                maxLength={64}
+                placeholder={slugify(draft.label)}
+                aria-invalid={!slugOk}
+                value={draft.onboarding.proposedProjectId ?? ""}
+                onChange={(e) =>
+                  setDetail(
+                    "proposedProjectId",
+                    e.target.value.trim() || undefined,
+                  )
+                }
+              />,
+              <span className={slugOk ? "fd-hint" : "fd-warn"}>
+                {slugOk
+                  ? "Permanent once FlightDeck creates the project. Lowercase letters, digits and dashes."
+                  : "Use lowercase letters, digits and dashes, starting with a letter or digit."}
+              </span>,
+            )}
+            {field(
+              "fd-country",
+              "Country",
+              <select
+                id="fd-country"
+                className="fd-select"
+                value={draft.onboarding.countryCode ?? ""}
+                onChange={(e) =>
+                  setDetail("countryCode", e.target.value || undefined)
+                }
+              >
+                <option value="">Choose a country</option>
+                {COUNTRIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>,
+              <span className="fd-hint">
+                Where the work happens. A cross-border fact for Legal.
+              </span>,
+            )}
+            {field(
+              "fd-works-council",
+              "Works council relevant",
+              <select
+                id="fd-works-council"
+                className="fd-select"
+                value={draft.onboarding.worksCouncilRelevant ?? ""}
+                onChange={(e) =>
+                  setDetail(
+                    "worksCouncilRelevant",
+                    (e.target.value ||
+                      undefined) as OnboardingDraft["worksCouncilRelevant"],
+                  )
+                }
+              >
+                <option value="">Choose</option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+                <option value="unknown">Unknown</option>
+              </select>,
+              <span className="fd-hint">
+                A fact for a human reviewer. It never starts or skips a step.
+              </span>,
+            )}
+            {field(
+              "fd-legal",
+              "Legal entity (optional)",
+              <Input
+                id="fd-legal"
+                maxLength={120}
+                value={draft.onboarding.legalEntity ?? ""}
+                onChange={(e) =>
+                  setDetail("legalEntity", e.target.value || undefined)
+                }
+              />,
+              <Hint text={draft.onboarding.legalEntity ?? ""} />,
+            )}
+            {field(
+              "fd-headcount",
+              "Headcount band (optional)",
+              <select
+                id="fd-headcount"
+                className="fd-select"
+                value={draft.onboarding.headcountBand ?? ""}
+                onChange={(e) =>
+                  setDetail(
+                    "headcountBand",
+                    (e.target.value ||
+                      undefined) as OnboardingDraft["headcountBand"],
+                  )
+                }
+              >
+                <option value="">Not set</option>
+                {headcountBands.map((band) => (
+                  <option key={band} value={band}>
+                    {HEADCOUNT_LABEL[band]}
+                  </option>
+                ))}
+              </select>,
+              <span className="fd-hint">A band, never a count.</span>,
+            )}
+            <p className="fd-hint fd-wide">
+              Owner roles are role titles only, never names. People are
+              appointed in FlightDeck from its own roster.
+            </p>
+            {(
+              [
+                ["process", "Process owner role"],
+                ["data", "Data owner role"],
+                ["support", "Support owner role"],
+              ] as const
+            ).map(([role, label]) =>
+              field(
+                `fd-role-${role}`,
+                label,
+                <Input
+                  id={`fd-role-${role}`}
+                  maxLength={80}
+                  value={draft.onboarding.ownerRoles?.[role] ?? ""}
+                  onChange={(e) => setRole(role, e.target.value)}
+                />,
+                <Hint text={draft.onboarding.ownerRoles?.[role] ?? ""} />,
+              ),
+            )}
+            <div className="fd-field fd-wide">
+              <span id="fd-sources-label">Data sources</span>
+              <ul className="fd-chips" aria-labelledby="fd-sources-label">
+                {(draft.onboarding.dataSources ?? []).map((source, i) => (
+                  <li key={`${source}-${i}`}>
+                    {source}
+                    <button
+                      type="button"
+                      aria-label={`Remove data source ${source}`}
+                      onClick={() =>
+                        setDetail(
+                          "dataSources",
+                          draft.onboarding.dataSources!.filter(
+                            (_, j) => j !== i,
+                          ),
+                        )
+                      }
+                    >
+                      <X size={12} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <div className="fd-add">
+                <Input
+                  aria-label="New data source"
+                  maxLength={80}
+                  placeholder="e.g. SAP HCM"
+                  value={newSource}
+                  onChange={(e) => setNewSource(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={
+                    !newSource.trim() ||
+                    (draft.onboarding.dataSources?.length ?? 0) >= 10
+                  }
+                  onClick={() => {
+                    setDetail("dataSources", [
+                      ...(draft.onboarding.dataSources ?? []),
+                      newSource.trim(),
+                    ]);
+                    setNewSource("");
+                  }}
+                >
+                  <Plus size={14} />
+                  Add data source
+                </Button>
+              </div>
+            </div>
+            <div className="fd-field fd-wide">
+              <span id="fd-access-label">Access requested</span>
+              <span className="fd-hint">
+                Shown to the OS reviewer as to-dos. Nothing is granted by
+                sending.
+              </span>
+              <ul className="fd-chips" aria-labelledby="fd-access-label">
+                {(draft.onboarding.accessRequested ?? []).map((a, i) => (
+                  <li key={`${a.system}-${i}`}>
+                    {a.system} ({a.level})
+                    <button
+                      type="button"
+                      aria-label={`Remove access request ${a.system}`}
+                      onClick={() =>
+                        setDetail(
+                          "accessRequested",
+                          draft.onboarding.accessRequested!.filter(
+                            (_, j) => j !== i,
+                          ),
+                        )
+                      }
+                    >
+                      <X size={12} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <div className="fd-add">
+                <Input
+                  aria-label="System"
+                  maxLength={80}
+                  placeholder="e.g. SAP HCM"
+                  value={newAccess.system}
+                  onChange={(e) =>
+                    setNewAccess({ ...newAccess, system: e.target.value })
+                  }
+                />
+                <select
+                  aria-label="Access level"
+                  className="fd-select"
+                  value={newAccess.level}
+                  onChange={(e) =>
+                    setNewAccess({
+                      ...newAccess,
+                      level: e.target.value as (typeof accessLevels)[number],
+                    })
+                  }
+                >
+                  {accessLevels.map((level) => (
+                    <option key={level}>{level}</option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={
+                    !newAccess.system.trim() ||
+                    (draft.onboarding.accessRequested?.length ?? 0) >= 10
+                  }
+                  onClick={() => {
+                    setDetail("accessRequested", [
+                      ...(draft.onboarding.accessRequested ?? []),
+                      {
+                        system: newAccess.system.trim(),
+                        level: newAccess.level,
+                      },
+                    ]);
+                    setNewAccess({ system: "", level: "read" });
+                  }}
+                >
+                  <Plus size={14} />
+                  Add access request
+                </Button>
+              </div>
+            </div>
+            <label className="fd-check fd-wide" htmlFor="fd-cowork">
+              <input
+                id="fd-cowork"
+                type="checkbox"
+                checked={!!draft.onboarding.coworkRequested}
+                onChange={(e) => setDetail("coworkRequested", e.target.checked)}
+              />
+              Ask FlightDeck to set this project up with Cowork
+            </label>
+            <label className="fd-check fd-wide" htmlFor="fd-ready">
+              <input
+                id="fd-ready"
+                type="checkbox"
+                checked={draft.ready}
+                onChange={(e) => set("ready", e.target.checked)}
+              />
+              Mark this project Ready for FlightDeck
+            </label>
+          </div>
+        )}
+        {tab === "review" && (
+          <div className="fd-review">
+            {superAdmin ? (
+              retrying ? (
+                <p className="fd-hint">
+                  Destination workspace:{" "}
+                  <strong>
+                    {workspaces.find((w) => w.id === target)?.label || target}
+                  </strong>{" "}
+                  (kept for the retry, so the same request goes to the same
+                  place).
+                </p>
+              ) : (
+                field(
+                  "fd-destination",
+                  "Destination workspace",
+                  <select
+                    id="fd-destination"
+                    className="fd-select"
+                    value={destination}
+                    onChange={(e) => setDestination(e.target.value)}
+                  >
+                    <option value="">Choose a workspace</option>
+                    {workspaces.map((w) => (
+                      <option key={w.id} value={w.id} disabled={!w.enabled}>
+                        {w.label || w.id}
+                        {w.enabled ? "" : " (disabled)"}
+                      </option>
+                    ))}
+                  </select>,
+                  <span className="fd-hint">
+                    {selectable.length
+                      ? "Chosen here for this send only, and checked again with FlightDeck when you press Send."
+                      : `FlightDeck workspaces are unavailable${contextState ? ` (${contextState.replace(/_/g, " ")})` : ""}.`}
+                  </span>,
+                )
+              )
+            ) : (
+              <p className="fd-hint">
+                The Atlas Super Admin chooses the destination workspace and
+                sends the request.
+              </p>
+            )}
+            <section aria-label="What will be sent">
+              <h3>What will be sent</h3>
+              <dl>
+                {rows.map((row) => (
+                  <div key={row.path}>
+                    <dt>{row.label}</dt>
+                    <dd className={row.missing ? "missing" : ""}>
+                      {row.path === "target.workspaceId" && !row.missing
+                        ? workspaces.find((w) => w.id === row.value)?.label ||
+                          row.value
+                        : row.value}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+            <section className="fd-never">
+              <h3>Never sent</h3>
+              <ul aria-label="Never sent">
+                {NEVER_SENT.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </section>
+          </div>
+        )}
+      </fieldset>
+      {tab === "review" && (
+        <div className="fd-send">
+          <p className="fd-hint">
+            Sending files a request for review in FlightDeck. An OS admin
+            decides; nothing becomes OS data until they accept it.
+          </p>
+          {superAdmin && (
+            <Button
+              type="button"
+              disabled={!!sendBlocked || sending || !target}
+              onClick={() => void send()}
+            >
+              <Send size={14} />
+              {sending
+                ? "Sending…"
+                : retrying
+                  ? "Retry send"
+                  : "Send to FlightDeck"}
+            </Button>
+          )}
+          {sendBlocked && <span className="fd-hint">{sendBlocked}</span>}
+        </div>
+      )}
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="bridge-actions">
+        <Button
+          type="submit"
+          disabled={busy || locked || !draft.label.trim() || !slugOk}
+        >
+          Save onboarding draft
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={busy}
+          onClick={onClose}
+        >
+          Close
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** The dashboard card: what is actually live. */
+export function FlightDeckPromo({ onOpen }: { onOpen: () => void }) {
+  const { stages, failed } = useOnboardingStages();
+  const values = Object.values(stages ?? {});
+  const count = (list: OnboardingStage[]) =>
+    values.filter((stage) => list.includes(stage)).length;
+  const sent = count([
+    "submitted",
+    "linked",
+    "setup-in-progress",
+    "setup-complete",
+  ]);
+  const linked = count(["linked", "setup-in-progress", "setup-complete"]);
+  const moreInfo = count(["needs-more-info"]);
+  const line = failed
+    ? "Onboarding status is unavailable right now."
+    : !stages
+      ? "Checking onboarding status…"
+      : sent || moreInfo
+        ? `Onboarding: ${sent} sent to FlightDeck, ${linked} linked${moreInfo ? `, ${moreInfo} need more info` : ""}.`
+        : "Onboarding: no project sent yet. Prepare one in To FlightDeck.";
+  return (
+    <div className="flightdeck-promo">
+      <span className="promo-mark">
+        <Layers3 size={23} />
+      </span>
+      <h3>FlightDeck OS</h3>
+      <p>{line}</p>
+      <button className="text-link" onClick={onOpen}>
+        FlightDeck connection <ArrowUpRight size={16} />
+      </button>
+      <small>Import from FlightDeck: not enabled</small>
+    </div>
+  );
+}

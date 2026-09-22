@@ -100,15 +100,27 @@ export const opportunities: Opportunity[] = [
     effort: "One-scorecard pilot",
   },
 ];
+/** The fixed pilot checklist. FlightDeck onboarding maps some of these
+ * titles to form fields (lib/flightdeck/onboarding.ts); the titles themselves
+ * are never sent. */
+export const ONBOARDING_CHECKLIST = {
+  owners: "Confirm the sponsor, process owner, and current baseline",
+  outcome: "Agree a measurable pilot outcome and review date",
+  data: "Map approved data sources and minimum access",
+  register:
+    "Register the function and project in FlightDeck when the SDK is ready",
+  pilot: "Run the pilot with human review and record results",
+  support: "Train users, name the support owner, and decide whether to scale",
+} as const;
 export function onboardingTasks(idea: Opportunity) {
   return [
     idea.discovery,
-    "Confirm the sponsor, process owner, and current baseline",
-    "Agree a measurable pilot outcome and review date",
-    "Map approved data sources and minimum access",
-    "Register the function and project in FlightDeck when the SDK is ready",
-    "Run the pilot with human review and record results",
-    "Train users, name the support owner, and decide whether to scale",
+    ONBOARDING_CHECKLIST.owners,
+    ONBOARDING_CHECKLIST.outcome,
+    ONBOARDING_CHECKLIST.data,
+    ONBOARDING_CHECKLIST.register,
+    ONBOARDING_CHECKLIST.pilot,
+    ONBOARDING_CHECKLIST.support,
   ].map((title) => ({
     id: crypto.randomUUID(),
     title,
