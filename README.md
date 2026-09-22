@@ -10,7 +10,7 @@ A TE Connectivity themed portfolio and action hub, with a dashboard, Project Eye
 - Soft card shadows, button/visual hover effects and keyboard focus feedback, respecting reduced-motion settings.
 - Globe → building → stylized 3D room → laptop → project journey, with skip, cancel and reduced-motion support.
 - Light and dark themes with a remembered device preference.
-- FlightDeck DTO validation, an injectable SDK transport, and an integration handoff. **Live FlightDeck SSO and sync are pending the new SDK.**
+- FlightDeck DTO validation, an injectable SDK transport, and an integration handoff. Read-only FlightDeck workspace/project context is live locally for the Super Admin (see below). **Live FlightDeck SSO, import and sync are pending the new SDK.**
 - A clearly labeled example workspace until you add your own projects.
 
 ## Work studio
@@ -45,7 +45,18 @@ The browser tests use an already running local server at port 5173 and Chrome. T
 
 ## FlightDeck integration
 
-See [SDK requirements](docs/FLIGHTDECK-SDK-REQUIREMENTS.md). The live connection is intentionally disabled until the new SDK provides delegated identity and authorized project transport. The private preview’s platform identity is not FlightDeck SSO.
+See [SDK requirements](docs/FLIGHTDECK-SDK-REQUIREMENTS.md).
+
+**Live (local only, read-only): workspace and project context.** The top of the sidebar and the mobile menu show **FlightDeck workspace** and **FlightDeck project** selects that mirror the FlightDeck OS sidebar switchers. Atlas reads them server-side from the OS inbound API (`GET /api/inbound/v1/context/workspaces` and `GET /api/inbound/v1/context/workspaces/:workspaceId/projects`, scope `read:context`) through its own `/api/flightdeck/context` route. The browser never contacts the OS and never receives the credential.
+
+- One OS machine credential is used for everyone, so it cannot filter per user. The lists are shown only to the Atlas Super Admin (the role that administers Apps & connections); other members see nothing.
+- The OS decides which workspaces are readable (`inbound.api.readWorkspaces`; empty means none). Disabled workspaces are listed but cannot be selected. Disabled projects are shown, unselectable, to the Super Admin only.
+- The choice is saved per Atlas user in preferences (`flightdeckContext` with `osWorkspaceId` and `osProjectId`, deliberately distinct from Atlas's `?workspace=` project id) after re-checking fresh OS lists. An unknown project falls back to that workspace's default project; Atlas never switches the workspace on its own.
+- Lists refresh on window focus and every minute. An unreachable OS keeps the last confirmed lists with their check time; a refused credential or missing configuration clears them. Choosing a context changes nothing in the OS or in Atlas projects.
+
+Configure it in the ignored `.env.local` for development (or as deployment secrets): `ATLAS_FLIGHTDECK_URL`, for example `http://127.0.0.1:4173` (plain HTTP is accepted only for a loopback address), and `ATLAS_FLIGHTDECK_INBOUND_TOKEN`, an OS inbound credential with the `read:context` scope. Never commit or print the credential. Restart `npm run dev` after changing either value. A hosted Atlas cannot reach an OS running on another computer's loopback address, so this connection is local only.
+
+**Still disconnected:** FlightDeck SSO and delegated per-user identity, per-user OS membership filtering, project import and onboarding (`/api/flightdeck/import` and `/api/flightdeck/onboard/:id` return `503 flightdeck_not_connected`), sync and AI. The private preview’s platform identity is not FlightDeck SSO.
 
 ## Map and motion
 

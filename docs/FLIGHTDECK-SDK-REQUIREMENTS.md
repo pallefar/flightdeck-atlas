@@ -1,6 +1,20 @@
 # Atlas integration handoff
 
-Status: prepared for the forthcoming SDK. The owner confirmed on 2026-09-18 that FlightDeck login is moving to the existing self-hosted/local Supabase instance; Atlas must use that same identity provider. No live SSO or sync is claimed.
+Status: prepared for the forthcoming SDK. The owner confirmed on 2026-09-18 that FlightDeck login is moving to the existing self-hosted/local Supabase instance; Atlas must use that same identity provider. No live SSO or sync is claimed. Only the read-only workspace/project context below is live, locally.
+
+## Live now: read-only workspace and project context (local only)
+
+Added 2026-09-22 with the owner's approval. This is the only live FlightDeck connection. It is not SSO, not delegated identity and not project import.
+
+- **OS routes** (inbound API route class, `Authorization: Bearer <inbound credential>` only, no cookies or `X-Workspace-Id`, scope `read:context`):
+  - `GET /api/inbound/v1/context/workspaces` → `{ integrationId, workspaces: [{ id, label, enabled, isDefault }], generatedAt }`. Only workspaces listed in the OS admin setting `inbound.api.readWorkspaces`; empty means none.
+  - `GET /api/inbound/v1/context/workspaces/:workspaceId/projects` → `{ workspaceId, projects: [{ id, label, enabled, isDefault }], generatedAt }`, disabled projects included and flagged. `404 { "error": "not found" }` for an unreadable or unknown workspace, `409 { "error": "workspace disabled", "code": "workspace_disabled" }` for a disabled one.
+  - Refusals: the uniform `401`, the submissions route's missing-scope `403`, and `429` with `Retry-After`.
+- **Atlas transport** (`lib/flightdeck/context-client.ts`, server-only): base URL and credential from `ATLAS_FLIGHTDECK_URL` and `ATLAS_FLIGHTDECK_INBOUND_TOKEN`. Plain HTTP is accepted only for loopback. Requests use a 5 s timeout, `cache: "no-store"`, no redirects, and no cookies. Responses are validated strictly against the DTOs above (`lib/flightdeck/context.ts`); an unknown field, duplicate id or response for another workspace is rejected. Outcomes map to typed states: `ok`, `not_configured`, `os_unreachable`, `unauthorized` (401/403), `rate_limited` (with `retryAfter`), `workspace_not_found` (404), `workspace_disabled` (409) and `invalid_response` (anything else, including an OS without these routes). Successful reads are reused for 10 s, and a rate limit is respected for all paths until it expires. This keeps Atlas within the OS's 30 requests per minute per credential.
+- **Atlas route** `GET/PUT /api/flightdeck/context`: requires an Atlas sign-in (`projects.read`, as the catalog route). Because the OS credential is a machine credential that cannot filter per user, only the Atlas Super Admin receives lists; everyone else gets `not_permitted` and empty lists. `PUT` is same-origin only. It re-validates the selection against fresh OS lists, falls back to the workspace's default project for an unknown project, never switches workspace, and saves `flightdeckContext: { osWorkspaceId, osProjectId }` in the user's Atlas preferences. Responses never contain the credential.
+- **UI**: `app/flightdeck-context-switcher.tsx` at the top of the sidebar and mobile menu. It mirrors the OS switchers: disabled workspaces are greyed and unselectable, disabled projects are hidden unless the viewer is Super Admin, the default project reads "General", and ambiguous labels show their id. Connections shows this context separately from import/onboarding, which stay disconnected (`503`).
+
+This read-only path does not satisfy items 2–4 below: there is still no per-user OS identity or membership check, and OS lists must not be used to authorize Atlas data. Selecting a context changes nothing in the OS or in Atlas project records.
 
 See [SUPABASE-IDENTITY-CONTRACT.md](SUPABASE-IDENTITY-CONTRACT.md) for the inspected repository state, shared-user target, identity migration, session requirements and local/hosted connectivity constraints.
 
