@@ -954,3 +954,120 @@
     transform: none;
   }
 }
+/* FlightDeck OS context: read-only mirror of the OS Workspace / Project switchers. */
+.fd-context {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  margin: 0 0 12px;
+  padding: 10px 11px 9px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--foreground), transparent 97%);
+}
+.fd-context-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+.fd-context-heading .eyebrow {
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+.fd-context-badge {
+  font-size: 9px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.fd-context label {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--muted-foreground);
+  margin-top: 3px;
+}
+.fd-context [data-slot="native-select-wrapper"] {
+  width: 100%;
+  min-width: 0;
+}
+.fd-context .fd-context-select {
+  height: 32px;
+  font-size: 12px;
+  padding-left: 9px;
+  padding-right: 30px;
+  border-radius: 7px;
+  border-color: var(--input);
+  background: var(--card);
+  color: var(--foreground);
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.fd-context .fd-context-select:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--orange), var(--input) 45%);
+}
+.fd-context .fd-context-select:disabled {
+  cursor: not-allowed;
+}
+.fd-context [data-slot="native-select-icon"] {
+  right: 10px;
+}
+.fd-context-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 4px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+.fd-context-status p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fd-context-status small {
+  display: block;
+  font-size: 10px;
+  opacity: 0.85;
+}
+.fd-context-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+}
+.fd-context-status[data-tone="ok"] .fd-context-dot {
+  background: var(--green);
+}
+.fd-context-status[data-tone="warn"] .fd-context-dot {
+  background: var(--orange);
+}
+.fd-context-status[data-tone="error"] .fd-context-dot {
+  background: var(--destructive);
+}
+.fd-context-error {
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--destructive);
+  overflow-wrap: anywhere;
+}
+.mobile-navigation-dialog .fd-context .fd-context-select {
+  height: 40px;
+  font-size: 14px;
+}
+.mobile-navigation-dialog .fd-context label {
+  font-size: 12px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fd-context .fd-context-select {
+    transition: none;
+  }
+}

@@ -19,7 +19,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { AppEntry, Team } from "@/lib/collaboration";
-import { flightdeckApp, defaultPreferences } from "@/lib/collaboration";
+import {
+  flightdeckApp,
+  defaultPreferences,
+  PREFERENCES_CHANGED_EVENT,
+} from "@/lib/collaboration";
 import type { AccessProfile } from "@/lib/access-policy";
 import type { Project, ProjectFields } from "@/lib/projects";
 export type WorkspaceData = {
@@ -63,10 +67,13 @@ export function useWorkspace() {
       if (document.visibilityState === "visible") void load();
     };
     const timer = setInterval(refresh, 30000);
+    const changed = () => void load();
     window.addEventListener("focus", refresh);
+    window.addEventListener(PREFERENCES_CHANGED_EVENT, changed);
     return () => {
       clearInterval(timer);
       window.removeEventListener("focus", refresh);
+      window.removeEventListener(PREFERENCES_CHANGED_EVENT, changed);
     };
   }, [load]);
   async function mutate(payload: unknown) {

@@ -23,10 +23,73 @@ import {
   type ImportCandidate,
 } from "@/lib/flightdeck/bridge";
 import { downloadText } from "@/lib/briefing";
+import { useFlightDeckContext } from "./flightdeck-context-switcher";
+import type { ContextState } from "@/lib/flightdeck/context";
+const contextStatus: Record<
+  ContextState | "check_failed" | "checking",
+  { chip: string; tone: string; text: string }
+> = {
+  ok: {
+    chip: "Connected (read-only)",
+    tone: "completed",
+    text: "connected (read-only). The sidebar mirrors your FlightDeck OS workspace and project lists through the OS inbound API.",
+  },
+  workspace_not_found: {
+    chip: "Connected (read-only)",
+    tone: "completed",
+    text: "connected (read-only). Your saved workspace is no longer shared with Atlas; choose another in the sidebar.",
+  },
+  workspace_disabled: {
+    chip: "Connected (read-only)",
+    tone: "completed",
+    text: "connected (read-only). The selected workspace is disabled in FlightDeck.",
+  },
+  checking: {
+    chip: "Checking",
+    tone: "planning",
+    text: "checking the FlightDeck inbound API.",
+  },
+  not_configured: {
+    chip: "Not configured",
+    tone: "planning",
+    text: "not configured. Set the FlightDeck URL and inbound credential in Atlas server configuration.",
+  },
+  not_permitted: {
+    chip: "Super Admin only",
+    tone: "planning",
+    text: "read-only lists are shown to the Atlas Super Admin because they use one shared OS machine credential.",
+  },
+  os_unreachable: {
+    chip: "Unreachable",
+    tone: "on-hold",
+    text: "FlightDeck OS could not be reached. The last confirmed lists stay visible.",
+  },
+  rate_limited: {
+    chip: "Busy",
+    tone: "on-hold",
+    text: "FlightDeck asked Atlas to wait before reading again.",
+  },
+  invalid_response: {
+    chip: "Unexpected response",
+    tone: "on-hold",
+    text: "FlightDeck answered, but not with the agreed context contract.",
+  },
+  check_failed: {
+    chip: "Unavailable",
+    tone: "on-hold",
+    text: "Atlas could not check the context right now.",
+  },
+  unauthorized: {
+    chip: "Refused",
+    tone: "on-hold",
+    text: "FlightDeck refused Atlas's inbound credential. Nothing is shown.",
+  },
+};
 export default function FlightDeckConnection({
   projects,
   busy,
   canCreate,
+  superAdmin,
   onNew,
   onOpen,
   onSave,
@@ -35,6 +98,7 @@ export default function FlightDeckConnection({
   projects: Project[];
   busy: boolean;
   canCreate: boolean;
+  superAdmin: boolean;
   onNew: () => void;
   onOpen: (project: Project) => void;
   onSave: (
@@ -53,6 +117,9 @@ export default function FlightDeckConnection({
     [workspace, setWorkspace] = useState(""),
     [message, setMessage] = useState("");
   const [importing, setImporting] = useState<string | null>(null);
+  const context = useFlightDeckContext(superAdmin);
+  const contextRow =
+    contextStatus[!superAdmin ? "not_permitted" : context.state || "checking"];
   async function refresh(cursor?: string) {
     setLoading(true);
     setError("");
@@ -136,6 +203,12 @@ export default function FlightDeckConnection({
         <Link2 className="hub-heading-icon" size={29} />
       </div>
       <div className="connection-status">
+        <span className={`status ${contextRow.tone}`}>{contextRow.chip}</span>
+        <p>
+          <strong>Workspace &amp; project context:</strong> {contextRow.text}
+        </p>
+      </div>
+      <div className="connection-status">
         <span
           className={`status ${catalog?.connected ? "in-progress" : "planning"}`}
         >
@@ -148,6 +221,7 @@ export default function FlightDeckConnection({
                 : "Connection unavailable"}
         </span>
         <p>
+          <strong>Project import &amp; onboarding:</strong>{" "}
           {catalog?.connected
             ? "Projects shown here are filtered by your FlightDeck access."
             : catalog?.reason || "Checking the FlightDeck connection."}

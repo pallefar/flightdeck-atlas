@@ -835,6 +835,7 @@ export default function Atlas() {
                 projects={projects}
                 busy={saving}
                 canCreate={!!access?.permissions.includes("projects.create")}
+                superAdmin={!!access?.superAdmin}
                 onNew={() => {
                   setError("");
                   setCreating(true);
