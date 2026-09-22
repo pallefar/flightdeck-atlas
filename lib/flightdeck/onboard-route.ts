@@ -360,12 +360,15 @@ export function createOnboardRoute<A extends OnboardAccess>(
     );
   }
 
-  /** Stores the OS answer to the one remote write. */
+  /** Stores the OS answer to the one remote write. `retry`: the call
+   * resent a reservation an earlier attempt made, whatever that attempt
+   * recorded (it may have stopped before recording anything). */
   async function settle(
     db: OnboardDb,
     op: OperationRow,
     result: SubmitResult,
     submissions: SubmissionClient,
+    retry: boolean,
   ) {
     const stamp = now().toISOString();
     const status = () => currentStatus(db, op.atlas_project_id, true);
@@ -452,11 +455,13 @@ export function createOnboardRoute<A extends OnboardAccess>(
       case "refused":
         // The first attempt refused outright: nothing was filed, so close
         // it, and a corrected draft gets a fresh key. A refused RETRY is
-        // different: an earlier attempt of this key ended unknown (any
-        // reason_code on a reserved row) and FlightDeck may hold it, so the
-        // reservation stays and the next retry reuses the key
-        // (PROJECT-BRIDGE-CONTRACT.md: never a fresh key after a lost reply).
-        if (op.reason_code !== null) {
+        // different: an earlier attempt of this key ended unknown and
+        // FlightDeck may hold it, so the reservation stays and the next
+        // retry reuses the key (PROJECT-BRIDGE-CONTRACT.md: never a fresh
+        // key after a lost reply). The row cannot tell a retry: an attempt
+        // that stopped before storing the OS answer (a failed receipt write,
+        // a stopped Worker) leaves no reason code, so the caller says.
+        if (retry) {
           await patch(
             db,
             op.id,
@@ -709,7 +714,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
           );
       }
       const result = await submissions.submit(envelope);
-      return await settle(db, op, result, submissions);
+      return await settle(db, op, result, submissions, reuse !== null);
     } catch {
       return refuse(
         503,

@@ -1208,6 +1208,82 @@ test("a refusal after a lost response keeps the reservation, so the retry reuses
   ]);
 });
 
+test("a refused retry after the receipt was never stored keeps the reservation, its key and its request", async () => {
+  const h = harness();
+  // FlightDeck files the send (202), but the one write that stores its
+  // receipt fails, exactly as if the Worker stopped after the POST: the row
+  // stays reserved and no reason code was ever recorded.
+  const prepare = h.store.db.prepare.bind(h.store.db);
+  let failReceipt = true;
+  h.store.db.prepare = (sql) => {
+    if (
+      failReceipt &&
+      sql.startsWith(
+        "UPDATE atlas_flightdeck_operations SET state=?,submission_id=?",
+      )
+    ) {
+      failReceipt = false;
+      throw Error("D1 unavailable");
+    }
+    return prepare(sql);
+  };
+  const lost = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  expect(lost.status).toBe(503);
+  expect(await lost.json()).toMatchObject({ code: "storage_unavailable" });
+  expect(failReceipt).toBe(false);
+  const [first] = h.store.ops();
+  expect(first).toMatchObject({ state: "reserved", reason_code: null });
+  expect(first.request_body).toEqual(expect.any(String));
+
+  // The kind flag is set per run in the OS shell, so after an OS restart the
+  // retry is refused. That says nothing about the attempt FlightDeck filed.
+  for (const state of [
+    "refused",
+    "unauthorized",
+    "invalid_submission",
+  ] as const) {
+    h.fake.onSubmit = async () => ({ state });
+    const response = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+    expect(response.status, state).toBe(502);
+    const body = (await response.json()) as { error: string; status: unknown };
+    expect(body).toMatchObject({ code: state });
+    expect(body.error).toMatch(/earlier attempt may already have been filed/i);
+    expect(body.error).not.toMatch(/nothing was filed/i);
+    expect(onboardingStatusSchema.parse(body.status)).toMatchObject({
+      retryPending: true,
+      operation: { state: "reserved", stage: "not-confirmed" },
+    });
+    expect(h.store.ops()).toEqual([
+      expect.objectContaining({
+        id: first.id,
+        state: "reserved",
+        idempotency_key: first.idempotency_key,
+        request_body: first.request_body,
+        destination_workspace_id: "hr-de",
+        atlas_revision: 7,
+        reason_code: state,
+      }),
+    ]);
+  }
+  // Once FlightDeck accepts requests again the retry reuses the first key,
+  // is answered as a duplicate, and nothing is adopted.
+  h.fake.onSubmit = duplicateReceipt;
+  expect((await h.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  expect(new Set(h.fake.submits.map((e) => e.payload.idempotencyKey))).toEqual(
+    new Set([first.idempotency_key]),
+  );
+  expect(h.store.ops()).toEqual([
+    expect.objectContaining({
+      id: first.id,
+      state: "filed",
+      adopted: 0,
+      destination_workspace_id: "hr-de",
+      atlas_revision: 7,
+      submission_id: os.submissionId,
+    }),
+  ]);
+});
+
 test("an email or phone number outside the summary and success measure is refused before anything is reserved or sent", async () => {
   const base = readyProject().onboarding!;
   const cases: [string, Partial<Project>][] = [
@@ -2104,6 +2180,117 @@ test("after a send the form shows where it went and which revision FlightDeck ho
     await expect
       .poll(() => posts)
       .toEqual([{ destinationWorkspaceId: "hr-de", revision: first.revision }]);
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
+test("a save elsewhere while the form is open refreshes Review, and an edited draft can neither overwrite it nor be sent", async ({
+  page,
+}) => {
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const project = await createProject(page, {
+    name: "Stale QA",
+    description: "Reviewed summary v1",
+    benefit: "Measure",
+    functionArea: "HR",
+    onboardingStage: "Ready for FlightDeck",
+    flightdeckDraft: { label: "Stale QA", workspaceHint: "" },
+    onboarding: { countryCode: "DE", worksCouncilRelevant: "no" },
+  });
+  const posts: unknown[] = [];
+  await page.route(`**/api/flightdeck/onboard/${project.id}**`, (route) => {
+    if (route.request().method() === "POST")
+      posts.push(route.request().postDataJSON());
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        statusBody(route.request().method() === "POST" ? "submitted" : null),
+      ),
+    });
+  });
+  // Atlas reloads its projects on focus (and every minute); this is the
+  // same reload, without the wait.
+  const reloadProjects = () =>
+    page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  const latest = async () =>
+    page.evaluate(async (id) => {
+      const body = (await (await fetch("/api/projects")).json()) as {
+        projects: Project[];
+      };
+      return body.projects.find((p) => p.id === id)!;
+    }, project.id);
+  try {
+    await page.reload();
+    await page.getByRole("button", { name: /To FlightDeck/ }).click();
+    const row = page.locator("article.bridge-project", { hasText: "Stale QA" });
+    await row.getByRole("button", { name: "Edit draft", exact: true }).click();
+
+    // Edited here, then saved elsewhere: the edits stay, but they were made
+    // on revision 1, so neither Save nor Send may go ahead.
+    await row.getByLabel("Summary").fill("My unsaved summary");
+    const elsewhere = await updateProject(page, project, {
+      description:
+        "Changed by another editor: call Jane Doe on +49 151 23456789",
+    });
+    expect(elsewhere.revision).toBe(project.revision + 1);
+    await reloadProjects();
+    const conflict = row.getByText(
+      new RegExp(
+        `saved elsewhere \\(now revision ${elsewhere.revision}\\) after you started editing revision ${project.revision}`,
+      ),
+    );
+    await expect(conflict).toBeVisible();
+    await expect(row.getByLabel("Summary")).toHaveValue("My unsaved summary");
+    await expect(
+      row.getByRole("button", { name: "Save onboarding draft" }),
+    ).toBeDisabled();
+    await row.getByRole("tab", { name: "Review & send" }).click();
+    await row.getByLabel("Destination workspace").selectOption("hr-de");
+    const sendButton = row.getByRole("button", { name: "Send to FlightDeck" });
+    await expect(sendButton).toBeDisabled();
+    await expect(
+      row.getByText(/This project was saved elsewhere\. Load the latest/),
+    ).toBeVisible();
+    expect((await latest()).description).toBe(elsewhere.description);
+
+    // Loading the latest version shows exactly what the server would send,
+    // with the free-text warning for it.
+    await row
+      .getByRole("button", {
+        name: `Discard my edits and load revision ${elsewhere.revision}`,
+      })
+      .click();
+    await expect(conflict).toHaveCount(0);
+    const review = row.getByRole("region", { name: "What will be sent" });
+    await expect(review).toContainText("Jane Doe");
+    await expect(review).not.toContainText("My unsaved summary");
+    await expect(
+      row.getByText(/Summary is sent as written.*phone number/i),
+    ).toBeVisible();
+
+    // An untouched draft follows a save elsewhere on its own, and Send
+    // confirms the revision Review shows.
+    const third = await updateProject(page, elsewhere, {
+      description: "Summary v3 from another tab",
+    });
+    await reloadProjects();
+    await expect(review).toContainText("Summary v3 from another tab");
+    await expect(review).not.toContainText("Jane Doe");
+    await expect(
+      row.getByText(
+        new RegExp(
+          `saved elsewhere, so this form now shows revision ${third.revision}`,
+        ),
+      ),
+    ).toBeVisible();
+    await expect(sendButton).toBeEnabled();
+    await sendButton.click();
+    await expect
+      .poll(() => posts)
+      .toEqual([{ destinationWorkspaceId: "hr-de", revision: third.revision }]);
   } finally {
     await removeProject(page, project.id);
   }

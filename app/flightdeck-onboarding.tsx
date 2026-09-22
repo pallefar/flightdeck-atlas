@@ -404,6 +404,19 @@ export function OnboardingEditor({
 }) {
   const [draft, setDraft] = useState(() => draftFrom(project));
   const [dirty, setDirty] = useState(false);
+  // The revision the draft was built from. Atlas reloads its projects on
+  // focus and every minute, so a save elsewhere can arrive while the form
+  // is open: an untouched draft follows it, so Review always shows what the
+  // server would send; an edited one keeps the edits, but may neither save
+  // over that change nor be sent until the latest version is loaded.
+  const [base, setBase] = useState(project.revision);
+  const [refreshedTo, setRefreshedTo] = useState<number | null>(null);
+  if (project.revision !== base && !dirty) {
+    setBase(project.revision);
+    setDraft(draftFrom(project));
+    setRefreshedTo(project.revision);
+  }
+  const stale = project.revision !== base;
   const [tab, setTab] = useState<OnboardingTab>("basics");
   const [destination, setDestination] = useState("");
   const [sending, setSending] = useState(false);
@@ -503,10 +516,24 @@ export function OnboardingEditor({
     });
     setDirty(true);
   }
+  function loadLatest() {
+    setBase(project.revision);
+    setDraft(draftFrom(project));
+    setDirty(false);
+    setRefreshedTo(null);
+  }
   async function save() {
     setError("");
-    const saved = await onSave(fieldsFrom(project, draft), project);
+    // Saved against the revision the edits were made on, so a change saved
+    // elsewhere meanwhile is refused (409), never overwritten.
+    const saved = await onSave(fieldsFrom(project, draft), {
+      ...project,
+      revision: base,
+    });
     if (saved) {
+      setBase(saved.revision);
+      setDraft(draftFrom(saved));
+      setRefreshedTo(null);
       setDirty(false);
       onMessage(
         "Onboarding draft saved in Atlas. Nothing has been sent to FlightDeck.",
@@ -524,13 +551,11 @@ export function OnboardingEditor({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           // A retry confirms the reserved revision, which it resends as
-          // first sent; a new send confirms the saved revision.
+          // first sent; a new send confirms the revision Review showed, so
+          // anything saved after it is refused (409 project_changed).
           body: JSON.stringify({
             destinationWorkspaceId: target,
-            revision:
-              retrying && op?.atlasRevision
-                ? op.atlasRevision
-                : project.revision,
+            revision: retrying && op?.atlasRevision ? op.atlasRevision : base,
           }),
         },
       );
@@ -569,13 +594,15 @@ export function OnboardingEditor({
       ? "This project has already been sent to FlightDeck."
       : retrying
         ? ""
-        : dirty
-          ? "Save the draft first: FlightDeck receives the saved version."
-          : !ready.ready
-            ? `Complete the required details first (${ready.done} of ${ready.total}).`
-            : privacy.refused.length
-              ? `Remove the email address or phone number from: ${privacy.refused.map(fieldLabel).join(", ")}. FlightDeck receives role titles and system names, not personal details.`
-              : "";
+        : stale
+          ? "This project was saved elsewhere. Load the latest version and review it before sending."
+          : dirty
+            ? "Save the draft first: FlightDeck receives the saved version."
+            : !ready.ready
+              ? `Complete the required details first (${ready.done} of ${ready.total}).`
+              : privacy.refused.length
+                ? `Remove the email address or phone number from: ${privacy.refused.map(fieldLabel).join(", ")}. FlightDeck receives role titles and system names, not personal details.`
+                : "";
   const freeTextWarnings = (warned: string[]) =>
     warned.map((path) => (
       <p key={path} className="fd-warn" role="note">
@@ -635,6 +662,26 @@ export function OnboardingEditor({
       {failed && (
         <p className="fd-hint" role="status">
           Onboarding status could not be checked. Atlas will try again.
+        </p>
+      )}
+      {!locked && stale && (
+        <div className="fd-banner warn" role="alert">
+          <AlertTriangle size={16} />
+          <p>
+            This project was saved elsewhere (now revision {project.revision})
+            after you started editing revision {base}. Your edits are kept here,
+            but saving them would overwrite that change, so Save and Send wait
+            until you load the latest version.{" "}
+            <Button type="button" variant="outline" onClick={loadLatest}>
+              Discard my edits and load revision {project.revision}
+            </Button>
+          </p>
+        </div>
+      )}
+      {!locked && !stale && refreshedTo === project.revision && (
+        <p className="fd-hint" role="status">
+          This project was saved elsewhere, so this form now shows revision{" "}
+          {project.revision}. Review it again before sending.
         </p>
       )}
       <div
@@ -1303,7 +1350,7 @@ export function OnboardingEditor({
       <div className="bridge-actions">
         <Button
           type="submit"
-          disabled={busy || locked || !draft.label.trim() || !slugOk}
+          disabled={busy || locked || stale || !draft.label.trim() || !slugOk}
         >
           Save onboarding draft
         </Button>
