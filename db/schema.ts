@@ -1,4 +1,11 @@
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import {
+  sqliteTable,
+  text,
+  integer,
+  index,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 export const projects = sqliteTable(
   "atlas_projects",
   {
@@ -134,5 +141,70 @@ export const workRecords = sqliteTable(
   (t) => [
     index("idx_atlas_work_project").on(t.projectId, t.kind),
     index("idx_atlas_work_owner_due").on(t.owner, t.availableAt),
+  ],
+);
+
+/** Atlas -> FlightDeck OS onboarding sends (plan §4.7). A row is reserved
+ * with a fresh idempotency key BEFORE the remote call; a lost response keeps
+ * the row and its key, so a retry can never file a second request. At most
+ * one open send per Atlas project (reserved, filed, promoted or linked).
+ * `setup_state` and `checked_at` extend the §4.7 list: the status timeline
+ * and the server-side one-read-a-minute throttle need them. */
+export const flightdeckOperations = sqliteTable(
+  "atlas_flightdeck_operations",
+  {
+    id: text("id").primaryKey(),
+    atlasProjectId: text("atlas_project_id").notNull(),
+    atlasRevision: integer("atlas_revision").notNull(),
+    idempotencyKey: text("idempotency_key").notNull().unique(),
+    destinationWorkspaceId: text("destination_workspace_id").notNull(),
+    proposedLabel: text("proposed_label").notNull(),
+    proposedProjectId: text("proposed_project_id"),
+    state: text("state").notNull(),
+    submissionId: text("submission_id"),
+    receivedAt: text("received_at"),
+    payloadSha256: text("payload_sha256"),
+    reasonCode: text("reason_code"),
+    setupState: text("setup_state"),
+    createdBy: text("created_by").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    checkedAt: text("checked_at"),
+  },
+  (t) => [
+    index("idx_atlas_fd_operations_project").on(t.atlasProjectId, t.updatedAt),
+    uniqueIndex("uniq_atlas_fd_operations_open")
+      .on(t.atlasProjectId)
+      .where(sql`state IN ('reserved','filed','promoted','linked')`),
+  ],
+);
+/** Confirmed Atlas <-> OS project links (PROJECT-BRIDGE-CONTRACT.md:27-32).
+ * Written only after the OS read-back says promoted AND read:context lists
+ * the project. Installation-scoped, outside the editable project JSON. */
+export const projectLinks = sqliteTable(
+  "atlas_project_links",
+  {
+    installationId: text("installation_id").notNull(),
+    osInstanceId: text("os_instance_id").notNull(),
+    workspaceId: text("workspace_id").notNull(),
+    osProjectId: text("os_project_id").notNull(),
+    atlasProjectId: text("atlas_project_id").notNull(),
+    submissionId: text("submission_id"),
+    linkedAt: text("linked_at").notNull(),
+    linkedBy: text("linked_by").notNull(),
+    sourceRevision: integer("source_revision"),
+    lastCheckedAt: text("last_checked_at").notNull(),
+    accessState: text("access_state").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uniq_atlas_project_links_os").on(
+      t.installationId,
+      t.osInstanceId,
+      t.workspaceId,
+      t.osProjectId,
+    ),
+    uniqueIndex("uniq_atlas_project_links_atlas").on(
+      t.installationId,
+      t.atlasProjectId,
+    ),
   ],
 );
