@@ -7,8 +7,12 @@
 // admin decides. The order below is the contract (PROJECT-BRIDGE-CONTRACT.md
 // "Reserve before the remote call"): Super Admin, then the destination from
 // this request re-checked against fresh OS lists, then a reserved operation
-// row with its idempotency key, and only then the one remote write. A lost
-// response keeps the row and its key, so a retry can never file twice.
+// row with its idempotency key and the exact request body, and only then the
+// one remote write. A lost response keeps the row, its key and its body, so a
+// retry resends the same bytes and can never file twice. FlightDeck answers a
+// same-key retry with the ORIGINAL submission whatever the body says ("what
+// was filed stays filed", proposal §8b), so rebuilding the body from an
+// edited project would make Atlas record a revision FlightDeck never got.
 import { z } from "zod";
 import { json, sameOrigin } from "../http";
 import type { Project } from "../projects";
@@ -22,9 +26,12 @@ import {
 import {
   buildOnboardingPayload,
   onboardingEnvelope,
+  onboardingEnvelopeSchema,
   onboardingSubject,
+  personalDataIn,
   projectOnboardingPayloadSchema,
   readiness,
+  type OnboardingEnvelope,
   stageFor,
   type OnboardingStage,
   type OnboardingStatus,
@@ -80,6 +87,11 @@ type OperationRow = {
   created_by: string;
   updated_at: string;
   checked_at: string | null;
+  /** The reserved envelope as sent; null once FlightDeck confirmed or
+   * refused it. */
+  request_body: string | null;
+  /** 1 when Atlas adopted a request FlightDeck already held. */
+  adopted: number;
 };
 type LinkRow = {
   installation_id: string;
@@ -183,6 +195,33 @@ const submitRefusals = {
 } as const;
 const NOT_CONFIRMED =
   "FlightDeck did not confirm the send. Nothing is lost: Retry send sends the same request again, with the same key.";
+/** A refusal of a RETRY says nothing about the earlier attempt, which
+ * FlightDeck may have filed: the reservation, its key and its body stay. */
+const retryRefusals = {
+  invalid_submission: "FlightDeck rejected the request format.",
+  unauthorized: "FlightDeck refused Atlas's credential.",
+  refused:
+    "FlightDeck refused the request: project onboarding is not enabled for Atlas, or the credential lacks submit:proposal.",
+} as const;
+const KEPT =
+  " An earlier attempt may already have been filed, so Atlas keeps this request and its key. Retry send once FlightDeck accepts requests again: it resends the same request.";
+
+/** The envelope reserved with the key, or null if the row holds none. */
+function reservedEnvelope(op: OperationRow): OnboardingEnvelope | null {
+  if (!op.request_body) return null;
+  try {
+    const parsed = onboardingEnvelopeSchema.safeParse(
+      JSON.parse(op.request_body),
+    );
+    return parsed.success &&
+      parsed.data.payload.idempotencyKey === op.idempotency_key &&
+      parsed.data.payload.atlasProjectId === op.atlas_project_id
+      ? parsed.data
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 const isPollable = (op: OperationRow) =>
   op.state === "filed" ||
@@ -264,13 +303,15 @@ function statusBody(
             reasonCode: op.reason_code,
             setupState: op.setup_state,
           }),
-          destinationWorkspaceId: superAdmin
-            ? op.destination_workspace_id
-            : null,
+          // An adopted request's destination and revision are FlightDeck's;
+          // the row only holds what the adopting request asked for.
+          destinationWorkspaceId:
+            superAdmin && !op.adopted ? op.destination_workspace_id : null,
           submittedAt: op.received_at,
           reasonCode: op.reason_code,
           setupState: op.setup_state,
-          atlasRevision: op.atlas_revision,
+          atlasRevision: op.adopted ? null : op.atlas_revision,
+          adopted: !!op.adopted,
           updatedAt: op.updated_at,
           checkedAt: op.checked_at,
         }
@@ -283,6 +324,10 @@ function statusBody(
             linkedAt: link.linked_at,
             accessState: link.access_state,
           }
+        : null,
+    pendingPayload:
+      superAdmin && op?.state === "reserved"
+        ? (reservedEnvelope(op)?.payload ?? null)
         : null,
     canSend: !op || ["reserved", "rejected", "refused"].includes(op.state),
     retryPending: op?.state === "reserved",
@@ -335,6 +380,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
             received_at: result.data.receivedAt,
             payload_sha256: result.data.payloadSha256,
             reason_code: null,
+            request_body: null,
             updated_at: stamp,
             checked_at: stamp,
           },
@@ -343,8 +389,11 @@ export function createOnboardRoute<A extends OnboardAccess>(
         return json(await status(), 202);
       case "already_submitted": {
         // FlightDeck already holds an open or promoted request for this
-        // subject. Adopt it only once the read-back proves it is this
-        // project's; a slug or label match is never enough.
+        // subject under another key, one Atlas has no record of (a same-key
+        // retry is answered as a duplicate instead). Adopt it only once the
+        // read-back proves it is this project's; a slug or label match is
+        // never enough. The read-back names neither its destination nor its
+        // revision, so the row is flagged `adopted` and claims neither.
         const read = result.submissionId
           ? await submissions.readSubmission(result.submissionId)
           : null;
@@ -359,6 +408,8 @@ export function createOnboardRoute<A extends OnboardAccess>(
                 received_at: read.data.receivedAt,
                 payload_sha256: read.data.payloadSha256,
                 reason_code: null,
+                request_body: null,
+                adopted: 1,
                 updated_at: stamp,
                 checked_at: stamp,
               },
@@ -384,6 +435,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
           {
             state: "refused",
             reason_code: "already_submitted",
+            request_body: null,
             updated_at: stamp,
           },
           ["reserved"],
@@ -398,12 +450,32 @@ export function createOnboardRoute<A extends OnboardAccess>(
       case "invalid_submission":
       case "unauthorized":
       case "refused":
-        // Refused before anything was filed: close it. A corrected draft
-        // then gets a fresh key.
+        // The first attempt refused outright: nothing was filed, so close
+        // it, and a corrected draft gets a fresh key. A refused RETRY is
+        // different: an earlier attempt of this key ended unknown (any
+        // reason_code on a reserved row) and FlightDeck may hold it, so the
+        // reservation stays and the next retry reuses the key
+        // (PROJECT-BRIDGE-CONTRACT.md: never a fresh key after a lost reply).
+        if (op.reason_code !== null) {
+          await patch(
+            db,
+            op.id,
+            { reason_code: result.state, updated_at: stamp },
+            ["reserved"],
+          );
+          return refuse(502, result.state, retryRefusals[result.state] + KEPT, {
+            status: await status(),
+          });
+        }
         await patch(
           db,
           op.id,
-          { state: "refused", reason_code: result.state, updated_at: stamp },
+          {
+            state: "refused",
+            reason_code: result.state,
+            request_body: null,
+            updated_at: stamp,
+          },
           ["reserved"],
         );
         return refuse(502, result.state, submitRefusals[result.state], {
@@ -485,22 +557,6 @@ export function createOnboardRoute<A extends OnboardAccess>(
           "not_eligible",
           "Only projects created in Atlas can be sent to FlightDeck.",
         );
-      if (project.revision !== revision)
-        return refuse(
-          409,
-          "project_changed",
-          "This project changed after you reviewed it. Review it again before sending.",
-        );
-      const missing = readiness(project, destinationWorkspaceId)
-        .items.filter((item) => !item.done)
-        .map((item) => item.key);
-      if (missing.length)
-        return refuse(
-          400,
-          "not_ready",
-          "Complete the required FlightDeck details before sending.",
-          { missing },
-        );
       const installationId = deps.installationId();
       const reader = deps.reader(true);
       const submissions = deps.submissions();
@@ -520,13 +576,79 @@ export function createOnboardRoute<A extends OnboardAccess>(
           { status: await currentStatus(db, project.id, true) },
         );
       const reuse = existing?.state === "reserved" ? existing : null;
-      if (reuse && reuse.destination_workspace_id !== destinationWorkspaceId)
-        return refuse(
-          409,
-          "pending_send",
-          `A send to ${reuse.destination_workspace_id} is waiting for FlightDeck to confirm it. Retry that send first.`,
-          { destinationWorkspaceId: reuse.destination_workspace_id },
+      let envelope: OnboardingEnvelope;
+      if (reuse) {
+        // A retry resends the reserved request byte for byte: same key,
+        // destination, revision, requester and text, whatever the project
+        // says now and whoever presses Retry.
+        if (reuse.destination_workspace_id !== destinationWorkspaceId)
+          return refuse(
+            409,
+            "pending_send",
+            `A send to ${reuse.destination_workspace_id} is waiting for FlightDeck to confirm it. Retry that send first.`,
+            { destinationWorkspaceId: reuse.destination_workspace_id },
+          );
+        if (revision !== reuse.atlas_revision)
+          return refuse(
+            409,
+            "pending_send_changed",
+            `FlightDeck may already hold revision ${reuse.atlas_revision} of this project. Retry send resends revision ${reuse.atlas_revision} exactly as it was first sent; later edits are not included. Review it and retry.`,
+            { atlasRevision: reuse.atlas_revision },
+          );
+        const stored = reservedEnvelope(reuse);
+        if (!stored)
+          return refuse(
+            409,
+            "pending_send_unreadable",
+            "Atlas cannot read the request it reserved, so it cannot retry it safely. Nothing was sent. Ask the OS admin whether FlightDeck received it.",
+          );
+        envelope = stored;
+      } else {
+        if (project.revision !== revision)
+          return refuse(
+            409,
+            "project_changed",
+            "This project changed after you reviewed it. Review it again before sending.",
+          );
+        const missing = readiness(project, destinationWorkspaceId)
+          .items.filter((item) => !item.done)
+          .map((item) => item.key);
+        if (missing.length)
+          return refuse(
+            400,
+            "not_ready",
+            "Complete the required FlightDeck details before sending.",
+            { missing },
+          );
+        const built = projectOnboardingPayloadSchema.safeParse(
+          buildOnboardingPayload({
+            project,
+            destinationWorkspaceId,
+            idempotencyKey: newId(),
+            installationId,
+            requestedBy: await sha256Hex(access.userId),
+          }),
         );
+        if (!built.success)
+          return refuse(
+            400,
+            "invalid_payload",
+            "Some FlightDeck details are not in the agreed format. Check them, save and try again.",
+          );
+        // Decision 4: role titles, never people. Fields §3 classes as not
+        // personal refuse an email or phone-number shape; the refusal names
+        // the fields, never their values. Summary and success measure are
+        // free text the owner chose to send (decision 5): warned in the form.
+        const { refused: fields } = personalDataIn(built.data);
+        if (fields.length)
+          return refuse(
+            400,
+            "personal_data",
+            "Remove the email address or phone number from these fields: FlightDeck receives role titles and system names, not personal details. Nothing was sent.",
+            { fields },
+          );
+        envelope = onboardingEnvelope(built.data);
+      }
       // The destination comes from this request only, never from saved
       // preferences or the planning note, and is re-checked against fresh
       // OS lists: it must be listed, enabled and readable.
@@ -543,44 +665,28 @@ export function createOnboardRoute<A extends OnboardAccess>(
         const { status, error } = contextRefusals[state];
         return refuse(status, state, error, {}, view.retryAfter);
       }
-      const key = reuse?.idempotency_key ?? newId();
-      const built = projectOnboardingPayloadSchema.safeParse(
-        buildOnboardingPayload({
-          project,
-          destinationWorkspaceId,
-          idempotencyKey: key,
-          installationId,
-          requestedBy: await sha256Hex(access.userId),
-        }),
-      );
-      if (!built.success)
-        return refuse(
-          400,
-          "invalid_payload",
-          "Some FlightDeck details are not in the agreed format. Check them, save and try again.",
-        );
       const stamp = now().toISOString();
-      const fields = {
-        atlas_revision: project.revision,
-        proposed_label: built.data.target.label,
-        proposed_project_id: built.data.target.projectId ?? null,
-        updated_at: stamp,
-      };
       let op: OperationRow;
       if (reuse) {
-        if (!(await patch(db, reuse.id, fields, ["reserved"])))
+        // Nothing about the reserved request changes, only the stamp; the
+        // guard stops a retry racing a settled send.
+        if (!(await patch(db, reuse.id, { updated_at: stamp }, ["reserved"])))
           return refuse(
             409,
             "send_in_progress",
             "A send for this project is already in progress.",
           );
-        op = { ...reuse, ...fields };
+        op = { ...reuse, updated_at: stamp };
       } else {
+        const { payload } = envelope;
         op = {
           id: newId(),
           atlas_project_id: project.id,
-          idempotency_key: key,
+          atlas_revision: payload.atlasRevision,
+          idempotency_key: payload.idempotencyKey,
           destination_workspace_id: destinationWorkspaceId,
+          proposed_label: payload.target.label,
+          proposed_project_id: payload.target.projectId ?? null,
           state: "reserved",
           submission_id: null,
           received_at: null,
@@ -588,8 +694,10 @@ export function createOnboardRoute<A extends OnboardAccess>(
           reason_code: null,
           setup_state: null,
           created_by: access.userId,
+          updated_at: stamp,
           checked_at: null,
-          ...fields,
+          request_body: JSON.stringify(envelope),
+          adopted: 0,
         };
         // Reserved BEFORE the remote call. The partial unique index allows
         // one open send per project, so a second tab loses here.
@@ -600,7 +708,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
             "A send for this project is already in progress.",
           );
       }
-      const result = await submissions.submit(onboardingEnvelope(built.data));
+      const result = await submissions.submit(envelope);
       return await settle(db, op, result, submissions);
     } catch {
       return refuse(
@@ -660,7 +768,8 @@ export function createOnboardRoute<A extends OnboardAccess>(
       submission_id: op.submission_id,
       linked_at: stamp,
       linked_by: userId,
-      source_revision: op.atlas_revision,
+      // An adopted request's revision is unknown to Atlas.
+      source_revision: op.adopted ? null : op.atlas_revision,
       last_checked_at: stamp,
       access_state: found.enabled ? "active" : "disabled",
     };

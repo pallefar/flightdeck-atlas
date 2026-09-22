@@ -17,6 +17,7 @@ import type { Project, ProjectFields } from "@/lib/projects";
 import { functions } from "@/lib/opportunities";
 import type { OsContextEntry } from "@/lib/flightdeck/context";
 import {
+  FREE_TEXT_NOTE,
   ISO_COUNTRY_CODES,
   NEVER_SENT,
   TIMELINE,
@@ -24,11 +25,13 @@ import {
   buildOnboardingPayload,
   checklistSuggestions,
   countryName,
+  fieldLabel,
   headcountBands,
   onboardErrorSchema,
   onboardStagesSchema,
   onboardingStatusSchema,
   personalDataHint,
+  personalDataIn,
   readiness,
   reviewRows,
   type OnboardingDraft,
@@ -330,7 +333,7 @@ function StatusBanner({
       text = `FlightDeck has not confirmed this send yet. ${reason} Retry send sends the same request again, with the same key, so it can never be filed twice.`;
       break;
     case "submitted":
-      text = `Sent for review${where ? ` to ${where}` : ""}. An OS admin decides; nothing is created automatically. The draft is locked while FlightDeck reviews it. ${reason}`;
+      text = `${op.adopted ? "FlightDeck already held a request for this project, and Atlas now follows it." : `Sent for review${where ? ` to ${where}` : ""}.`} An OS admin decides; nothing is created automatically. The draft is locked while FlightDeck reviews it. ${reason}`;
       break;
     case "linked":
     case "setup-in-progress":
@@ -364,8 +367,10 @@ function StatusBanner({
   );
 }
 
-function Hint({ text }: { text: string }) {
-  const hint = personalDataHint(text);
+/** `strict`: every field except Summary and Success measure, where the
+ * server refuses an email or phone-number shape. */
+function Hint({ text, strict = false }: { text: string; strict?: boolean }) {
+  const hint = personalDataHint(text, strict);
   return hint ? (
     <span className="fd-warn" role="note">
       {hint}
@@ -422,24 +427,34 @@ export function OnboardingEditor({
     pendingFocus.current = null;
   }, [tab]);
 
+  // An open send (reserved, filed, promoted or linked) locks the draft; the
+  // readiness meter and "What will be sent" describe a send still to make,
+  // so they give way to what FlightDeck holds, or what Retry resends.
   const locked = !!op && LOCKED_STATES.includes(op.state);
   const retrying = !!status?.retryPending;
-  const target = retrying ? op?.destinationWorkspaceId || "" : destination;
+  const sent = locked && !retrying;
+  const target = locked ? op?.destinationWorkspaceId || "" : destination;
+  const workspaceLabel = (id: string) =>
+    workspaces.find((w) => w.id === id)?.label || id;
   const preview = useMemo(
     () => ({ ...project, ...fieldsFrom(project, draft) }),
     [project, draft],
   );
   const ready = readiness(preview, target || null);
   const suggestions = locked ? [] : checklistSuggestions(preview);
-  const rows = reviewRows(
-    buildOnboardingPayload({
-      project: preview,
-      destinationWorkspaceId: target,
-      idempotencyKey: PREVIEW_KEY,
-      installationId: "atlas-local",
-      requestedBy: PREVIEW_HASH,
-    }),
-  );
+  const payload = buildOnboardingPayload({
+    project: preview,
+    destinationWorkspaceId: target,
+    idempotencyKey: PREVIEW_KEY,
+    installationId: "atlas-local",
+    requestedBy: PREVIEW_HASH,
+  });
+  const rows = reviewRows(payload);
+  const privacy = personalDataIn(payload);
+  /** Exactly what Retry send resends (Super Admin only). */
+  const pending = retrying ? (status?.pendingPayload ?? null) : null;
+  const changedSince =
+    locked && !!op?.atlasRevision && op.atlasRevision !== project.revision;
   const slugOk =
     !draft.onboarding.proposedProjectId ||
     SLUG_RE.test(draft.onboarding.proposedProjectId);
@@ -508,9 +523,14 @@ export function OnboardingEditor({
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          // A retry confirms the reserved revision, which it resends as
+          // first sent; a new send confirms the saved revision.
           body: JSON.stringify({
             destinationWorkspaceId: target,
-            revision: project.revision,
+            revision:
+              retrying && op?.atlasRevision
+                ? op.atlasRevision
+                : project.revision,
           }),
         },
       );
@@ -526,7 +546,10 @@ export function OnboardingEditor({
       const refused = onboardErrorSchema.safeParse(raw);
       setError(
         refused.success
-          ? refused.data.error
+          ? refused.data.error +
+              (refused.data.fields?.length
+                ? ` (${refused.data.fields.map(fieldLabel).join(", ")})`
+                : "")
           : "The send could not be completed. Try again.",
       );
       if (refused.success && refused.data.status) show(refused.data.status);
@@ -538,15 +561,42 @@ export function OnboardingEditor({
       setSending(false);
     }
   }
+  // A retry resends the reserved request, so today's draft (its readiness
+  // and its text) does not decide whether it can go.
   const sendBlocked = !superAdmin
     ? "Only the Atlas Super Admin can send a project to FlightDeck."
     : status && !status.canSend
       ? "This project has already been sent to FlightDeck."
-      : dirty
-        ? "Save the draft first: FlightDeck receives the saved version."
-        : !ready.ready
-          ? `Complete the required details first (${ready.done} of ${ready.total}).`
-          : "";
+      : retrying
+        ? ""
+        : dirty
+          ? "Save the draft first: FlightDeck receives the saved version."
+          : !ready.ready
+            ? `Complete the required details first (${ready.done} of ${ready.total}).`
+            : privacy.refused.length
+              ? `Remove the email address or phone number from: ${privacy.refused.map(fieldLabel).join(", ")}. FlightDeck receives role titles and system names, not personal details.`
+              : "";
+  const freeTextWarnings = (warned: string[]) =>
+    warned.map((path) => (
+      <p key={path} className="fd-warn" role="note">
+        {fieldLabel(path)} is sent as written and looks like it contains an
+        email address or phone number.
+      </p>
+    ));
+  const rowList = (list: typeof rows) => (
+    <dl>
+      {list.map((row) => (
+        <div key={row.path}>
+          <dt>{row.label}</dt>
+          <dd className={row.missing ? "missing" : ""}>
+            {row.path === "target.workspaceId" && !row.missing
+              ? workspaceLabel(row.value)
+              : row.value}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
 
   const field = (
     id: string,
@@ -612,47 +662,49 @@ export function OnboardingEditor({
           </button>
         ))}
       </div>
-      <div className="fd-readiness">
-        <div
-          className="fd-meter-row"
-          role="meter"
-          aria-label="Required FlightDeck details"
-          aria-valuemin={0}
-          aria-valuemax={ready.total}
-          aria-valuenow={ready.done}
-          aria-valuetext={`${ready.done} of ${ready.total} required`}
-        >
-          <span>
-            {ready.done} of {ready.total} required
-          </span>
-          <span className="fd-meter" aria-hidden="true">
-            <span style={{ width: `${(ready.done / ready.total) * 100}%` }} />
-          </span>
+      {!locked && (
+        <div className="fd-readiness">
+          <div
+            className="fd-meter-row"
+            role="meter"
+            aria-label="Required FlightDeck details"
+            aria-valuemin={0}
+            aria-valuemax={ready.total}
+            aria-valuenow={ready.done}
+            aria-valuetext={`${ready.done} of ${ready.total} required`}
+          >
+            <span>
+              {ready.done} of {ready.total} required
+            </span>
+            <span className="fd-meter" aria-hidden="true">
+              <span style={{ width: `${(ready.done / ready.total) * 100}%` }} />
+            </span>
+          </div>
+          {!ready.ready && (
+            <ul className="fd-missing" aria-label="Missing details">
+              {ready.items
+                .filter((item) => !item.done)
+                .map((item) => (
+                  <li key={item.key}>
+                    {item.key === "destination" && !superAdmin ? (
+                      <span className="fd-hint">
+                        {item.label} (chosen by the Atlas Super Admin)
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="text-link"
+                        onClick={() => goTo(item.tab, item.field)}
+                      >
+                        {item.label}
+                      </button>
+                    )}
+                  </li>
+                ))}
+            </ul>
+          )}
         </div>
-        {!ready.ready && (
-          <ul className="fd-missing" aria-label="Missing details">
-            {ready.items
-              .filter((item) => !item.done)
-              .map((item) => (
-                <li key={item.key}>
-                  {item.key === "destination" && !superAdmin ? (
-                    <span className="fd-hint">
-                      {item.label} (chosen by the Atlas Super Admin)
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      className="text-link"
-                      onClick={() => goTo(item.tab, item.field)}
-                    >
-                      {item.label}
-                    </button>
-                  )}
-                </li>
-              ))}
-          </ul>
-        )}
-      </div>
+      )}
       {!!suggestions.length && (
         <div className="fd-suggest">
           <p>
@@ -691,6 +743,7 @@ export function OnboardingEditor({
                 value={draft.label}
                 onChange={(e) => set("label", e.target.value)}
               />,
+              <Hint text={draft.label} strict />,
             )}
             {field(
               "fd-workspace-note",
@@ -724,6 +777,7 @@ export function OnboardingEditor({
                   ))}
                 </datalist>
               </>,
+              <Hint text={draft.functionArea} strict />,
             )}
             {field(
               "fd-category",
@@ -735,6 +789,7 @@ export function OnboardingEditor({
                 value={draft.category}
                 onChange={(e) => set("category", e.target.value)}
               />,
+              <Hint text={draft.category} strict />,
             )}
             {field(
               "fd-summary",
@@ -821,6 +876,7 @@ export function OnboardingEditor({
                 value={draft.location}
                 onChange={(e) => set("location", e.target.value)}
               />,
+              <Hint text={draft.location} strict />,
             )}
           </div>
         )}
@@ -905,7 +961,7 @@ export function OnboardingEditor({
                   setDetail("legalEntity", e.target.value || undefined)
                 }
               />,
-              <Hint text={draft.onboarding.legalEntity ?? ""} />,
+              <Hint text={draft.onboarding.legalEntity ?? ""} strict />,
             )}
             {field(
               "fd-headcount",
@@ -951,7 +1007,10 @@ export function OnboardingEditor({
                   value={draft.onboarding.ownerRoles?.[role] ?? ""}
                   onChange={(e) => setRole(role, e.target.value)}
                 />,
-                <Hint text={draft.onboarding.ownerRoles?.[role] ?? ""} />,
+                <Hint
+                  text={draft.onboarding.ownerRoles?.[role] ?? ""}
+                  strict
+                />,
               ),
             )}
             <div className="fd-field fd-wide">
@@ -1004,6 +1063,12 @@ export function OnboardingEditor({
                   Add data source
                 </Button>
               </div>
+              <Hint
+                text={[...(draft.onboarding.dataSources ?? []), newSource].join(
+                  " ",
+                )}
+                strict
+              />
             </div>
             <div className="fd-field fd-wide">
               <span id="fd-access-label">Access requested</span>
@@ -1079,6 +1144,15 @@ export function OnboardingEditor({
                   Add access request
                 </Button>
               </div>
+              <Hint
+                text={[
+                  ...(draft.onboarding.accessRequested ?? []).map(
+                    (a) => a.system,
+                  ),
+                  newAccess.system,
+                ].join(" ")}
+                strict
+              />
             </div>
             <label className="fd-check fd-wide" htmlFor="fd-cowork">
               <input
@@ -1102,40 +1176,38 @@ export function OnboardingEditor({
         )}
         {tab === "review" && (
           <div className="fd-review">
-            {superAdmin ? (
-              retrying ? (
+            {locked ? (
+              retrying &&
+              superAdmin && (
                 <p className="fd-hint">
                   Destination workspace:{" "}
-                  <strong>
-                    {workspaces.find((w) => w.id === target)?.label || target}
-                  </strong>{" "}
-                  (kept for the retry, so the same request goes to the same
-                  place).
+                  <strong>{workspaceLabel(target)}</strong> (kept for the retry,
+                  so the same request goes to the same place).
                 </p>
-              ) : (
-                field(
-                  "fd-destination",
-                  "Destination workspace",
-                  <select
-                    id="fd-destination"
-                    className="fd-select"
-                    value={destination}
-                    onChange={(e) => setDestination(e.target.value)}
-                  >
-                    <option value="">Choose a workspace</option>
-                    {workspaces.map((w) => (
-                      <option key={w.id} value={w.id} disabled={!w.enabled}>
-                        {w.label || w.id}
-                        {w.enabled ? "" : " (disabled)"}
-                      </option>
-                    ))}
-                  </select>,
-                  <span className="fd-hint">
-                    {selectable.length
-                      ? "Chosen here for this send only, and checked again with FlightDeck when you press Send."
-                      : `FlightDeck workspaces are unavailable${contextState ? ` (${contextState.replace(/_/g, " ")})` : ""}.`}
-                  </span>,
-                )
+              )
+            ) : superAdmin ? (
+              field(
+                "fd-destination",
+                "Destination workspace",
+                <select
+                  id="fd-destination"
+                  className="fd-select"
+                  value={destination}
+                  onChange={(e) => setDestination(e.target.value)}
+                >
+                  <option value="">Choose a workspace</option>
+                  {workspaces.map((w) => (
+                    <option key={w.id} value={w.id} disabled={!w.enabled}>
+                      {w.label || w.id}
+                      {w.enabled ? "" : " (disabled)"}
+                    </option>
+                  ))}
+                </select>,
+                <span className="fd-hint">
+                  {selectable.length
+                    ? "Chosen here for this send only, and checked again with FlightDeck when you press Send."
+                    : `FlightDeck workspaces are unavailable${contextState ? ` (${contextState.replace(/_/g, " ")})` : ""}.`}
+                </span>,
               )
             ) : (
               <p className="fd-hint">
@@ -1143,22 +1215,51 @@ export function OnboardingEditor({
                 sends the request.
               </p>
             )}
-            <section aria-label="What will be sent">
-              <h3>What will be sent</h3>
-              <dl>
-                {rows.map((row) => (
-                  <div key={row.path}>
-                    <dt>{row.label}</dt>
-                    <dd className={row.missing ? "missing" : ""}>
-                      {row.path === "target.workspaceId" && !row.missing
-                        ? workspaces.find((w) => w.id === row.value)?.label ||
-                          row.value
-                        : row.value}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
+            {sent && op && (
+              <section aria-label="Sent to FlightDeck">
+                <h3>Sent to FlightDeck</h3>
+                <p>
+                  {op.adopted
+                    ? "FlightDeck already held a request for this project, and Atlas now follows it. Atlas did not record where it was sent or which revision it carries: FlightDeck's record is what counts."
+                    : `FlightDeck received revision ${op.atlasRevision} of this project${target ? ` for ${workspaceLabel(target)}` : ""}. FlightDeck keeps what it received.`}{" "}
+                  {changedSince
+                    ? `This project is now at revision ${project.revision}; later edits are not sent.`
+                    : "Later edits in Atlas are not sent."}
+                </p>
+              </section>
+            )}
+            {retrying &&
+              (pending ? (
+                <section aria-label="What Retry send resends">
+                  <h3>What Retry send resends</h3>
+                  {changedSince && (
+                    <p className="fd-warn" role="note">
+                      This project changed after the send (it is now at revision{" "}
+                      {project.revision}). Retry send resends revision{" "}
+                      {op?.atlasRevision} exactly as it was first sent, and
+                      later edits are not included: FlightDeck may already hold
+                      revision {op?.atlasRevision}.
+                    </p>
+                  )}
+                  {freeTextWarnings(personalDataIn(pending).warned)}
+                  {rowList(reviewRows(pending, { preview: false }))}
+                </section>
+              ) : (
+                <p className="fd-hint">
+                  A send of revision {op?.atlasRevision} is waiting for
+                  FlightDeck to confirm it
+                  {superAdmin
+                    ? "."
+                    : "; only the Atlas Super Admin can retry it."}
+                </p>
+              ))}
+            {!locked && (
+              <section aria-label="What will be sent">
+                <h3>What will be sent</h3>
+                {freeTextWarnings(privacy.warned)}
+                {rowList(rows)}
+              </section>
+            )}
             <section className="fd-never">
               <h3>Never sent</h3>
               <ul aria-label="Never sent">
@@ -1166,6 +1267,7 @@ export function OnboardingEditor({
                   <li key={item}>{item}</li>
                 ))}
               </ul>
+              <p className="fd-hint">{FREE_TEXT_NOTE}</p>
             </section>
           </div>
         )}

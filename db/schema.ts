@@ -149,7 +149,8 @@ export const workRecords = sqliteTable(
  * the row and its key, so a retry can never file a second request. At most
  * one open send per Atlas project (reserved, filed, promoted or linked).
  * `setup_state` and `checked_at` extend the §4.7 list: the status timeline
- * and the server-side one-read-a-minute throttle need them. */
+ * and the server-side one-read-a-minute throttle need them. Migration 0005
+ * adds `request_body` and `adopted` (see below). */
 export const flightdeckOperations = sqliteTable(
   "atlas_flightdeck_operations",
   {
@@ -169,6 +170,16 @@ export const flightdeckOperations = sqliteTable(
     createdBy: text("created_by").notNull(),
     updatedAt: text("updated_at").notNull(),
     checkedAt: text("checked_at"),
+    /** The exact envelope reserved with the key. A retry resends these bytes
+     * and never rebuilds them, because FlightDeck keeps what the key first
+     * filed. Held only while the send is unconfirmed; cleared once FlightDeck
+     * files or refuses it, so Atlas keeps no second copy of the free text. */
+    requestBody: text("request_body"),
+    /** FlightDeck already held a request for this project that Atlas had no
+     * record of, and Atlas adopted it after the read-back matched the
+     * subject. Its destination and revision are FlightDeck's, not this
+     * row's, so Atlas never shows or links them as its own. */
+    adopted: integer("adopted", { mode: "boolean" }).notNull().default(false),
   },
   (t) => [
     index("idx_atlas_fd_operations_project").on(t.atlasProjectId, t.updatedAt),

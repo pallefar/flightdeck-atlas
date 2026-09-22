@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import {
   unlinkedProjects,
@@ -30,6 +30,7 @@ import {
   onboardingStatusSchema,
   payloadLeafPaths,
   personalDataHint,
+  personalDataIn,
   projectOnboardingPayloadSchema,
   readiness,
   reviewRows,
@@ -383,6 +384,35 @@ test("Review & send covers every payload field and the meter counts nine require
     "worksCouncilRelevant",
     "ready",
   ]);
+  // "Never sent" promises only what Atlas can keep: no blanket claim that
+  // free text holds no email address or name.
+  expect(NEVER_SENT.join(" ")).not.toMatch(/any email|person's name/i);
+  const typed = payloadFor(
+    readyProject({
+      description: "Guide new HR users. Contact jane@example.com",
+    }),
+  );
+  expect(
+    reviewRows(typed).find((r) => r.path === "profile.summary")?.value,
+  ).toBe("Guide new HR users. Contact jane@example.com");
+  expect(personalDataIn(typed)).toEqual({
+    refused: [],
+    warned: ["profile.summary"],
+  });
+  expect(personalDataIn(payload)).toEqual({ refused: [], warned: [] });
+  expect(
+    personalDataIn(
+      payloadFor(
+        readyProject({
+          location: "Call +49 89 1234 5678",
+          onboarding: {
+            ...readyProject().onboarding,
+            ownerRoles: { data: "dana@example.com" },
+          },
+        }),
+      ),
+    ).refused,
+  ).toEqual(["profile.site", "facts.ownerRoles.data"]);
   // Free text is checked for the obvious personal details before sending.
   expect(personalDataHint("Ask dana@example.com")).toMatch(/email/i);
   expect(personalDataHint("Call +49 89 1234 5678")).toMatch(/phone/i);
@@ -694,15 +724,18 @@ const statusRequest = (refresh = true) =>
 const sendTo = (destinationWorkspaceId: string, revision = 7) =>
   send({ destinationWorkspaceId, revision });
 
-/** A D1-shaped adapter over node:sqlite with the real migration 0004. */
+/** A D1-shaped adapter over node:sqlite with the real onboarding migrations
+ * (0004 onwards). */
 function onboardDb() {
-  const migration = readFileSync(
-    new URL("../drizzle/0004_silly_speedball.sql", import.meta.url),
-    "utf8",
-  );
+  const dir = new URL("../drizzle/", import.meta.url);
   const sqlite = new DatabaseSync(":memory:");
-  for (const statement of migration.split("--> statement-breakpoint"))
-    sqlite.exec(statement);
+  for (const name of readdirSync(dir)
+    .filter((n) => /^\d{4}_\w+\.sql$/.test(n) && n >= "0004")
+    .sort())
+    for (const statement of readFileSync(new URL(name, dir), "utf8").split(
+      "--> statement-breakpoint",
+    ))
+      sqlite.exec(statement);
   const db: OnboardDb = {
     prepare(sql) {
       return {
@@ -743,8 +776,9 @@ function harness(
 ) {
   const store = onboardDb();
   let clock = Date.parse("2026-09-22T09:00:00.000Z");
-  const project =
+  let project =
     options.project === undefined ? readyProject() : options.project;
+  let user = { userId: "user-1", superAdmin: options.superAdmin ?? true };
   const fake = {
     workspaces: structuredClone(os.context.workspaces) as Record<
       string,
@@ -809,9 +843,7 @@ function harness(
   const route = createOnboardRoute({
     async authorize() {
       fake.authorize++;
-      return {
-        access: { userId: "user-1", superAdmin: options.superAdmin ?? true },
-      };
+      return { access: { ...user } };
     },
     async loadProject(_access, id) {
       return project && id === project.id ? { project, canEdit: true } : null;
@@ -857,6 +889,10 @@ function harness(
     fake,
     readAs,
     tick: (ms: number) => void (clock += ms),
+    /** The project as edited elsewhere in Atlas after a send. */
+    setProject: (next: Project) => void (project = next),
+    as: (userId: string, superAdmin = true) =>
+      void (user = { userId, superAdmin }),
     async status(refresh = true) {
       const response = await route.GET(statusRequest(refresh), ATLAS_ID);
       expect(response.status).toBe(200);
@@ -1025,6 +1061,227 @@ test("a lost response keeps the reservation, and the retry reuses the same key a
   expect(h.store.ops()[0]).toMatchObject({
     received_at: os.receivedAt,
     payload_sha256: os.payloadSha256,
+  });
+});
+
+const duplicateReceipt = async (): Promise<SubmitResult> => ({
+  state: "ok",
+  data: {
+    submissionId: os.submissionId,
+    receivedAt: null,
+    payloadSha256: null,
+    duplicate: true,
+  },
+});
+
+test("a retry after an edit resends the reserved request byte for byte and keeps its revision", async () => {
+  const h = harness();
+  // Revision 7 carries an email in the summary; FlightDeck filed it, but the
+  // reply was lost.
+  h.setProject(
+    readyProject({ description: "Summary v1: contact alex@example.com" }),
+  );
+  h.fake.onSubmit = async () => ({ state: "os_unreachable" });
+  expect((await h.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(503);
+  const [reserved] = h.store.ops();
+  expect(JSON.parse(String(reserved.request_body))).toEqual(h.fake.submits[0]);
+  // The project is then edited elsewhere in Atlas: revision 8, clean text.
+  h.setProject(
+    readyProject({
+      revision: 8,
+      description: "Summary v2: no personal data",
+      flightdeckDraft: { label: "Renamed label", workspaceHint: "" },
+    }),
+  );
+  // The Super Admin sees exactly what Retry resends: revision 7, as sent.
+  const pending = await h.status(false);
+  expect(pending.operation?.atlasRevision).toBe(7);
+  expect(pending.pendingPayload).toEqual(h.fake.submits[0].payload);
+  expect(pending.pendingPayload?.profile.summary).toBe(
+    "Summary v1: contact alex@example.com",
+  );
+  // Retrying "the current project" is refused, unsent: the key is revision 7's.
+  const changed = await h.route.POST(sendTo("hr-de", 8), ATLAS_ID);
+  expect(changed.status).toBe(409);
+  expect(await changed.json()).toMatchObject({
+    code: "pending_send_changed",
+    atlasRevision: 7,
+  });
+  expect(h.fake.submits).toHaveLength(1);
+  // Another Super Admin retries revision 7: the very same bytes go again.
+  h.as("user-2");
+  h.fake.onSubmit = duplicateReceipt;
+  const retry = await h.route.POST(sendTo("hr-de", 7), ATLAS_ID);
+  expect(retry.status).toBe(202);
+  expect(h.fake.submits).toHaveLength(2);
+  expect(JSON.stringify(h.fake.submits[1])).toBe(
+    JSON.stringify(h.fake.submits[0]),
+  );
+  expect(h.fake.submits[1].payload).toMatchObject({
+    atlasRevision: 7,
+    requestedBy: HASH,
+    target: { label: "Payroll rollout" },
+  });
+  // Atlas records what FlightDeck holds, and drops its copy of the body.
+  expect(h.store.ops()).toEqual([
+    expect.objectContaining({
+      id: reserved.id,
+      state: "filed",
+      idempotency_key: reserved.idempotency_key,
+      atlas_revision: 7,
+      proposed_label: "Payroll rollout",
+      request_body: null,
+    }),
+  ]);
+  const filed = await h.status(false);
+  expect(filed.operation?.atlasRevision).toBe(7);
+  expect(filed.pendingPayload).toBeNull();
+  // The link records revision 7 as its source, not the edited revision 8.
+  h.fake.onRead = h.readAs("promoted");
+  h.fake.projects["hr-de"] = structuredClone(os.context.projectsAfterPromotion);
+  h.tick(61_000);
+  expect((await h.status()).operation?.stage).toBe("linked");
+  expect(h.store.links()[0]).toMatchObject({ source_revision: 7 });
+});
+
+test("only the Super Admin sees the request a retry would resend", async () => {
+  const h = harness();
+  h.fake.onSubmit = async () => ({ state: "os_unreachable" });
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  h.as("member-1", false);
+  const view = await h.status(false);
+  expect(view).toMatchObject({
+    retryPending: true,
+    pendingPayload: null,
+    operation: { destinationWorkspaceId: null },
+  });
+});
+
+test("a refusal after a lost response keeps the reservation, so the retry reuses the first key", async () => {
+  const h = harness();
+  h.fake.onSubmit = async () => ({ state: "os_unreachable" });
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  // FlightDeck may hold the first attempt. A refusal of a later attempt
+  // (the kind switched off for a while, a rotated credential, a format
+  // check) says nothing about that one.
+  for (const state of [
+    "refused",
+    "unauthorized",
+    "invalid_submission",
+  ] as const) {
+    h.fake.onSubmit = async () => ({ state });
+    const response = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+    expect(response.status, state).toBe(502);
+    const body = (await response.json()) as { error: string; status: unknown };
+    expect(body).toMatchObject({ code: state });
+    expect(body.error).toMatch(/earlier attempt may already have been filed/i);
+    expect(onboardingStatusSchema.parse(body.status)).toMatchObject({
+      retryPending: true,
+      operation: {
+        state: "reserved",
+        stage: "not-confirmed",
+        reasonCode: state,
+      },
+    });
+  }
+  expect(h.store.ops()).toEqual([
+    expect.objectContaining({
+      state: "reserved",
+      reason_code: "invalid_submission",
+    }),
+  ]);
+  // Nothing else can be sent meanwhile, and no fresh key is ever issued.
+  const moved = await h.route.POST(sendTo("te-ops"), ATLAS_ID);
+  expect(moved.status).toBe(409);
+  expect(await moved.json()).toMatchObject({ code: "pending_send" });
+  h.fake.onSubmit = duplicateReceipt;
+  expect((await h.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  expect(
+    new Set(h.fake.submits.map((e) => e.payload.idempotencyKey)).size,
+  ).toBe(1);
+  expect(h.store.ops()).toEqual([
+    expect.objectContaining({
+      state: "filed",
+      destination_workspace_id: "hr-de",
+      submission_id: os.submissionId,
+    }),
+  ]);
+});
+
+test("an email or phone number outside the summary and success measure is refused before anything is reserved or sent", async () => {
+  const base = readyProject().onboarding!;
+  const cases: [string, Partial<Project>][] = [
+    [
+      "target.label",
+      {
+        flightdeckDraft: {
+          label: "jane.doe@example.com payroll",
+          workspaceHint: "",
+        },
+      },
+    ],
+    [
+      "facts.ownerRoles.process",
+      {
+        onboarding: {
+          ...base,
+          ownerRoles: { process: "jane.doe@example.com" },
+        },
+      },
+    ],
+    [
+      "facts.dataSources",
+      {
+        onboarding: {
+          ...base,
+          dataSources: ["SAP HCM", "jane.doe@example.com mailbox"],
+        },
+      },
+    ],
+    [
+      "facts.accessRequested",
+      {
+        onboarding: {
+          ...base,
+          accessRequested: [{ system: "Call +49 89 1234 5678", level: "read" }],
+        },
+      },
+    ],
+    ["profile.site", { location: "jane.doe@example.com" }],
+    [
+      "facts.legalEntity",
+      { onboarding: { ...base, legalEntity: "Ask +49 (89) 1234-5678" } },
+    ],
+    ["profile.functionArea", { functionArea: "hr@example.com" }],
+    ["profile.category", { category: "Pilot for jane@example.com" }],
+  ];
+  for (const [path, overrides] of cases) {
+    const h = harness({ project: readyProject(overrides) });
+    const response = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+    expect(response.status, path).toBe(400);
+    const text = await response.text();
+    expect(JSON.parse(text), path).toMatchObject({
+      code: "personal_data",
+      fields: [path],
+    });
+    // The refusal names the field, never the value.
+    for (const value of ["example.com", "jane", "1234"])
+      expect(text, path).not.toContain(value);
+    expect(h.fake.calls, path).toEqual([]);
+    expect(h.store.ops(), path).toEqual([]);
+  }
+  // Summary and success measure are free text the owner chose to send
+  // (decision 5): the form warns, and they travel as written.
+  const free = harness({
+    project: readyProject({
+      description: "Contact jane@example.com",
+      benefit: "Call +49 89 1234 5678",
+    }),
+  });
+  expect((await free.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  expect(free.fake.submits[0].payload.profile).toMatchObject({
+    summary: "Contact jane@example.com",
+    successMeasure: "Call +49 89 1234 5678",
   });
 });
 
@@ -1257,23 +1514,42 @@ test("definitive OS refusals close the send; an OS subject lock is adopted only 
   });
   expect((await h.status(false)).operation?.stage).toBe("not-sent");
 
-  // FlightDeck already holds a request for this subject: adopt it once the
-  // read-back proves it is this project's, without sending again.
+  // FlightDeck already holds a request for this subject, one Atlas has no
+  // record of: adopt it once the read-back proves it is this project's,
+  // without sending again. The read-back does not say where it was sent or
+  // which revision it carries, so Atlas claims neither: not the te-ops this
+  // request named, and not revision 7.
   h.fake.onSubmit = async () => ({
     state: "already_submitted",
     submissionId: os.submissionId,
     osState: "filed",
   });
-  const adopted = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  const adopted = await h.route.POST(sendTo("te-ops"), ATLAS_ID);
   expect(adopted.status).toBe(202);
   expect(h.store.ops()[1]).toMatchObject({
     state: "filed",
     submission_id: os.submissionId,
     received_at: os.receivedAt,
+    adopted: 1,
+    request_body: null,
   });
   expect(h.store.ops()[1].idempotency_key).not.toBe(
     h.store.ops()[0].idempotency_key,
   );
+  expect((await h.status(false)).operation).toMatchObject({
+    stage: "submitted",
+    adopted: true,
+    destinationWorkspaceId: null,
+    atlasRevision: null,
+  });
+  // Once promoted, the link takes FlightDeck's workspace and no revision.
+  h.fake.onRead = h.readAs("promoted");
+  h.fake.projects["hr-de"] = structuredClone(os.context.projectsAfterPromotion);
+  h.tick(61_000);
+  expect((await h.status()).link).toMatchObject({ workspaceId: "hr-de" });
+  expect(h.store.links()).toEqual([
+    expect.objectContaining({ workspace_id: "hr-de", source_revision: null }),
+  ]);
 
   const stranger = harness();
   stranger.fake.onSubmit = async () => ({
@@ -1330,6 +1606,28 @@ async function createProject(page: Page, fields: Partial<Project>) {
     { ...examples[0], tasks: [], ...fields },
   );
 }
+async function updateProject(
+  page: Page,
+  project: Project,
+  fields: Partial<Project>,
+) {
+  return page.evaluate(
+    async ({ project, fields }) => {
+      const r = await fetch(`/api/projects/${project.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...project,
+          activity: undefined,
+          ...fields,
+          revision: project.revision,
+        }),
+      });
+      return ((await r.json()) as { project: Project }).project;
+    },
+    { project, fields },
+  );
+}
 async function removeProject(page: Page, id: string) {
   await page.evaluate(async (id) => {
     const body = (await (await fetch("/api/projects")).json()) as {
@@ -1384,11 +1682,13 @@ function statusBody(
           reasonCode: stage === "needs-more-info" ? "needs-more-info" : null,
           setupState: stage === "setup-in-progress" ? "awaiting-cowork" : null,
           atlasRevision: 2,
+          adopted: false,
           updatedAt: os.receivedAt,
           checkedAt: null,
         }
       : null,
     link: null,
+    pendingPayload: null,
     canSend:
       !stage || ["needs-more-info", "rejected", "not-sent"].includes(stage),
     retryPending: false,
@@ -1715,6 +2015,159 @@ test("needs more info reopens the draft for editing and sending again", async ({
     await expect(
       row.getByRole("button", { name: "Send to FlightDeck" }),
     ).toBeEnabled();
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
+test("after a send the form shows where it went and which revision FlightDeck holds, never a missing destination", async ({
+  page,
+}) => {
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const first = await createProject(page, {
+    name: "Sent QA",
+    description: "Summary v1: contact alex@example.com",
+    benefit: "Measure",
+    functionArea: "HR",
+    onboardingStage: "Ready for FlightDeck",
+    flightdeckDraft: { label: "Sent QA", workspaceHint: "" },
+    onboarding: { countryCode: "DE", worksCouncilRelevant: "no" },
+  });
+  const sentPayload = buildOnboardingPayload({
+    project: first,
+    destinationWorkspaceId: "hr-de",
+    idempotencyKey: KEY,
+    installationId: "atlas-local",
+    requestedBy: HASH,
+  });
+  // Edited elsewhere in Atlas after the send: a new revision, clean text.
+  const project = await updateProject(page, first, {
+    description: "Summary v2: no personal data",
+  });
+  expect(project.revision).toBe(first.revision + 1);
+  const op = { atlasRevision: first.revision, destinationWorkspaceId: "hr-de" };
+  let status = statusBody("submitted");
+  status = { ...status, operation: { ...status.operation!, ...op } };
+  const posts: unknown[] = [];
+  await page.route(`**/api/flightdeck/onboard/${project.id}**`, (route) => {
+    if (route.request().method() === "POST")
+      posts.push(route.request().postDataJSON());
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(status),
+    });
+  });
+  try {
+    await page.reload();
+    await page.getByRole("button", { name: /To FlightDeck/ }).click();
+    const row = page.locator("article.bridge-project", { hasText: "Sent QA" });
+    await row.getByRole("button", { name: "Edit draft", exact: true }).click();
+    await expect(row.getByText(/Sent for review to HR Germany/)).toBeVisible();
+    // Sent: nothing is "missing", and nothing claims to be about to be sent.
+    await expect(row.getByRole("meter")).toHaveCount(0);
+    await expect(
+      row.getByRole("list", { name: "Missing details" }),
+    ).toHaveCount(0);
+    await row.getByRole("tab", { name: "Review & send" }).click();
+    await expect(row.getByLabel("Destination workspace")).toHaveCount(0);
+    await expect(
+      row.getByRole("region", { name: "What will be sent" }),
+    ).toHaveCount(0);
+    const record = row.getByRole("region", { name: "Sent to FlightDeck" });
+    await expect(record).toContainText("HR Germany");
+    await expect(record).toContainText(`revision ${first.revision}`);
+    await expect(record).toContainText(`now at revision ${project.revision}`);
+    await expect(row.getByText("Missing", { exact: true })).toHaveCount(0);
+
+    // Not confirmed: Review lists exactly what Retry resends (revision 1,
+    // with its email), says the later edit is not in it, and Retry names
+    // that revision.
+    status = statusBody("not-confirmed", {
+      retryPending: true,
+      canSend: true,
+      pendingPayload: sentPayload,
+    });
+    status = { ...status, operation: { ...status.operation!, ...op } };
+    await page.reload();
+    await page.getByRole("button", { name: /To FlightDeck/ }).click();
+    await row.getByRole("button", { name: "Edit draft", exact: true }).click();
+    await expect(row.getByRole("meter")).toHaveCount(0);
+    await row.getByRole("tab", { name: "Review & send" }).click();
+    const resend = row.getByRole("region", { name: "What Retry send resends" });
+    await expect(resend).toContainText("Summary v1: contact alex@example.com");
+    await expect(resend).not.toContainText("Summary v2");
+    await expect(row.getByText(/later edits are not included/i)).toBeVisible();
+    await expect(row.getByText(/HR Germany/).first()).toBeVisible();
+    await row.getByRole("button", { name: "Retry send" }).click();
+    await expect
+      .poll(() => posts)
+      .toEqual([{ destinationWorkspaceId: "hr-de", revision: first.revision }]);
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
+test("Review warns about personal details in free text and blocks them in every other field", async ({
+  page,
+}) => {
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const project = await createProject(page, {
+    name: "Privacy QA",
+    description: "Guide new HR users. Contact jane@example.com",
+    benefit: "Measure",
+    functionArea: "HR",
+    onboardingStage: "Ready for FlightDeck",
+    flightdeckDraft: { label: "Privacy QA", workspaceHint: "" },
+    onboarding: { countryCode: "DE", worksCouncilRelevant: "no" },
+  });
+  await page.route(`**/api/flightdeck/onboard/${project.id}**`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(statusBody(null)),
+    }),
+  );
+  try {
+    await page.reload();
+    await page.getByRole("button", { name: /To FlightDeck/ }).click();
+    const row = page.locator("article.bridge-project", {
+      hasText: "Privacy QA",
+    });
+    await row.getByRole("button", { name: "Edit draft", exact: true }).click();
+    await row.getByRole("tab", { name: "Review & send" }).click();
+    const review = row.getByRole("region", { name: "What will be sent" });
+    await expect(review).toContainText("Contact jane@example.com");
+    await expect(
+      row.getByText(/Summary is sent as written.*email address/i),
+    ).toBeVisible();
+    const never = row.getByRole("list", { name: "Never sent" });
+    await expect(never).toContainText("Sponsor");
+    await expect(never).not.toContainText(/any email address/i);
+    await row.getByLabel("Destination workspace").selectOption("hr-de");
+    const sendButton = row.getByRole("button", { name: "Send to FlightDeck" });
+    await expect(sendButton).toBeEnabled();
+    // A role title is never a person: an email there blocks the send.
+    await row.getByRole("tab", { name: "FlightDeck details" }).click();
+    await row.getByLabel("Process owner role").fill("jane@example.com");
+    await expect(
+      row.getByText(
+        /Atlas will not send an email address or phone number here/,
+      ),
+    ).toBeVisible();
+    await row.getByRole("button", { name: "Save onboarding draft" }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Onboarding draft saved" }),
+    ).toBeVisible();
+    await row.getByRole("tab", { name: "Review & send" }).click();
+    await expect(sendButton).toBeDisabled();
+    await expect(
+      row.getByText(
+        /Remove the email address or phone number from: Process owner \(role title\)/,
+      ),
+    ).toBeVisible();
   } finally {
     await removeProject(page, project.id);
   }

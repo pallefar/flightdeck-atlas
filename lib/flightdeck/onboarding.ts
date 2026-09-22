@@ -354,11 +354,12 @@ export function readiness(
   };
 }
 
-/** Everything Atlas holds that never travels to FlightDeck (plan §3). */
+/** Everything Atlas holds that never travels to FlightDeck (plan §3). Only
+ * what Atlas can keep: it cannot promise that text someone typed holds no
+ * name (see FREE_TEXT_NOTE). */
 export const NEVER_SENT = [
   "Sponsor",
   "Task assignees and their emails",
-  "Any email address or person's name",
   "Time entries",
   "Goal owners",
   "Discussions, reviews and other collaboration",
@@ -481,15 +482,65 @@ export function reviewRows(
   return rows;
 }
 
-/** A nudge, not a filter: free text may still hold personal data. */
-export function personalDataHint(text: string) {
-  if (text.includes("@"))
-    return "This looks like it contains an email address. Send facts and role titles, not personal details.";
+/** What the review says under "Never sent" about the free text. */
+export const FREE_TEXT_NOTE =
+  "Summary and Success measure are sent as you wrote them, including any name or email address typed there. Atlas refuses an email address or phone number in every other field, but it cannot recognise a person's name.";
+
+const personalShape = (text: string): "email" | "phone" | null => {
+  if (text.includes("@")) return "email";
   for (const match of text.matchAll(/\+?\(?\d[\d\s().\/-]{6,}\d/g))
-    if (match[0].replace(/\D/g, "").length >= 9)
-      return "This looks like it contains a phone number. Send facts and role titles, not personal details.";
+    if (match[0].replace(/\D/g, "").length >= 9) return "phone";
   return null;
+};
+/** A hint under a field. Free text (summary, success measure) is only
+ * warned about: the owner chose to send it (decision 5). Every other field
+ * is `strict`: the server refuses an email or phone-number shape there. */
+export function personalDataHint(text: string, strict = false) {
+  const shape = personalShape(text);
+  if (!shape) return null;
+  if (strict)
+    return "Atlas will not send an email address or phone number here. Use a role title or a system name.";
+  return shape === "email"
+    ? "This looks like it contains an email address. It is sent as written: send facts and role titles, not personal details."
+    : "This looks like it contains a phone number. It is sent as written: send facts and role titles, not personal details.";
 }
+
+/** Free text the owner allowed to travel (decision 5): warned, not refused. */
+export const FREE_TEXT_FIELDS = ["profile.summary", "profile.successMeasure"];
+/** Every other text field. §3 classes them as not personal, so an email or
+ * phone-number shape there is refused before anything is reserved or sent.
+ * In review order. */
+export const STRICT_TEXT_FIELDS = [
+  "target.label",
+  "profile.functionArea",
+  "profile.category",
+  "profile.site",
+  "facts.legalEntity",
+  "facts.ownerRoles.process",
+  "facts.ownerRoles.data",
+  "facts.ownerRoles.support",
+  "facts.dataSources",
+  "facts.accessRequested",
+];
+const textsAt = (payload: ProjectOnboardingPayload, path: string) => {
+  const value = at(payload, path);
+  if (typeof value === "string") return [value];
+  if (!Array.isArray(value)) return [];
+  return value.map((v) =>
+    typeof v === "string" ? v : String((v as { system?: string }).system ?? ""),
+  );
+};
+/** Review paths whose text looks like an email address or phone number. The
+ * route refuses `refused`; the form warns about `warned`. Never the values. */
+export function personalDataIn(payload: ProjectOnboardingPayload) {
+  const hit = (paths: string[]) =>
+    paths.filter((path) =>
+      textsAt(payload, path).some((text) => personalShape(text)),
+    );
+  return { refused: hit(STRICT_TEXT_FIELDS), warned: hit(FREE_TEXT_FIELDS) };
+}
+export const fieldLabel = (path: string) =>
+  REVIEW_FIELDS.find((f) => f.path === path)?.label ?? path;
 
 export type SuggestionField =
   | "functionArea"
@@ -676,7 +727,12 @@ export const onboardingStatusSchema = z
         submittedAt: isoSchema.nullable(),
         reasonCode: z.string().max(40).nullable(),
         setupState: z.enum(setupStates).nullable(),
-        atlasRevision: z.number().int().positive(),
+        /** The revision FlightDeck was sent; null when Atlas adopted a
+         * request it had no record of. */
+        atlasRevision: z.number().int().positive().nullable(),
+        /** FlightDeck already held this project's request and Atlas follows
+         * it: its destination and revision are not Atlas's to show. */
+        adopted: z.boolean(),
         updatedAt: isoSchema,
         checkedAt: isoSchema.nullable(),
       })
@@ -692,6 +748,9 @@ export const onboardingStatusSchema = z
       })
       .strict()
       .nullable(),
+    /** Super Admin only, while a send is unconfirmed: exactly what Retry
+     * send resends, which may be an older revision than the project now. */
+    pendingPayload: projectOnboardingPayloadSchema.nullable(),
     /** No open request: a (new) send is possible. */
     canSend: z.boolean(),
     /** The last send was not confirmed; a retry reuses its key. */
@@ -708,6 +767,8 @@ export const onboardErrorSchema = z.object({
   code: z.string(),
   retryAfter: z.number().int().positive().nullable().optional(),
   missing: z.array(z.string()).optional(),
+  fields: z.array(z.string()).optional(),
+  atlasRevision: z.number().int().positive().optional(),
   status: onboardingStatusSchema.optional(),
 });
 export const onboardStagesSchema = z.object({
