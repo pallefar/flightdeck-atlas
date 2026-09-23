@@ -986,3 +986,46 @@ test("Connections links a Super Admin to FlightDeck's developer reference, and t
     page.getByRole("heading", { name: "FlightDeck developer reference" }),
   ).toBeVisible();
 });
+
+test("Connections shows no FlightDeck developer reference to a signed-in user who is not Super Admin", async ({
+  page,
+}) => {
+  // The card is gated on Super Admin AND a known OS address. Pin the address
+  // exactly as the Super Admin test does, so only the role differs.
+  await page.route("**/api/workspace", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const res = await route.fetch();
+    const body = (await res.json()) as { apps?: Array<{ id: string; url: string }> };
+    body.apps = (body.apps ?? []).map((a) =>
+      a.id === "flightdeck" ? { ...a, url: "http://os.example:4173/" } : a,
+    );
+    await route.fulfill({ response: res, json: body });
+  });
+  // The browser learns its role from /api/projects' access profile. Demote it
+  // there and relabel the role so the page can prove it applied the change.
+  await page.route("**/api/projects", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const res = await route.fetch();
+    const body = (await res.json()) as {
+      access?: { superAdmin: boolean; roleName: string };
+    };
+    if (body.access)
+      body.access = {
+        ...body.access,
+        superAdmin: false,
+        roleName: "Project member (test)",
+      };
+    await route.fulfill({ response: res, json: body });
+  });
+  await page.goto("/?view=connection");
+  await expect(page.getByText("Project member (test)")).toBeVisible();
+  await expect(page.getByText("Super Admin sends")).toBeVisible();
+  // Let every load (workspace apps included) settle before asserting absence.
+  await page.waitForLoadState("networkidle");
+  await expect(
+    page.getByRole("heading", { name: "FlightDeck developer reference" }),
+  ).toHaveCount(0);
+  await expect(
+    page.locator('a[href*="console/help?article=developers"]'),
+  ).toHaveCount(0);
+});
