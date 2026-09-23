@@ -67,6 +67,7 @@ import WellbeingPage, {
   FocusBadge,
 } from "./wellbeing";
 import FlightDeckConnection from "./flightdeck-connection";
+import { FlightDeckPromo } from "./flightdeck-onboarding";
 import AccessManagement from "./access-management";
 import type { AccessProfile } from "@/lib/access-policy";
 import Ideas from "./ideas";
@@ -835,6 +836,7 @@ export default function Atlas() {
                 projects={projects}
                 busy={saving}
                 canCreate={!!access?.permissions.includes("projects.create")}
+                superAdmin={!!access?.superAdmin}
                 onNew={() => {
                   setError("");
                   setCreating(true);
@@ -1198,20 +1200,10 @@ export default function Atlas() {
                               </p>
                             )}
                           </div>
-                          <div className="flightdeck-promo">
-                            <span className="promo-mark">
-                              <Layers3 size={23} />
-                            </span>
-                            <h3>A connected workspace.</h3>
-                            <p>Your FlightDeck projects belong here, too.</p>
-                            <button
-                              className="text-link"
-                              onClick={() => navigate("connection")}
-                            >
-                              FlightDeck connection <ArrowUpRight size={16} />
-                            </button>
-                            <small>Not connected</small>
-                          </div>
+                          <FlightDeckPromo
+                            superAdmin={!!access?.superAdmin}
+                            onOpen={() => navigate("connection")}
+                          />
                         </aside>
                       )}
                     </div>

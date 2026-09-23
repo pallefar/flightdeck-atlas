@@ -10,7 +10,7 @@ A TE Connectivity themed portfolio and action hub, with a dashboard, Project Eye
 - Soft card shadows, button/visual hover effects and keyboard focus feedback, respecting reduced-motion settings.
 - Globe → building → stylized 3D room → laptop → project journey, with skip, cancel and reduced-motion support.
 - Light and dark themes with a remembered device preference.
-- FlightDeck DTO validation, an injectable SDK transport, and an integration handoff. **Live FlightDeck SSO and sync are pending the new SDK.**
+- FlightDeck DTO validation, an injectable SDK transport, and an integration handoff. Read-only FlightDeck workspace/project context is live locally for the Super Admin, and the Super Admin can send a prepared project to FlightDeck as a proposal for OS review (see below). **Live FlightDeck SSO, import and sync are pending the new SDK.**
 - A clearly labeled example workspace until you add your own projects.
 
 ## Work studio
@@ -31,6 +31,8 @@ node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0001_past_blue_shield.sql
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0002_lowly_thing.sql
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0003_dazzling_blue_blade.sql
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0004_silly_speedball.sql
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0005_romantic_titania.sql
 npm run dev
 ```
 
@@ -41,11 +43,32 @@ npx tsc --noEmit
 npx playwright test
 ```
 
-The browser tests use an already running local server at port 5173 and Chrome. They create and remove temporary projects and access fixtures in the local database. The SDK adapter tests use fixtures and do not contact FlightDeck.
+The browser tests use an already running local server at port 5173 and Chrome. They create and remove temporary projects and access fixtures in the local database. The SDK adapter, context and onboarding tests use fixtures (`tests/fixtures/os-project-onboarding.json` records the OS onboarding contract) and never contact FlightDeck.
 
 ## FlightDeck integration
 
-See [SDK requirements](docs/FLIGHTDECK-SDK-REQUIREMENTS.md). The live connection is intentionally disabled until the new SDK provides delegated identity and authorized project transport. The private preview’s platform identity is not FlightDeck SSO.
+See [SDK requirements](docs/FLIGHTDECK-SDK-REQUIREMENTS.md).
+
+**Live (local only, read-only): workspace and project context.** The top of the sidebar and the mobile menu show **FlightDeck workspace** and **FlightDeck project** selects that mirror the FlightDeck OS sidebar switchers. Atlas reads them server-side from the OS inbound API (`GET /api/inbound/v1/context/workspaces` and `GET /api/inbound/v1/context/workspaces/:workspaceId/projects`, scope `read:context`) through its own `/api/flightdeck/context` route. The browser never contacts the OS and never receives the credential.
+
+- One OS machine credential is used for everyone, so it cannot filter per user. The lists are shown only to the Atlas Super Admin (the role that administers Apps & connections); other members see nothing.
+- The OS decides which workspaces are readable (`inbound.api.readWorkspaces`; empty means none). Disabled workspaces are listed but cannot be selected. Disabled projects are shown, unselectable, to the Super Admin only.
+- The choice is saved per Atlas user in preferences (`flightdeckContext` with `osWorkspaceId` and `osProjectId`, deliberately distinct from Atlas's `?workspace=` project id) after re-checking fresh OS lists. An unknown project falls back to that workspace's default project; Atlas never switches the workspace on its own.
+- Lists refresh on window focus and every minute. An unreachable OS keeps the last confirmed lists with their check time; a refused credential or missing configuration clears them. Choosing a context changes nothing in the OS or in Atlas projects.
+
+Configure it in the ignored `.env.local` for development (or as deployment secrets): `ATLAS_FLIGHTDECK_URL`, for example `http://127.0.0.1:4173` (plain HTTP is accepted only for a loopback address), and `ATLAS_FLIGHTDECK_INBOUND_TOKEN`, an OS inbound credential with the `read:context` scope. Never commit or print the credential. Restart `npm run dev` after changing either value. A hosted Atlas cannot reach an OS running on another computer's loopback address, so this connection is local only.
+
+**Built, waiting on the OS: sending a project to FlightDeck for review.** In Connections → To FlightDeck, a project's onboarding form has three tabs: **Basics** (prefilled from the project), **FlightDeck details** (country, works-council relevance, owner role titles, data sources, access requested and more, with one-click prefill from a pilot's checklist) and **Review & send**, which lists every field that will be sent and everything that never is. A readiness meter counts the nine required items and links to each missing one. Only the Atlas Super Admin can press **Send to FlightDeck**, and only for a saved, complete draft, after choosing the destination workspace in that tab.
+
+- Sending files a *request* (kind `project-onboarding`) through the OS inbound API with the same server-side credential. An OS admin reviews it; nothing is created automatically. The sponsor, task assignees and their emails are never sent, and owners travel as role titles. Atlas refuses to send an email address or phone number in any field except the summary and success measure. Those two are free text and travel as written: the form warns on an `@` or a phone number, but Atlas cannot recognise a person's name typed there (owner decision 5).
+- Atlas records each send in D1 (`atlas_flightdeck_operations`, migrations 0004 and 0005) with its key and exact request body before contacting the OS. A lost reply is retried with the same key and the same bytes, so it can never file twice, and Atlas never records a revision FlightDeck did not get: a retry resends the revision first sent, even if the project was edited since. The body is kept only until FlightDeck files or refuses the request, or until the Super Admin closes the send. Deleting the project is refused while a send is still unconfirmed, so the body can never outlive the project it belongs to; once the send is resolved, deleting the project takes its send records and its FlightDeck link with it. A refusal of a retry keeps the reservation, because the earlier attempt may already have been filed. A retry skips the destination check (it was made when the key was reserved), so it still reaches FlightDeck after the workspace is disabled or unshared.
+- When a retry keeps being refused, or FlightDeck says it does not know a filed request, the Super Admin can **Close this unconfirmed send** in Review & send. Nothing is sent; the draft opens again and the project shows "Send closed". The next send uses a fresh key. If FlightDeck did file the earlier attempt, it answers that key with the request it holds (`409 already_submitted`), and Atlas follows that request instead of filing a second one.
+- The form, the To FlightDeck list and the dashboard card show the status: Submitted → Linked → Setup in progress → Setup complete. "Needs more info" from the OS reopens the draft. "Linked" appears only after FlightDeck confirms the project through `read:context`; the link is kept in `atlas_project_links`.
+- **Atlas has no background job: it checks FlightDeck only while the Atlas Super Admin has Atlas open**, because only the Super Admin's view may use the shared machine credential. The Super Admin's open form checks its send at most once a minute. Their To FlightDeck list and dashboard card check up to two other sends a minute, each at most every five minutes, and stop when FlightDeck is busy or unreachable. Everyone else sees the stored status, reloaded every minute, and each sent project says when it was last checked with FlightDeck. All of this shares the credential's 30 requests a minute with the context reads.
+- The OS must ship the `project-onboarding` kind (plan workstream W1, not deployed yet) and enable it with both `INBOUND_PROJECT_ONBOARDING_ENABLED=true` and `inbound.api.integrationKinds=atlas:project-onboarding`, and the Atlas credential needs the `submit:proposal` scope. Until then a send is refused and nothing is filed. This path is tested against a recorded contract fixture, not a running OS.
+- Optional `ATLAS_INSTALLATION_ID` (a lowercase slug) scopes the link records; unset means `atlas-local`. Set it once, before the first send.
+
+**Still disconnected:** FlightDeck SSO and delegated per-user identity, per-user OS membership filtering, import from FlightDeck (`/api/flightdeck/import` returns `503 flightdeck_not_connected`), sync and AI. The private preview’s platform identity is not FlightDeck SSO.
 
 ## Map and motion
 
@@ -69,7 +92,7 @@ The future SDK/master-app/TEOA contract is in [docs/MASTER-APP-CONTRACT.md](docs
 
 ## Project onboarding bridge
 
-Connections has **From FlightDeck** and **To FlightDeck** flows. Atlas onboarding drafts persist with proposed OS names and workspace planning notes; users can edit, remove and export them. The OS intake list and creation endpoints stay explicitly disconnected until delegated identity, project-level access, durable external links and idempotent creation are implemented with the SDK. No draft sends data to the OS or submits automatically. See [the bridge contract](docs/PROJECT-BRIDGE-CONTRACT.md).
+Connections has **From FlightDeck** and **To FlightDeck** flows. Atlas onboarding drafts persist with proposed OS names, workspace planning notes and FlightDeck details; users can edit, remove and export them. The Super Admin can send a saved, complete draft to FlightDeck as a proposal (above); nothing is sent automatically. Import from FlightDeck stays disconnected until delegated identity and project-level access exist with the SDK. See [the bridge contract](docs/PROJECT-BRIDGE-CONTRACT.md).
 
 ## Wellbeing and personal overview
 

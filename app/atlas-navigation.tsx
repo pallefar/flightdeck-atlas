@@ -14,6 +14,7 @@ import {
 import { workTools, type View, type WorkTool } from "@/lib/navigation";
 import type { AccessProfile } from "@/lib/access-policy";
 import type { Project } from "@/lib/projects";
+import FlightDeckContextSwitcher from "./flightdeck-context-switcher";
 export default function AtlasNavigation({
   view,
   tool,
@@ -161,6 +162,7 @@ export default function AtlasNavigation({
   ];
   return (
     <nav className="atlas-navigation" aria-label="Main navigation">
+      <FlightDeckContextSwitcher access={access} />
       <div className="primary-nav-link">
         <ListTodo size={17} />
         {item("Today & advisor", "today", undefined, "Today and advisor")}

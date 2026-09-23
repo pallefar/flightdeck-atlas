@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { osSelectionSchema, type OsSelection } from "./flightdeck/context";
 const email = z
   .string()
   .trim()
@@ -152,7 +153,12 @@ export const preferenceSchema = z.object({
   favourites: z.array(z.string().max(80)).max(50),
   recent: z.array(z.string().max(80)).max(10),
   digest: z.enum(["all", "daily", "weekly"]),
+  // Chosen FlightDeck OS workspace/project (OS ids, not Atlas project ids).
+  flightdeckContext: osSelectionSchema.nullable().default(null),
 });
+/** Dispatched on window after a preference is saved outside useWorkspace, so
+ * open views reload the new revision instead of hitting a stale-revision 409. */
+export const PREFERENCES_CHANGED_EVENT = "atlas-preferences-changed";
 export const defaultPreferences = {
   frog: null as z.infer<typeof preferenceSchema>["frog"],
   shareCapacity: false,
@@ -163,4 +169,5 @@ export const defaultPreferences = {
   favourites: [] as string[],
   recent: [] as string[],
   digest: "all" as const,
+  flightdeckContext: null as OsSelection | null,
 };

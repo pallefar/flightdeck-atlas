@@ -17,19 +17,7 @@ export async function owner() {
   const user = await getChatGPTUser();
   return user?.userId || null;
 }
-export function json(body: unknown, status = 200) {
-  return Response.json(body, {
-    status,
-    headers: { "Cache-Control": "private, no-store" },
-  });
-}
-export function sameOrigin(request: Request) {
-  const origin = request.headers.get("origin");
-  return (
-    request.headers.get("sec-fetch-site") !== "cross-site" &&
-    (!origin || origin === new URL(request.url).origin)
-  );
-}
+export { json, sameOrigin } from "./http";
 export async function readFields(request: Request) {
   if (!request.headers.get("content-type")?.includes("application/json"))
     throw new Error("Send a JSON project.");
@@ -110,6 +98,11 @@ export function recordChanges(
           ? "FlightDeck onboarding draft prepared or updated"
           : "FlightDeck onboarding draft removed",
       );
+    if (
+      JSON.stringify(fields.onboarding ?? null) !==
+      JSON.stringify(previous.onboarding ?? null)
+    )
+      add("project", "FlightDeck onboarding details updated");
     for (const old of previous.tasks)
       if (!fields.tasks.some((t) => t.id === old.id))
         add("task-removed", `Removed task: ${old.title}`, old.id);

@@ -29,6 +29,20 @@
       "when": 1789934255725,
       "tag": "0003_dazzling_blue_blade",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1790065155771,
+      "tag": "0004_silly_speedball",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790068522107,
+      "tag": "0005_romantic_titania",
+      "breakpoints": true
     }
   ]
 }

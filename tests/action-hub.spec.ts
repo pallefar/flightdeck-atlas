@@ -299,7 +299,11 @@ test("Super Admin can define and grant a role; protected identity and invalid gr
   accessFixtures.push({ name, email });
   await page.getByLabel("Role name", { exact: true }).fill(name);
   await page.getByRole("button", { name: "Create role", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("Role created");
+  // The page has more than one status region (the sidebar's FlightDeck
+  // context has its own), so look for the one that reports the new role.
+  await expect(
+    page.getByRole("status").filter({ hasText: "Role created" }),
+  ).toContainText("Role created. You can now assign it to users.");
   const checks = await page.evaluate(
     async ({ name, email }) => {
       const initial = (await (await fetch("/api/access")).json()) as {

@@ -11,6 +11,7 @@ import {
   flightdeckApp,
   type AppEntry,
 } from "@/lib/collaboration";
+import { keptSelection } from "@/lib/flightdeck/context-route";
 export const dynamic = "force-dynamic";
 export async function GET() {
   const a = await authorize("projects.read");
@@ -146,6 +147,11 @@ export async function POST(req: Request) {
       const previousFrog = before
         ? JSON.parse(before.data as string).frog
         : null;
+      // Only /api/flightdeck/context changes the FlightDeck selection, after
+      // validating it against the OS. Other preference saves keep it as is.
+      data.flightdeckContext = keptSelection(
+        before ? (before.data as string) : null,
+      );
       if (
         data.frog &&
         JSON.stringify(data.frog) !== JSON.stringify(previousFrog)

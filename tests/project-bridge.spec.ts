@@ -1,10 +1,185 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Browser, type Page } from "@playwright/test";
+import { createHash } from "node:crypto";
+import { readFileSync, readdirSync } from "node:fs";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import {
   unlinkedProjects,
   projectRefKey,
   type ImportCandidate,
 } from "../lib/flightdeck/bridge";
-import { type Project, examples } from "../lib/projects";
+import { type Project, examples, projectSchema } from "../lib/projects";
+import { onboardingTasks, opportunities } from "../lib/opportunities";
+import { osWorkspacesResponseSchema } from "../lib/flightdeck/context";
+import {
+  createCachedReader,
+  createContextClient,
+  createGuardedSubmissions,
+  createSubmissionClient,
+  type ContextReader,
+  type ReadSubmissionResult,
+  type SubmitResult,
+} from "../lib/flightdeck/context-client";
+import {
+  NEVER_SENT,
+  ONBOARDING_SUMMARY,
+  REVIEW_FIELDS,
+  buildOnboardingPayload,
+  checklistSuggestions,
+  isDraftLocked,
+  isLockedState,
+  isStatusMoving,
+  lockNote,
+  lockedStages,
+  movingStages,
+  onboardStagesSchema,
+  onboardingEnvelope,
+  onboardingSchema,
+  onboardingStatusSchema,
+  operationStates,
+  payloadLeafPaths,
+  personalDataHint,
+  personalDataIn,
+  projectOnboardingPayloadSchema,
+  readiness,
+  rejectionReasons,
+  reviewRows,
+  setupStates,
+  stageFor,
+  type OnboardingEnvelope,
+  type OnboardingStage,
+  type OnboardingStatus,
+} from "../lib/flightdeck/onboarding";
+import {
+  createOnboardRoute,
+  forgetProject,
+  isPollable,
+  unconfirmedSend,
+  type OnboardDb,
+} from "../lib/flightdeck/onboard-route";
+
+// Nothing in this file contacts FlightDeck OS. The OS side of the
+// project-onboarding kind (W1) is not deployed yet, so its responses come from
+// a fixture recorded from the contract, the route handlers run over a fake OS
+// and a SQLite database built from the real migration 0004, and browser calls
+// to Atlas's FlightDeck routes are answered with page.route.
+const os = JSON.parse(
+  readFileSync(
+    new URL("./fixtures/os-project-onboarding.json", import.meta.url),
+    "utf8",
+  ),
+);
+const ATLAS_ID = "4f7d1c2a-8b3e-4c5d-9e6f-a1b2c3d4e5f6";
+const KEY = "0b5c6d7e-8f90-4a1b-9c2d-3e4f5a6b7c8d";
+const HASH = createHash("sha256").update("user-1").digest("hex");
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const FAKE_CREDENTIAL = "fake-credential-for-tests-0123456789";
+const config = { baseUrl: "http://127.0.0.1:4173", token: FAKE_CREDENTIAL };
+const readBack = (name: string) => ({
+  ...os.readBack.base,
+  subject: `atlas-${ATLAS_ID}`,
+  ...os.readBack[name],
+});
+const jsonResponse = (
+  status: number,
+  body: unknown,
+  headers: Record<string, string> = {},
+) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8", ...headers },
+  });
+const fromFixture = (entry: {
+  status: number;
+  body: unknown;
+  headers?: Record<string, string>;
+}) => jsonResponse(entry.status, entry.body, entry.headers);
+
+/** An Atlas project full of things that must never leave Atlas. */
+function readyProject(overrides: Partial<Project> = {}): Project {
+  return {
+    ...examples[0],
+    id: ATLAS_ID,
+    name: "Payroll rollout",
+    description: "Move payroll approvals into one reviewed flow.",
+    benefit: "Approval time halves within a quarter.",
+    functionArea: "HR",
+    category: "Consultancy pilot",
+    location: "Munich, Germany",
+    dueDate: "2026-12-01",
+    priority: "High",
+    status: "In progress",
+    sponsor: "Dana Sponsor",
+    nextAction: "Call Dana",
+    blocker: "Waiting on Olivia",
+    onboardingStage: "Ready for FlightDeck",
+    flightdeckDraft: {
+      label: "Payroll rollout",
+      workspaceHint: "Hint Workspace te-ops",
+    },
+    onboarding: {
+      proposedProjectId: "payroll-rollout",
+      countryCode: "DE",
+      worksCouncilRelevant: "unknown",
+      legalEntity: "TE Connectivity Germany GmbH",
+      headcountBand: "250+",
+      ownerRoles: {
+        process: "Payroll process owner",
+        data: "HR data steward",
+        support: "HR service desk",
+      },
+      dataSources: ["SAP HCM"],
+      accessRequested: [{ system: "SAP HCM", level: "read" }],
+      coworkRequested: true,
+    },
+    objectives: [
+      {
+        id: "o1",
+        title: "Faster approvals",
+        description: "Owned by Olivia",
+        owner: "Olivia Owner",
+        dueDate: "",
+        status: "Planned",
+      },
+    ],
+    tasks: [
+      {
+        id: "t1",
+        title: "Confirm the sponsor, process owner, and current baseline",
+        done: true,
+        assignee: "Alex Assignee",
+        assigneeEmail: "alex@example.com",
+        timeEntries: [
+          {
+            id: "e1",
+            date: "2026-09-01",
+            minutes: 30,
+            note: "Kickoff call with Alex",
+            author: "alex@example.com",
+          },
+        ],
+        checklist: [{ id: "c1", title: "Secret checklist item", done: false }],
+      },
+      {
+        id: "t2",
+        title: "Map approved data sources and minimum access",
+        done: false,
+      },
+      { id: "t3", title: "Archived task", done: false, archived: true },
+    ],
+    revision: 7,
+    ...overrides,
+  };
+}
+const payloadFor = (project = readyProject(), destination = "hr-de") =>
+  buildOnboardingPayload({
+    project,
+    destinationWorkspaceId: destination,
+    idempotencyKey: KEY,
+    installationId: "atlas-test",
+    requestedBy: HASH,
+  });
+
 test("OS discovery excludes confirmed and denied projects without collapsing identities", () => {
   const ref = { instanceId: "os-a", workspaceId: "ops", projectId: "one" };
   const c: ImportCandidate = {
@@ -37,6 +212,2182 @@ test("OS discovery excludes confirmed and denied projects without collapsing ide
     ),
   ).toThrow("Unexpected FlightDeck context");
 });
+
+test("the onboarding payload is the §3 allowlist only: key snapshot, no sponsor, assignee or email", () => {
+  const payload = payloadFor();
+  expect(payloadLeafPaths(payload)).toEqual([
+    "atlasProjectId",
+    "atlasRevision",
+    "cowork.requested",
+    "facts.accessRequested",
+    "facts.countryCode",
+    "facts.dataSources",
+    "facts.headcountBand",
+    "facts.legalEntity",
+    "facts.ownerRoles.data",
+    "facts.ownerRoles.process",
+    "facts.ownerRoles.support",
+    "facts.worksCouncilRelevant",
+    "idempotencyKey",
+    "installationId",
+    "profile.category",
+    "profile.functionArea",
+    "profile.priority",
+    "profile.site",
+    "profile.status",
+    "profile.successMeasure",
+    "profile.summary",
+    "profile.targetDate",
+    "progress",
+    "requestedBy",
+    "schema",
+    "target.label",
+    "target.projectId",
+    "target.workspaceId",
+  ]);
+  expect(payload).toEqual({
+    schema: "atlas-project-onboarding/1",
+    idempotencyKey: KEY,
+    atlasProjectId: ATLAS_ID,
+    atlasRevision: 7,
+    installationId: "atlas-test",
+    requestedBy: HASH,
+    target: {
+      workspaceId: "hr-de",
+      label: "Payroll rollout",
+      projectId: "payroll-rollout",
+    },
+    profile: {
+      summary: "Move payroll approvals into one reviewed flow.",
+      successMeasure: "Approval time halves within a quarter.",
+      functionArea: "HR",
+      category: "Consultancy pilot",
+      status: "In progress",
+      priority: "High",
+      targetDate: "2026-12-01",
+      site: "Munich, Germany",
+    },
+    facts: {
+      countryCode: "DE",
+      legalEntity: "TE Connectivity Germany GmbH",
+      headcountBand: "250+",
+      worksCouncilRelevant: "unknown",
+      ownerRoles: {
+        process: "Payroll process owner",
+        data: "HR data steward",
+        support: "HR service desk",
+      },
+      dataSources: ["SAP HCM"],
+      accessRequested: [{ system: "SAP HCM", level: "read" }],
+    },
+    // Counts only: task titles, assignees and time entries stay in Atlas.
+    progress: { done: 1, total: 2 },
+    cowork: { requested: true },
+  });
+  expect(projectOnboardingPayloadSchema.parse(payload)).toEqual(payload);
+  const sent = JSON.stringify(onboardingEnvelope(payload));
+  for (const secret of [
+    "Dana",
+    "Sponsor",
+    "Alex",
+    "Olivia",
+    "@",
+    "example.com",
+    "Secret checklist",
+    "Kickoff",
+    "Hint Workspace",
+    "Confirm the sponsor",
+    "Archived task",
+    "Call Dana",
+  ])
+    expect(sent, secret).not.toContain(secret);
+  expect(onboardingEnvelope(payload)).toEqual({
+    kind: "project-onboarding",
+    subject: `atlas-${ATLAS_ID}`,
+    summary: ONBOARDING_SUMMARY,
+    payload,
+  });
+  // Unknown keys fail the strict schema, at the top level and nested.
+  for (const bad of [
+    { ...payload, sponsor: "Dana Sponsor" },
+    { ...payload, target: { ...payload.target, owners: ["dana"] } },
+    { ...payload, facts: { ...payload.facts, assigneeEmail: "a@b.c" } },
+  ])
+    expect(projectOnboardingPayloadSchema.safeParse(bad).success).toBe(false);
+  // The saved draft cannot hold a person either: its schema is strict too.
+  expect(onboardingSchema.safeParse({ sponsor: "Dana" }).success).toBe(false);
+  expect(
+    projectSchema.safeParse({
+      ...readyProject(),
+      onboarding: { ownerRoles: { process: "x", email: "a@b.c" } },
+    }).success,
+  ).toBe(false);
+  // A bare draft sends no optional keys and says progress is not tracked.
+  const bare = payloadFor(
+    readyProject({
+      tasks: [],
+      priority: undefined,
+      dueDate: "",
+      location: "",
+      onboarding: { countryCode: "DK", worksCouncilRelevant: "no" },
+    }),
+  );
+  expect(bare.facts).toEqual({
+    countryCode: "DK",
+    worksCouncilRelevant: "no",
+    ownerRoles: {},
+    dataSources: [],
+    accessRequested: [],
+  });
+  expect(bare.progress).toBeNull();
+  expect(bare.cowork).toEqual({ requested: false });
+  expect(Object.keys(bare.target)).toEqual(["workspaceId", "label"]);
+  expect(Object.keys(bare.profile).sort()).toEqual([
+    "category",
+    "functionArea",
+    "status",
+    "successMeasure",
+    "summary",
+  ]);
+});
+
+test("Review & send covers every payload field and the meter counts nine required items", () => {
+  const payload = payloadFor();
+  const rows = reviewRows(payload, { preview: false });
+  expect(rows.map((r) => r.path).sort()).toEqual(payloadLeafPaths(payload));
+  expect(
+    payloadLeafPaths(payload).every((p) =>
+      REVIEW_FIELDS.some((f) => f.path === p),
+    ),
+  ).toBe(true);
+  expect(rows.find((r) => r.path === "progress")?.value).toBe(
+    "1 of 2 tasks done",
+  );
+  expect(
+    reviewRows(payloadFor(readyProject({ tasks: [] }))).find(
+      (r) => r.path === "progress",
+    )?.value,
+  ).toBe("Progress not tracked");
+  expect(rows.find((r) => r.path === "requestedBy")?.value).not.toContain(HASH);
+  expect(NEVER_SENT).toEqual(
+    expect.arrayContaining([
+      "Sponsor",
+      "Task assignees and their emails",
+      "Time entries",
+      "Goal owners",
+      "Budget",
+      "Task and checklist titles",
+    ]),
+  );
+  const ready = readiness(readyProject(), null);
+  expect([ready.done, ready.total, ready.ready]).toEqual([8, 9, false]);
+  expect(ready.items.filter((i) => !i.done).map((i) => i.key)).toEqual([
+    "destination",
+  ]);
+  expect(readiness(readyProject(), "hr-de").ready).toBe(true);
+  const bare = readiness(
+    readyProject({
+      onboarding: undefined,
+      onboardingStage: "Pilot",
+      functionArea: undefined,
+    }),
+    "hr-de",
+  );
+  expect(bare.items.filter((i) => !i.done).map((i) => i.key)).toEqual([
+    "functionArea",
+    "countryCode",
+    "worksCouncilRelevant",
+    "ready",
+  ]);
+  // "Never sent" promises only what Atlas can keep: no blanket claim that
+  // free text holds no email address or name.
+  expect(NEVER_SENT.join(" ")).not.toMatch(/any email|person's name/i);
+  const typed = payloadFor(
+    readyProject({
+      description: "Guide new HR users. Contact jane@example.com",
+    }),
+  );
+  expect(
+    reviewRows(typed).find((r) => r.path === "profile.summary")?.value,
+  ).toBe("Guide new HR users. Contact jane@example.com");
+  expect(personalDataIn(typed)).toEqual({
+    refused: [],
+    warned: ["profile.summary"],
+  });
+  expect(personalDataIn(payload)).toEqual({ refused: [], warned: [] });
+  expect(
+    personalDataIn(
+      payloadFor(
+        readyProject({
+          location: "Call +49 89 1234 5678",
+          onboarding: {
+            ...readyProject().onboarding,
+            ownerRoles: { data: "dana@example.com" },
+          },
+        }),
+      ),
+    ).refused,
+  ).toEqual(["profile.site", "facts.ownerRoles.data"]);
+  // Free text is checked for the obvious personal details before sending.
+  expect(personalDataHint("Ask dana@example.com")).toMatch(/email/i);
+  expect(personalDataHint("Call +49 89 1234 5678")).toMatch(/phone/i);
+  expect(personalDataHint("Due 2026-09-22, 3 sites, 250 people")).toBeNull();
+});
+
+test("checklist items prefill role titles and pilot facts, never their own titles", () => {
+  // A consultancy pilot: its checklist says which fields it informs.
+  const idea = opportunities.find((o) => o.id === "hr-onboarding")!;
+  const pilot = readyProject({
+    functionArea: undefined,
+    benefit: "",
+    description: "",
+    onboarding: {},
+    tasks: onboardingTasks(idea),
+  });
+  const suggestions = checklistSuggestions(pilot);
+  expect(suggestions.map((s) => [s.field, s.value])).toEqual([
+    ["functionArea", "HR"],
+    ["summary", idea.pilot],
+    ["successMeasure", idea.measure],
+    ["ownerRoles.process", "Process owner"],
+    ["ownerRoles.data", "Data owner"],
+    ["ownerRoles.support", "Support owner"],
+  ]);
+  for (const s of suggestions) expect(s.source.length).toBeGreaterThan(0);
+  // Filled fields are left alone.
+  expect(checklistSuggestions(readyProject())).toEqual([]);
+});
+
+test("submit() POSTs the envelope with only the bearer credential and never X-Workspace-Id", async () => {
+  const seen: { url: string; init: RequestInit }[] = [];
+  let reply: () => Response | Promise<Response> = () =>
+    fromFixture(os.submit.accepted);
+  const client = createSubmissionClient(config, {
+    fetch: async (url, init) => {
+      seen.push({ url, init });
+      return reply();
+    },
+    timeoutMs: 50,
+  });
+  const envelope = onboardingEnvelope(payloadFor());
+  expect(await client.submit(envelope)).toEqual({
+    state: "ok",
+    data: {
+      submissionId: os.submissionId,
+      receivedAt: os.receivedAt,
+      payloadSha256: os.payloadSha256,
+      duplicate: false,
+    },
+  });
+  expect(seen).toHaveLength(1);
+  expect(seen[0].url).toBe("http://127.0.0.1:4173/api/inbound/v1/submissions");
+  expect(seen[0].init).toMatchObject({
+    method: "POST",
+    cache: "no-store",
+    redirect: "manual",
+  });
+  expect(seen[0].init.signal).toBeInstanceOf(AbortSignal);
+  expect(seen[0].init.headers).toEqual({
+    Authorization: `Bearer ${FAKE_CREDENTIAL}`,
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  });
+  expect(
+    Object.keys(seen[0].init.headers as object).map((k) => k.toLowerCase()),
+  ).not.toContain("x-workspace-id");
+  expect(Object.keys(seen[0].init)).not.toContain("credentials");
+  expect(JSON.parse(String(seen[0].init.body))).toEqual(envelope);
+
+  const outcome = async (make: () => Response | Promise<Response>) => {
+    reply = make;
+    return client.submit(envelope);
+  };
+  expect(await outcome(() => fromFixture(os.submit.duplicate))).toEqual({
+    state: "ok",
+    data: {
+      submissionId: os.submissionId,
+      receivedAt: null,
+      payloadSha256: null,
+      duplicate: true,
+    },
+  });
+  expect(await outcome(() => fromFixture(os.submit.alreadySubmitted))).toEqual({
+    state: "already_submitted",
+    submissionId: os.submissionId,
+    osState: "filed",
+  });
+  expect(await outcome(() => fromFixture(os.submit.invalid))).toEqual({
+    state: "invalid_submission",
+  });
+  expect(await outcome(() => fromFixture(os.submit.scopeMissing))).toEqual({
+    state: "refused",
+  });
+  expect(await outcome(() => fromFixture(os.submit.unauthorized))).toEqual({
+    state: "unauthorized",
+  });
+  expect(await outcome(() => fromFixture(os.submit.rateLimited))).toEqual({
+    state: "rate_limited",
+    retryAfter: 12,
+  });
+  expect(await outcome(() => jsonResponse(500, {}))).toEqual({
+    state: "invalid_response",
+  });
+  expect(
+    await outcome(() =>
+      jsonResponse(202, { ...os.submit.accepted.body, submissionId: "../x" }),
+    ),
+  ).toEqual({ state: "invalid_response" });
+  expect(
+    await outcome(() => {
+      throw new TypeError("connect ECONNREFUSED");
+    }),
+  ).toEqual({ state: "os_unreachable" });
+  // A reply that never arrives is a lost response, not a refusal.
+  const hung = createSubmissionClient(config, {
+    timeoutMs: 50,
+    fetch: (_url, init) =>
+      new Promise((_resolve, reject) =>
+        init.signal?.addEventListener("abort", () =>
+          reject(init.signal?.reason),
+        ),
+      ),
+  });
+  expect(await hung.submit(envelope)).toEqual({ state: "os_unreachable" });
+  // An envelope outside the strict schema is never sent at all.
+  const before = seen.length;
+  expect(
+    await client.submit({
+      ...envelope,
+      payload: { ...envelope.payload, sponsor: "Dana" },
+    } as unknown as OnboardingEnvelope),
+  ).toEqual({ state: "invalid_submission" });
+  expect(
+    await client.submit({ ...envelope, subject: "atlas-someone-else" }),
+  ).toEqual({ state: "invalid_submission" });
+  expect(seen).toHaveLength(before);
+});
+
+test("readSubmission() reads back only this submission, maps each OS state and drops reviewer identity", async () => {
+  const seen: { url: string; init: RequestInit }[] = [];
+  let reply: () => Response = () => jsonResponse(200, readBack("filed"));
+  const client = createSubmissionClient(config, {
+    fetch: async (url, init) => {
+      seen.push({ url, init });
+      return reply();
+    },
+  });
+  const read = async (make: () => Response, id = os.submissionId) => {
+    reply = make;
+    return client.readSubmission(id);
+  };
+  expect(await read(() => jsonResponse(200, readBack("filed")))).toEqual({
+    state: "ok",
+    data: {
+      submissionId: os.submissionId,
+      kind: "project-onboarding",
+      subject: `atlas-${ATLAS_ID}`,
+      receivedAt: os.receivedAt,
+      payloadSha256: os.payloadSha256,
+      state: "filed",
+      promoted: null,
+      reasonCode: null,
+    },
+  });
+  expect(seen[0].url).toBe(
+    `http://127.0.0.1:4173/api/inbound/v1/submissions/${os.submissionId}`,
+  );
+  expect(seen[0].init.method).toBe("GET");
+  expect(seen[0].init.headers).toEqual({
+    Authorization: `Bearer ${FAKE_CREDENTIAL}`,
+    Accept: "application/json",
+  });
+  const promoted = await read(() =>
+    jsonResponse(200, {
+      ...readBack("promoted"),
+      outcome: { ...os.readBack.promoted.outcome, by: "reviewer-jane" },
+      reviewedBy: "reviewer-jane",
+    }),
+  );
+  expect(promoted).toMatchObject({
+    state: "ok",
+    data: {
+      state: "promoted",
+      promoted: {
+        workspaceId: "hr-de",
+        projectId: "payroll-rollout",
+        setupState: "none",
+      },
+    },
+  });
+  expect(JSON.stringify(promoted)).not.toContain("reviewer-jane");
+  expect(
+    await read(() => jsonResponse(200, readBack("promotedNotShared"))),
+  ).toMatchObject({ state: "ok", data: { state: "promoted", promoted: null } });
+  expect(
+    await read(() => jsonResponse(200, readBack("needsMoreInfo"))),
+  ).toMatchObject({
+    state: "ok",
+    data: { state: "rejected", reasonCode: "needs-more-info" },
+  });
+  expect(
+    await read(() =>
+      jsonResponse(os.readBack.notFound.status, os.readBack.notFound.body),
+    ),
+  ).toEqual({ state: "not_found" });
+  // Another submission's body, a route the OS does not have, or a malformed
+  // id never count as this submission.
+  expect(
+    await read(() =>
+      jsonResponse(200, {
+        ...readBack("filed"),
+        submissionId: os.otherSubmissionId,
+      }),
+    ),
+  ).toEqual({ state: "invalid_response" });
+  expect(
+    await read(() => jsonResponse(404, { message: "Route not found" })),
+  ).toEqual({ state: "invalid_response" });
+  const calls = seen.length;
+  expect(await read(() => jsonResponse(200, {}), "../../admin")).toEqual({
+    state: "not_found",
+  });
+  expect(seen).toHaveLength(calls);
+});
+
+test("one rate limit covers the whole credential: context reads, submits and read-backs", async () => {
+  let clock = 0;
+  const cache = new Map();
+  const limited: ContextReader = {
+    workspaces: async () => ({ state: "rate_limited", retryAfter: 20 }),
+    projects: async () => ({ state: "rate_limited", retryAfter: 20 }),
+  };
+  await createCachedReader(limited, cache, { now: () => clock }).workspaces();
+  const calls: string[] = [];
+  const submissions = createGuardedSubmissions(
+    {
+      async submit() {
+        calls.push("submit");
+        return { state: "ok", data: {} } as SubmitResult;
+      },
+      async readSubmission() {
+        calls.push("read");
+        return { state: "not_found" } as ReadSubmissionResult;
+      },
+    },
+    cache,
+    { now: () => clock },
+  );
+  clock = 5_000;
+  expect(await submissions.submit(onboardingEnvelope(payloadFor()))).toEqual({
+    state: "rate_limited",
+    retryAfter: 15,
+  });
+  expect(await submissions.readSubmission(os.submissionId)).toEqual({
+    state: "rate_limited",
+    retryAfter: 15,
+  });
+  expect(calls).toEqual([]);
+  clock = 21_000;
+  expect((await submissions.readSubmission(os.submissionId)).state).toBe(
+    "not_found",
+  );
+  expect(calls).toEqual(["read"]);
+});
+
+test("read:context accepts any OS instanceId value it has not seen, and still rejects any other new key", async () => {
+  const { instanceId, ...without } = os.context.workspaces;
+  expect(instanceId).toBe(os.context.instanceId);
+  expect(
+    osWorkspacesResponseSchema.safeParse(os.context.workspaces).success,
+  ).toBe(true);
+  expect(osWorkspacesResponseSchema.safeParse(without).success).toBe(true);
+  // Atlas has never seen the OS mint an instance id, so its format is a
+  // guess. A guess that turns out wrong must degrade onboarding only (the
+  // link is held, see "no link without the OS instanceId"), never take the
+  // whole read:context response — and with it the context switcher — down.
+  for (const odd of [
+    "flightdeck.local",
+    "te-ops:9f2c",
+    "OS 12",
+    "../etc",
+    "0f1e2d3c-4b5a-6789-abcd-ef0123456789",
+  ]) {
+    const client = createContextClient(config, {
+      fetch: async () =>
+        jsonResponse(200, { ...os.context.workspaces, instanceId: odd }),
+    });
+    expect(await client.workspaces()).toMatchObject({
+      state: "ok",
+      data: { instanceId: odd },
+    });
+  }
+  // An unknown KEY, a non-string id, an empty id or an absurd length still
+  // rejects: the DTO stays strict about shape, only not about the value.
+  for (const bad of [
+    { ...os.context.workspaces, root: "/srv/te-ops" },
+    { ...os.context.workspaces, instanceId: "" },
+    { ...os.context.workspaces, instanceId: 7 },
+    { ...os.context.workspaces, instanceId: "x".repeat(129) },
+  ])
+    expect(osWorkspacesResponseSchema.safeParse(bad).success).toBe(false);
+  const client = createContextClient(config, {
+    fetch: async () => jsonResponse(200, os.context.workspaces),
+  });
+  expect(await client.workspaces()).toMatchObject({
+    state: "ok",
+    data: { instanceId: os.context.instanceId },
+  });
+});
+
+// ── The /api/flightdeck/onboard handlers over a fake OS and real SQL ───────
+
+const ORIGIN = "http://localhost:5173";
+const onboardUrl = (query = "") =>
+  `${ORIGIN}/api/flightdeck/onboard/${ATLAS_ID}${query}`;
+const send = (body: unknown, headers: Record<string, string> = {}) =>
+  new Request(onboardUrl(), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: ORIGIN,
+      "Sec-Fetch-Site": "same-origin",
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  });
+const statusRequest = (refresh = true) =>
+  new Request(onboardUrl(refresh ? "?refresh=1" : ""), {
+    headers: { "Sec-Fetch-Site": "same-origin" },
+  });
+const sendTo = (destinationWorkspaceId: string, revision = 7) =>
+  send({ destinationWorkspaceId, revision });
+const closeSend = (body: unknown, headers: Record<string, string> = {}) =>
+  new Request(`${ORIGIN}/api/flightdeck/onboard/${ATLAS_ID}/close`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: ORIGIN,
+      "Sec-Fetch-Site": "same-origin",
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  });
+const listRequest = (refresh: boolean, headers: Record<string, string> = {}) =>
+  new Request(
+    `${ORIGIN}/api/flightdeck/onboard${refresh ? "?refresh=1" : ""}`,
+    {
+      headers: { "Sec-Fetch-Site": "same-origin", ...headers },
+    },
+  );
+
+/** A D1-shaped adapter over node:sqlite with the real onboarding migrations
+ * (0004 onwards). */
+function onboardDb() {
+  const dir = new URL("../drizzle/", import.meta.url);
+  const sqlite = new DatabaseSync(":memory:");
+  for (const name of readdirSync(dir)
+    .filter((n) => /^\d{4}_\w+\.sql$/.test(n) && n >= "0004")
+    .sort())
+    for (const statement of readFileSync(new URL(name, dir), "utf8").split(
+      "--> statement-breakpoint",
+    ))
+      sqlite.exec(statement);
+  const db: OnboardDb = {
+    prepare(sql) {
+      return {
+        bind(...values) {
+          const statement = sqlite.prepare(sql);
+          const args = values as SQLInputValue[];
+          return {
+            async first<T>() {
+              return (statement.get(...args) as T | undefined) ?? null;
+            },
+            async all<T>() {
+              return { results: statement.all(...args) as T[] };
+            },
+            async run() {
+              return {
+                meta: { changes: Number(statement.run(...args).changes) },
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+  const ops = () =>
+    sqlite
+      .prepare("SELECT * FROM atlas_flightdeck_operations ORDER BY rowid")
+      .all() as Record<string, unknown>[];
+  const links = () =>
+    sqlite.prepare("SELECT * FROM atlas_project_links").all() as Record<
+      string,
+      unknown
+    >[];
+  return { db, sqlite, ops, links };
+}
+
+function harness(
+  options: { superAdmin?: boolean; project?: Project | null } = {},
+) {
+  const store = onboardDb();
+  let clock = Date.parse("2026-09-22T09:00:00.000Z");
+  let project =
+    options.project === undefined ? readyProject() : options.project;
+  let user = { userId: "user-1", superAdmin: options.superAdmin ?? true };
+  const fake = {
+    workspaces: structuredClone(os.context.workspaces) as Record<
+      string,
+      unknown
+    >,
+    projects: {
+      "te-ops": {
+        workspaceId: "te-ops",
+        projects: [
+          { id: "general", label: "General", enabled: true, isDefault: true },
+        ],
+        generatedAt: os.receivedAt,
+      },
+      "hr-de": structuredClone(os.context.projectsBeforePromotion),
+    } as unknown as Record<string, { projects: Record<string, unknown>[] }>,
+    calls: [] as string[],
+    /** Other projects the caller can see. */
+    visible: [] as string[],
+    submits: [] as OnboardingEnvelope[],
+    authorize: 0,
+    onSubmit: (async (): Promise<SubmitResult> => ({
+      state: "ok",
+      data: {
+        submissionId: os.submissionId,
+        receivedAt: os.receivedAt,
+        payloadSha256: os.payloadSha256,
+        duplicate: false,
+      },
+    })) as (envelope: OnboardingEnvelope) => Promise<SubmitResult>,
+    onRead: (async (): Promise<ReadSubmissionResult> => ({
+      state: "ok",
+      data: {
+        submissionId: os.submissionId,
+        kind: "project-onboarding",
+        subject: `atlas-${ATLAS_ID}`,
+        receivedAt: os.receivedAt,
+        payloadSha256: os.payloadSha256,
+        state: "filed",
+        promoted: null,
+        reasonCode: null,
+      },
+    })) as (id: string) => Promise<ReadSubmissionResult>,
+  };
+  const reader = (fresh: boolean): ContextReader => ({
+    async workspaces() {
+      fake.calls.push(fresh ? "workspaces:fresh" : "workspaces");
+      const parsed = osWorkspacesResponseSchema.parse(fake.workspaces);
+      return { state: "ok", data: parsed };
+    },
+    async projects(id) {
+      fake.calls.push(`projects:${id}`);
+      const list = fake.projects[id];
+      if (!list) return { state: "workspace_not_found" };
+      return {
+        state: "ok",
+        data: {
+          workspaceId: id,
+          projects: list.projects as never,
+          generatedAt: os.receivedAt,
+        },
+      };
+    },
+  });
+  const route = createOnboardRoute({
+    async authorize() {
+      fake.authorize++;
+      return { access: { ...user } };
+    },
+    async loadProject(_access, id) {
+      return project && id === project.id ? { project, canEdit: true } : null;
+    },
+    async visibleProjectIds() {
+      return [...(project ? [project.id] : []), ...fake.visible];
+    },
+    reader,
+    submissions: () => ({
+      async submit(envelope) {
+        fake.calls.push("submit");
+        fake.submits.push(envelope);
+        return fake.onSubmit(envelope);
+      },
+      async readSubmission(id) {
+        fake.calls.push(`read:${id}`);
+        return fake.onRead(id);
+      },
+    }),
+    db: () => store.db,
+    installationId: () => "atlas-test",
+    now: () => new Date(clock),
+  });
+  const readAs = (name: string) => async (): Promise<ReadSubmissionResult> => {
+    const body = readBack(name);
+    return {
+      state: "ok",
+      data: {
+        submissionId: body.submissionId,
+        kind: body.kind,
+        subject: body.subject,
+        receivedAt: body.receivedAt,
+        payloadSha256: body.payloadSha256,
+        state: body.state,
+        promoted: body.state === "promoted" ? (body.outcome ?? null) : null,
+        reasonCode: body.state === "rejected" ? body.outcome.reasonCode : null,
+      },
+    };
+  };
+  return {
+    route,
+    store,
+    fake,
+    readAs,
+    tick: (ms: number) => void (clock += ms),
+    /** The project as edited elsewhere in Atlas after a send. */
+    setProject: (next: Project) => void (project = next),
+    as: (userId: string, superAdmin = true) =>
+      void (user = { userId, superAdmin }),
+    async status(refresh = true) {
+      const response = await route.GET(statusRequest(refresh), ATLAS_ID);
+      expect(response.status).toBe(200);
+      return onboardingStatusSchema.parse(await response.json());
+    },
+    async list(refresh = true) {
+      const response = await route.LIST(listRequest(refresh));
+      expect(response.status).toBe(200);
+      return onboardStagesSchema.parse(await response.json());
+    },
+    /** Closes the send the caller last saw. */
+    async close(seen: OnboardingStatus) {
+      return route.CLOSE(
+        closeSend({ updatedAt: seen.operation!.updatedAt }),
+        ATLAS_ID,
+      );
+    },
+    /** A filed send of another project, straight into the table. */
+    fileOther(id: string, submissionId: string, checkedAt: string | null) {
+      store.sqlite
+        .prepare(
+          "INSERT INTO atlas_flightdeck_operations (id,atlas_project_id,atlas_revision,idempotency_key,destination_workspace_id,proposed_label,state,submission_id,created_by,updated_at,checked_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        )
+        .run(
+          `op-${id}`,
+          id,
+          1,
+          `key-${id}`,
+          "hr-de",
+          "Other",
+          "filed",
+          submissionId,
+          "user-0",
+          os.receivedAt,
+          checkedAt,
+        );
+    },
+  };
+}
+
+test("only the Atlas Super Admin may send; anyone else gets 403 before any OS call or reservation", async () => {
+  const member = harness({ superAdmin: false });
+  const refused = await member.route.POST(sendTo("hr-de"), ATLAS_ID);
+  expect(refused.status).toBe(403);
+  expect(await refused.json()).toMatchObject({ code: "not_permitted" });
+  expect(member.fake.calls).toEqual([]);
+  expect(member.store.ops()).toEqual([]);
+  // A member may read the stored status, never with OS ids and never by
+  // reading the OS, even when asking for a refresh.
+  const view = await member.status(true);
+  expect(view).toMatchObject({ operation: null, link: null });
+  expect(member.fake.calls).toEqual([]);
+
+  // Cross-site writes are refused before authorisation.
+  const admin = harness();
+  const crossSite: Record<string, string>[] = [
+    { Origin: "https://attacker.example" },
+    { Origin: "", "Sec-Fetch-Site": "cross-site" },
+  ];
+  for (const headers of crossSite) {
+    const response = await admin.route.POST(
+      send({ destinationWorkspaceId: "hr-de", revision: 7 }, headers),
+      ATLAS_ID,
+    );
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: "Request origin is not allowed.",
+    });
+  }
+  expect(admin.fake.authorize).toBe(0);
+  expect(admin.fake.calls).toEqual([]);
+});
+
+test("a send reserves its row with a fresh key before the remote call, then stores the OS receipt", async () => {
+  const h = harness();
+  let reservedAtCall: Record<string, unknown>[] = [];
+  h.fake.onSubmit = async (envelope) => {
+    reservedAtCall = h.store.ops();
+    expect(reservedAtCall).toHaveLength(1);
+    expect(reservedAtCall[0]).toMatchObject({
+      state: "reserved",
+      idempotency_key: envelope.payload.idempotencyKey,
+      atlas_project_id: ATLAS_ID,
+      atlas_revision: 7,
+      destination_workspace_id: "hr-de",
+      proposed_label: "Payroll rollout",
+      proposed_project_id: "payroll-rollout",
+      created_by: "user-1",
+      submission_id: null,
+    });
+    return {
+      state: "ok",
+      data: {
+        submissionId: os.submissionId,
+        receivedAt: os.receivedAt,
+        payloadSha256: os.payloadSha256,
+        duplicate: false,
+      },
+    };
+  };
+  const response = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  expect(response.status).toBe(202);
+  expect(reservedAtCall).toHaveLength(1);
+  const status = onboardingStatusSchema.parse(await response.json());
+  expect(status.operation).toMatchObject({
+    state: "filed",
+    stage: "submitted",
+    destinationWorkspaceId: "hr-de",
+    submittedAt: os.receivedAt,
+  });
+  expect(status.pollable).toBe(true);
+  expect(h.store.ops()).toEqual([
+    expect.objectContaining({
+      state: "filed",
+      submission_id: os.submissionId,
+      received_at: os.receivedAt,
+      payload_sha256: os.payloadSha256,
+    }),
+  ]);
+  // Exactly the allowlist built from the stored project, a v4 key and a
+  // hashed requester. The route sent no header of its own: the transport
+  // test above pins the header set.
+  const [envelope] = h.fake.submits;
+  expect(envelope.payload.idempotencyKey).toMatch(UUID_RE);
+  expect(envelope.payload.requestedBy).toBe(HASH);
+  expect(envelope).toEqual(
+    onboardingEnvelope(
+      buildOnboardingPayload({
+        project: readyProject(),
+        destinationWorkspaceId: "hr-de",
+        idempotencyKey: envelope.payload.idempotencyKey,
+        installationId: "atlas-test",
+        requestedBy: HASH,
+      }),
+    ),
+  );
+  // A second press while FlightDeck holds the request sends nothing.
+  const again = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  expect(again.status).toBe(409);
+  expect(await again.json()).toMatchObject({ code: "already_submitted" });
+  expect(h.fake.submits).toHaveLength(1);
+});
+
+test("a lost response keeps the reservation, and the retry reuses the same key and destination", async () => {
+  const h = harness();
+  // FlightDeck filed it, but the reply never reached Atlas.
+  h.fake.onSubmit = async () => ({ state: "os_unreachable" });
+  const first = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  expect(first.status).toBe(503);
+  const refusal = (await first.json()) as { status: unknown };
+  expect(refusal).toMatchObject({ code: "not_confirmed" });
+  expect(onboardingStatusSchema.parse(refusal.status).operation?.stage).toBe(
+    "not-confirmed",
+  );
+  expect(h.store.ops()).toEqual([
+    expect.objectContaining({
+      state: "reserved",
+      reason_code: "os_unreachable",
+    }),
+  ]);
+  const pending = await h.status(false);
+  expect(pending).toMatchObject({ retryPending: true, canSend: true });
+  expect(pending.operation?.destinationWorkspaceId).toBe("hr-de");
+  // The key belongs to that destination: another one is refused, unsent.
+  const moved = await h.route.POST(sendTo("te-ops"), ATLAS_ID);
+  expect(moved.status).toBe(409);
+  expect(await moved.json()).toMatchObject({
+    code: "pending_send",
+    destinationWorkspaceId: "hr-de",
+  });
+  expect(h.fake.submits).toHaveLength(1);
+  // The retry: same key, FlightDeck answers with its duplicate receipt.
+  h.fake.onSubmit = async () => ({
+    state: "ok",
+    data: {
+      submissionId: os.submissionId,
+      receivedAt: null,
+      payloadSha256: null,
+      duplicate: true,
+    },
+  });
+  const retry = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  expect(retry.status).toBe(202);
+  expect(h.fake.submits).toHaveLength(2);
+  expect(h.fake.submits[1].payload.idempotencyKey).toBe(
+    h.fake.submits[0].payload.idempotencyKey,
+  );
+  const [op] = h.store.ops();
+  expect(h.store.ops()).toHaveLength(1);
+  expect(op).toMatchObject({
+    state: "filed",
+    submission_id: os.submissionId,
+    idempotency_key: h.fake.submits[0].payload.idempotencyKey,
+  });
+  // The first read-back fills in the receipt a duplicate reply lacks.
+  h.tick(61_000);
+  await h.status();
+  expect(h.store.ops()[0]).toMatchObject({
+    received_at: os.receivedAt,
+    payload_sha256: os.payloadSha256,
+  });
+});
+
+const duplicateReceipt = async (): Promise<SubmitResult> => ({
+  state: "ok",
+  data: {
+    submissionId: os.submissionId,
+    receivedAt: null,
+    payloadSha256: null,
+    duplicate: true,
+  },
+});
+
+test("a retry after an edit resends the reserved request byte for byte and keeps its revision", async () => {
+  const h = harness();
+  // Revision 7 carries an email in the summary; FlightDeck filed it, but the
+  // reply was lost.
+  h.setProject(
+    readyProject({ description: "Summary v1: contact alex@example.com" }),
+  );
+  h.fake.onSubmit = async () => ({ state: "os_unreachable" });
+  expect((await h.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(503);
+  const [reserved] = h.store.ops();
+  expect(JSON.parse(String(reserved.request_body))).toEqual(h.fake.submits[0]);
+  // The project is then edited elsewhere in Atlas: revision 8, clean text.
+  h.setProject(
+    readyProject({
+      revision: 8,
+      description: "Summary v2: no personal data",
+      flightdeckDraft: { label: "Renamed label", workspaceHint: "" },
+    }),
+  );
+  // The Super Admin sees exactly what Retry resends: revision 7, as sent.
+  const pending = await h.status(false);
+  expect(pending.operation?.atlasRevision).toBe(7);
+  expect(pending.pendingPayload).toEqual(h.fake.submits[0].payload);
+  expect(pending.pendingPayload?.profile.summary).toBe(
+    "Summary v1: contact alex@example.com",
+  );
+  // Retrying "the current project" is refused, unsent: the key is revision 7's.
+  const changed = await h.route.POST(sendTo("hr-de", 8), ATLAS_ID);
+  expect(changed.status).toBe(409);
+  expect(await changed.json()).toMatchObject({
+    code: "pending_send_changed",
+    atlasRevision: 7,
+  });
+  expect(h.fake.submits).toHaveLength(1);
+  // Another Super Admin retries revision 7: the very same bytes go again.
+  h.as("user-2");
+  h.fake.onSubmit = duplicateReceipt;
+  const retry = await h.route.POST(sendTo("hr-de", 7), ATLAS_ID);
+  expect(retry.status).toBe(202);
+  expect(h.fake.submits).toHaveLength(2);
+  expect(JSON.stringify(h.fake.submits[1])).toBe(
+    JSON.stringify(h.fake.submits[0]),
+  );
+  expect(h.fake.submits[1].payload).toMatchObject({
+    atlasRevision: 7,
+    requestedBy: HASH,
+    target: { label: "Payroll rollout" },
+  });
+  // Atlas records what FlightDeck holds, and drops its copy of the body.
+  expect(h.store.ops()).toEqual([
+    expect.objectContaining({
+      id: reserved.id,
+      state: "filed",
+      idempotency_key: reserved.idempotency_key,
+      atlas_revision: 7,
+      proposed_label: "Payroll rollout",
+      request_body: null,
+    }),
+  ]);
+  const filed = await h.status(false);
+  expect(filed.operation?.atlasRevision).toBe(7);
+  expect(filed.pendingPayload).toBeNull();
+  // The link records revision 7 as its source, not the edited revision 8.
+  h.fake.onRead = h.readAs("promoted");
+  h.fake.projects["hr-de"] = structuredClone(os.context.projectsAfterPromotion);
+  h.tick(61_000);
+  expect((await h.status()).operation?.stage).toBe("linked");
+  expect(h.store.links()[0]).toMatchObject({ source_revision: 7 });
+});
+
+test("only the Super Admin sees the request a retry would resend", async () => {
+  const h = harness();
+  h.fake.onSubmit = async () => ({ state: "os_unreachable" });
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  h.as("member-1", false);
+  const view = await h.status(false);
+  expect(view).toMatchObject({
+    retryPending: true,
+    pendingPayload: null,
+    operation: { destinationWorkspaceId: null },
+  });
+});
+
+test("a refusal after a lost response keeps the reservation, so the retry reuses the first key", async () => {
+  const h = harness();
+  h.fake.onSubmit = async () => ({ state: "os_unreachable" });
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  // FlightDeck may hold the first attempt. A refusal of a later attempt
+  // (the kind switched off for a while, a rotated credential, a format
+  // check) says nothing about that one.
+  for (const state of [
+    "refused",
+    "unauthorized",
+    "invalid_submission",
+  ] as const) {
+    h.fake.onSubmit = async () => ({ state });
+    const response = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+    expect(response.status, state).toBe(502);
+    const body = (await response.json()) as { error: string; status: unknown };
+    expect(body).toMatchObject({ code: state });
+    expect(body.error).toMatch(/earlier attempt may already have been filed/i);
+    expect(onboardingStatusSchema.parse(body.status)).toMatchObject({
+      retryPending: true,
+      operation: {
+        state: "reserved",
+        stage: "not-confirmed",
+        reasonCode: state,
+      },
+    });
+  }
+  expect(h.store.ops()).toEqual([
+    expect.objectContaining({
+      state: "reserved",
+      reason_code: "invalid_submission",
+    }),
+  ]);
+  // Nothing else can be sent meanwhile, and no fresh key is ever issued.
+  const moved = await h.route.POST(sendTo("te-ops"), ATLAS_ID);
+  expect(moved.status).toBe(409);
+  expect(await moved.json()).toMatchObject({ code: "pending_send" });
+  h.fake.onSubmit = duplicateReceipt;
+  expect((await h.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  expect(
+    new Set(h.fake.submits.map((e) => e.payload.idempotencyKey)).size,
+  ).toBe(1);
+  expect(h.store.ops()).toEqual([
+    expect.objectContaining({
+      state: "filed",
+      destination_workspace_id: "hr-de",
+      submission_id: os.submissionId,
+    }),
+  ]);
+});
+
+test("a refused retry after the receipt was never stored keeps the reservation, its key and its request", async () => {
+  const h = harness();
+  // FlightDeck files the send (202), but the one write that stores its
+  // receipt fails, exactly as if the Worker stopped after the POST: the row
+  // stays reserved and no reason code was ever recorded.
+  const prepare = h.store.db.prepare.bind(h.store.db);
+  let failReceipt = true;
+  h.store.db.prepare = (sql) => {
+    if (
+      failReceipt &&
+      sql.startsWith(
+        "UPDATE atlas_flightdeck_operations SET state=?,submission_id=?",
+      )
+    ) {
+      failReceipt = false;
+      throw Error("D1 unavailable");
+    }
+    return prepare(sql);
+  };
+  const lost = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  expect(lost.status).toBe(503);
+  expect(await lost.json()).toMatchObject({ code: "storage_unavailable" });
+  expect(failReceipt).toBe(false);
+  const [first] = h.store.ops();
+  expect(first).toMatchObject({ state: "reserved", reason_code: null });
+  expect(first.request_body).toEqual(expect.any(String));
+
+  // The kind flag is set per run in the OS shell, so after an OS restart the
+  // retry is refused. That says nothing about the attempt FlightDeck filed.
+  for (const state of [
+    "refused",
+    "unauthorized",
+    "invalid_submission",
+  ] as const) {
+    h.fake.onSubmit = async () => ({ state });
+    const response = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+    expect(response.status, state).toBe(502);
+    const body = (await response.json()) as { error: string; status: unknown };
+    expect(body).toMatchObject({ code: state });
+    expect(body.error).toMatch(/earlier attempt may already have been filed/i);
+    expect(body.error).not.toMatch(/nothing was filed/i);
+    expect(onboardingStatusSchema.parse(body.status)).toMatchObject({
+      retryPending: true,
+      operation: { state: "reserved", stage: "not-confirmed" },
+    });
+    expect(h.store.ops()).toEqual([
+      expect.objectContaining({
+        id: first.id,
+        state: "reserved",
+        idempotency_key: first.idempotency_key,
+        request_body: first.request_body,
+        destination_workspace_id: "hr-de",
+        atlas_revision: 7,
+        reason_code: state,
+      }),
+    ]);
+  }
+  // Once FlightDeck accepts requests again the retry reuses the first key,
+  // is answered as a duplicate, and nothing is adopted.
+  h.fake.onSubmit = duplicateReceipt;
+  expect((await h.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  expect(new Set(h.fake.submits.map((e) => e.payload.idempotencyKey))).toEqual(
+    new Set([first.idempotency_key]),
+  );
+  expect(h.store.ops()).toEqual([
+    expect.objectContaining({
+      id: first.id,
+      state: "filed",
+      adopted: 0,
+      destination_workspace_id: "hr-de",
+      atlas_revision: 7,
+      submission_id: os.submissionId,
+    }),
+  ]);
+});
+
+test("a retry FlightDeck refuses for good can be closed, and the next send follows what FlightDeck holds instead of filing twice", async () => {
+  const h = harness();
+  h.fake.onSubmit = async () => ({ state: "os_unreachable" });
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  const [reserved] = h.store.ops();
+  // FlightDeck checks the format before it looks at the key, so these exact
+  // bytes are refused on every retry: they were never filed under any key.
+  h.fake.onSubmit = async () => ({ state: "invalid_submission" });
+  for (let i = 0; i < 3; i++) {
+    const retry = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+    expect(retry.status).toBe(502);
+    expect(((await retry.json()) as { error: string }).error).toMatch(
+      /close this unconfirmed send/i,
+    );
+  }
+  // A corrected revision and another destination still wait for this one,
+  // and both refusals say how to close it.
+  h.setProject(readyProject({ revision: 8 }));
+  for (const request of [sendTo("hr-de", 8), sendTo("te-ops", 7)]) {
+    const blocked = await h.route.POST(request, ATLAS_ID);
+    expect(blocked.status).toBe(409);
+    expect(((await blocked.json()) as { error: string }).error).toMatch(
+      /close it/i,
+    );
+  }
+  const stuck = await h.status(false);
+  expect(stuck).toMatchObject({
+    retryPending: true,
+    canClose: true,
+    operation: { state: "reserved", stage: "not-confirmed" },
+  });
+  // The way out: close it. Nothing is sent and the OS is not read.
+  h.fake.calls.length = 0;
+  const closed = await h.close(stuck);
+  expect(closed.status).toBe(200);
+  expect(onboardingStatusSchema.parse(await closed.json())).toMatchObject({
+    operation: { state: "refused", stage: "closed", reasonCode: "abandoned" },
+    canSend: true,
+    retryPending: false,
+    canClose: false,
+    pollable: false,
+    pendingPayload: null,
+  });
+  expect(h.fake.calls).toEqual([]);
+  expect(h.store.ops()).toEqual([
+    expect.objectContaining({
+      id: reserved.id,
+      idempotency_key: reserved.idempotency_key,
+      state: "refused",
+      reason_code: "abandoned",
+      request_body: null,
+    }),
+  ]);
+  // Say FlightDeck did file the first attempt after all: the next send, with
+  // a fresh key, meets its subject lock, and Atlas follows that request once
+  // the read-back proves it is this project's. Nothing is filed twice.
+  h.fake.onSubmit = async () => ({
+    state: "already_submitted",
+    submissionId: os.submissionId,
+    osState: "filed",
+  });
+  const again = await h.route.POST(sendTo("hr-de", 8), ATLAS_ID);
+  expect(again.status).toBe(202);
+  const [, second] = h.store.ops();
+  expect(second).toMatchObject({
+    state: "filed",
+    submission_id: os.submissionId,
+    adopted: 1,
+  });
+  expect(second.idempotency_key).not.toBe(reserved.idempotency_key);
+  expect(h.fake.submits.at(-1)!.payload.idempotencyKey).toBe(
+    second.idempotency_key,
+  );
+  // A send FlightDeck confirmed cannot be closed.
+  const late = await h.close(await h.status(false));
+  expect(late.status).toBe(409);
+  expect(await late.json()).toMatchObject({ code: "not_closable" });
+  expect(h.store.ops()[1]).toMatchObject({ state: "filed" });
+});
+
+test("a reserved request Atlas cannot read can be closed instead of blocking the project for good", async () => {
+  const h = harness();
+  h.fake.onSubmit = async () => ({ state: "os_unreachable" });
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  h.store.sqlite
+    .prepare("UPDATE atlas_flightdeck_operations SET request_body='{'")
+    .run();
+  const unreadable = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  expect(unreadable.status).toBe(409);
+  const body = (await unreadable.json()) as { code: string; error: string };
+  expect(body.code).toBe("pending_send_unreadable");
+  expect(body.error).toMatch(/close this unconfirmed send/i);
+  const seen = await h.status(false);
+  expect(seen.canClose).toBe(true);
+  expect((await h.close(seen)).status).toBe(200);
+  h.fake.onSubmit = async () => ({
+    state: "ok",
+    data: {
+      submissionId: os.otherSubmissionId,
+      receivedAt: os.receivedAt,
+      payloadSha256: os.payloadSha256,
+      duplicate: false,
+    },
+  });
+  expect((await h.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  expect(h.store.ops().map((o) => o.state)).toEqual(["refused", "filed"]);
+});
+
+test("only the Super Admin closes a send, same-origin, and only the send they last saw", async () => {
+  const h = harness();
+  h.fake.onSubmit = async () => ({ state: "os_unreachable" });
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  const seen = await h.status(false);
+  const updatedAt = seen.operation!.updatedAt;
+  const crossSite: Record<string, string>[] = [
+    { Origin: "https://attacker.example" },
+    { Origin: "", "Sec-Fetch-Site": "cross-site" },
+  ];
+  for (const headers of crossSite) {
+    const response = await h.route.CLOSE(
+      closeSend({ updatedAt }, headers),
+      ATLAS_ID,
+    );
+    expect(response.status).toBe(403);
+  }
+  h.as("member-1", false);
+  expect((await h.status(false)).canClose).toBe(false);
+  const member = await h.route.CLOSE(closeSend({ updatedAt }), ATLAS_ID);
+  expect(member.status).toBe(403);
+  expect(await member.json()).toMatchObject({ code: "not_permitted" });
+  h.as("user-1");
+  for (const body of [{}, { updatedAt: "yesterday" }, { updatedAt, x: 1 }])
+    expect(
+      (await h.route.CLOSE(closeSend(body), ATLAS_ID)).status,
+      JSON.stringify(body),
+    ).toBe(400);
+  // A retry since then changed the send: closing what was seen is refused.
+  h.tick(1_000);
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  const stale = await h.close(seen);
+  expect(stale.status).toBe(409);
+  expect(await stale.json()).toMatchObject({ code: "status_changed" });
+  expect(h.store.ops()).toEqual([
+    expect.objectContaining({ state: "reserved" }),
+  ]);
+  // Nothing to close at all.
+  const none = harness();
+  const nothing = await none.route.CLOSE(closeSend({ updatedAt }), ATLAS_ID);
+  expect(nothing.status).toBe(409);
+  expect(await nothing.json()).toMatchObject({ code: "not_closable" });
+});
+
+test("a retry still reaches FlightDeck after its destination was disabled or unshared, so a lost reply can be reconciled", async () => {
+  for (const change of ["disabled", "unshared"] as const) {
+    const h = harness();
+    h.fake.onSubmit = async () => ({ state: "os_unreachable" });
+    await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+    const list = h.fake.workspaces.workspaces as {
+      id: string;
+      enabled: boolean;
+    }[];
+    if (change === "disabled")
+      list.find((w) => w.id === "hr-de")!.enabled = false;
+    else h.fake.workspaces.workspaces = list.filter((w) => w.id !== "hr-de");
+    // The destination was checked when the key was reserved. FlightDeck
+    // answers a known key before it looks at the target, so resending the
+    // same bytes is the only way to learn what it holds.
+    h.fake.calls.length = 0;
+    h.fake.onSubmit = duplicateReceipt;
+    const retry = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+    expect(retry.status, change).toBe(202);
+    expect(h.fake.calls, change).toEqual(["submit"]);
+    expect(h.store.ops(), change).toEqual([
+      expect.objectContaining({
+        state: "filed",
+        submission_id: os.submissionId,
+        destination_workspace_id: "hr-de",
+      }),
+    ]);
+  }
+});
+
+test("a filed send FlightDeck no longer knows can be closed and sent again; one it knows cannot", async () => {
+  const h = harness();
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  h.fake.onRead = async () => ({ state: "not_found" });
+  h.tick(61_000);
+  const lost = await h.status();
+  expect(lost).toMatchObject({
+    canSend: false,
+    canClose: true,
+    operation: { state: "filed", reasonCode: "submission_not_found" },
+  });
+  expect(lost.notice).toMatch(/close this send/i);
+  expect(lost.notice).not.toMatch(/before sending again/i);
+  // FlightDeck knows it again: it can no longer be closed.
+  h.fake.onRead = h.readAs("filed");
+  h.tick(61_000);
+  const known = await h.status();
+  expect(known).toMatchObject({
+    canClose: false,
+    notice: null,
+    operation: { state: "filed", reasonCode: null },
+  });
+  const refused = await h.close(known);
+  expect(refused.status).toBe(409);
+  expect(await refused.json()).toMatchObject({ code: "not_closable" });
+  // Unknown again: closed, then sent again with a fresh key.
+  h.fake.onRead = async () => ({ state: "not_found" });
+  h.tick(61_000);
+  const gone = await h.status();
+  expect((await h.close(gone)).status).toBe(200);
+  expect(h.store.ops()[0]).toMatchObject({
+    state: "refused",
+    reason_code: "abandoned",
+    submission_id: os.submissionId,
+  });
+  expect(await h.status(false)).toMatchObject({
+    pollable: false,
+    canSend: true,
+    operation: { stage: "closed" },
+  });
+  h.fake.onSubmit = async () => ({
+    state: "ok",
+    data: {
+      submissionId: os.otherSubmissionId,
+      receivedAt: os.receivedAt,
+      payloadSha256: os.payloadSha256,
+      duplicate: false,
+    },
+  });
+  expect((await h.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  const [first, second] = h.store.ops();
+  expect(second).toMatchObject({
+    state: "filed",
+    submission_id: os.otherSubmissionId,
+  });
+  expect(second.idempotency_key).not.toBe(first.idempotency_key);
+});
+
+test("a project cannot be deleted under an unconfirmed send, and deleting it takes its send record and its link with it", async () => {
+  // A reserved send is the one state that still holds `request_body`: a
+  // verbatim copy of the summary and success measure, kept only so a retry
+  // can resend the same bytes. Deleting the project under it would strand
+  // that copy for good — POST, GET and CLOSE all answer 404 once the project
+  // is gone, and the list sweep only ever selects filed, promoted and linked.
+  const pending = harness();
+  pending.fake.onSubmit = async () => ({ state: "os_unreachable" });
+  expect((await pending.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(
+    503,
+  );
+  expect(pending.store.ops()[0]).toMatchObject({
+    state: "reserved",
+    request_body: expect.any(String),
+  });
+  expect(String(pending.store.ops()[0].request_body)).toContain(
+    readyProject().description,
+  );
+  expect(await unconfirmedSend(pending.store.db, ATLAS_ID)).toMatchObject({
+    state: "reserved",
+  });
+  // Nothing is deleted behind the owner's back (decision 6): this is exactly
+  // the state the form offers "Close this unconfirmed send" for, so the delete
+  // waits for that, and closing clears the body first.
+  expect((await pending.close(await pending.status(false))).status).toBe(200);
+  expect(pending.store.ops()[0]).toMatchObject({
+    state: "refused",
+    request_body: null,
+  });
+  expect(await unconfirmedSend(pending.store.db, ATLAS_ID)).toBeNull();
+  expect(await forgetProject(pending.store.db, ATLAS_ID)).toEqual({
+    operations: 1,
+    links: 0,
+  });
+  expect(pending.store.ops()).toEqual([]);
+
+  // A send FlightDeck has confirmed never blocks the delete: its body was
+  // cleared when the receipt was stored. Its link must still go, or
+  // uniq_atlas_project_links_os holds that OS project against a project Atlas
+  // no longer has, and every later promotion onto it answers link_conflict
+  // with no route able to clear it.
+  const held = harness();
+  expect((await held.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  held.fake.onRead = held.readAs("promoted");
+  held.fake.projects["hr-de"] = structuredClone(
+    os.context.projectsAfterPromotion,
+  );
+  held.tick(61_000);
+  expect((await held.status()).operation?.stage).toBe("linked");
+  expect(held.store.ops()[0]).toMatchObject({ request_body: null });
+  expect(held.store.links()).toHaveLength(1);
+  expect(await unconfirmedSend(held.store.db, ATLAS_ID)).toBeNull();
+  // Another Atlas project cannot take that OS project while the link stands.
+  const OTHER = "99999999-2222-4333-8444-555555555555";
+  const linkOther = () => {
+    try {
+      held.store.sqlite
+        .prepare(
+          "INSERT INTO atlas_project_links (installation_id,os_instance_id,workspace_id,os_project_id,atlas_project_id,submission_id,linked_at,linked_by,source_revision,last_checked_at,access_state) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        )
+        .run(
+          "atlas-test",
+          os.context.instanceId,
+          "hr-de",
+          "payroll-rollout",
+          OTHER,
+          null,
+          os.receivedAt,
+          "user-0",
+          1,
+          os.receivedAt,
+          "active",
+        );
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  expect(linkOther()).toBe(false);
+  expect(await forgetProject(held.store.db, ATLAS_ID)).toEqual({
+    operations: 1,
+    links: 1,
+  });
+  expect(held.store.ops()).toEqual([]);
+  expect(held.store.links()).toEqual([]);
+  expect(linkOther()).toBe(true);
+});
+
+test("an email or phone number outside the summary and success measure is refused before anything is reserved or sent", async () => {
+  const base = readyProject().onboarding!;
+  const cases: [string, Partial<Project>][] = [
+    [
+      "target.label",
+      {
+        flightdeckDraft: {
+          label: "jane.doe@example.com payroll",
+          workspaceHint: "",
+        },
+      },
+    ],
+    [
+      "facts.ownerRoles.process",
+      {
+        onboarding: {
+          ...base,
+          ownerRoles: { process: "jane.doe@example.com" },
+        },
+      },
+    ],
+    [
+      "facts.dataSources",
+      {
+        onboarding: {
+          ...base,
+          dataSources: ["SAP HCM", "jane.doe@example.com mailbox"],
+        },
+      },
+    ],
+    [
+      "facts.accessRequested",
+      {
+        onboarding: {
+          ...base,
+          accessRequested: [{ system: "Call +49 89 1234 5678", level: "read" }],
+        },
+      },
+    ],
+    ["profile.site", { location: "jane.doe@example.com" }],
+    [
+      "facts.legalEntity",
+      { onboarding: { ...base, legalEntity: "Ask +49 (89) 1234-5678" } },
+    ],
+    ["profile.functionArea", { functionArea: "hr@example.com" }],
+    ["profile.category", { category: "Pilot for jane@example.com" }],
+  ];
+  for (const [path, overrides] of cases) {
+    const h = harness({ project: readyProject(overrides) });
+    const response = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+    expect(response.status, path).toBe(400);
+    const text = await response.text();
+    expect(JSON.parse(text), path).toMatchObject({
+      code: "personal_data",
+      fields: [path],
+    });
+    // The refusal names the field, never the value.
+    for (const value of ["example.com", "jane", "1234"])
+      expect(text, path).not.toContain(value);
+    expect(h.fake.calls, path).toEqual([]);
+    expect(h.store.ops(), path).toEqual([]);
+  }
+  // A long run of digits is not a phone number. Decision 4 asks for role
+  // titles in place of people, and a role title carries a plant number and a
+  // year range; a system name carries a version; an entity carries a cost
+  // centre. These are refused by no override, so counting every digit in a
+  // group would leave the owner unable to send at all — and the refusal would
+  // name a phone number that is not in the text.
+  const codes = readyProject({
+    flightdeckDraft: { label: "Payroll 2024-2026", workspaceHint: "" },
+    functionArea: "Quality, Plant 4 (2024-2026)",
+    location: "Werk 4 / 2021-2024",
+    onboarding: {
+      ...base,
+      legalEntity: "Entity 4711 / cost centre 100-200-300-400",
+      ownerRoles: {
+        process: "Head of Quality, Plant 4 (2024-2026)",
+        data: "SAP (ERP) 2020 2021 2022 steward",
+      },
+      dataSources: ["SAP ECC 6.0 / S4 2021-2024"],
+    },
+  });
+  const clean = harness({ project: codes });
+  expect((await clean.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  expect(clean.fake.submits[0].payload.facts.ownerRoles.process).toBe(
+    "Head of Quality, Plant 4 (2024-2026)",
+  );
+  // The same text in the free-text fields is still warned about: a warning
+  // costs the writer a hint, a refusal costs them the send.
+  expect(personalDataIn(payloadFor(codes))).toEqual({
+    refused: [],
+    warned: [],
+  });
+  expect(
+    personalDataIn(
+      payloadFor({
+        ...codes,
+        description: "Head of Quality, Plant 4 (2024-2026)",
+      }),
+    ),
+  ).toEqual({ refused: [], warned: ["profile.summary"] });
+  // The form's own hint agrees with the route, field by field.
+  expect(
+    personalDataHint("Head of Quality, Plant 4 (2024-2026)", true),
+  ).toBeNull();
+  expect(personalDataHint("Head of Quality, Plant 4 (2024-2026)")).toMatch(
+    /phone/i,
+  );
+  expect(personalDataHint("Call +49 89 1234 5678", true)).toMatch(
+    /will not send an email address or phone number/i,
+  );
+  expect(personalDataHint("Reach me on 0151 2345678", true)).toMatch(
+    /will not send an email address or phone number/i,
+  );
+
+  // Summary and success measure are free text the owner chose to send
+  // (decision 5): the form warns, and they travel as written.
+  const free = harness({
+    project: readyProject({
+      description: "Contact jane@example.com",
+      benefit: "Call +49 89 1234 5678",
+    }),
+  });
+  expect((await free.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  expect(free.fake.submits[0].payload.profile).toMatchObject({
+    summary: "Contact jane@example.com",
+    successMeasure: "Call +49 89 1234 5678",
+  });
+});
+
+test("the destination comes from this dialog and is re-checked with chooseContext, never from preferences or the hint", async () => {
+  // The project's planning note names te-ops, and the harness has no
+  // preference store at all: only the request body can name a destination.
+  const h = harness();
+  h.fake.onSubmit = async (envelope) => {
+    expect(h.fake.calls.slice(0, 2)).toEqual([
+      "workspaces:fresh",
+      "projects:hr-de",
+    ]);
+    expect(envelope.payload.target.workspaceId).toBe("hr-de");
+    return {
+      state: "ok",
+      data: {
+        submissionId: os.submissionId,
+        receivedAt: os.receivedAt,
+        payloadSha256: os.payloadSha256,
+        duplicate: false,
+      },
+    };
+  };
+  expect((await h.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  expect(h.store.ops()[0].destination_workspace_id).toBe("hr-de");
+
+  for (const [destination, status, code] of [
+    ["gone", 404, "workspace_not_found"],
+    ["archive", 409, "workspace_disabled"],
+  ] as const) {
+    const other = harness();
+    const response = await other.route.POST(sendTo(destination), ATLAS_ID);
+    expect(response.status, destination).toBe(status);
+    expect(await response.json()).toMatchObject({ code });
+    expect(other.store.ops()).toEqual([]);
+    expect(other.fake.submits).toEqual([]);
+  }
+  const bad = harness();
+  for (const body of [
+    { revision: 7 },
+    { destinationWorkspaceId: "hr-de", revision: 7, workspaceHint: "te-ops" },
+    { destinationWorkspaceId: "../etc", revision: 7 },
+  ])
+    expect((await bad.route.POST(send(body), ATLAS_ID)).status).toBe(400);
+  const stale = await bad.route.POST(sendTo("hr-de", 6), ATLAS_ID);
+  expect(stale.status).toBe(409);
+  expect(await stale.json()).toMatchObject({ code: "project_changed" });
+  expect(bad.fake.calls).toEqual([]);
+  // An unfinished draft is refused with the missing items, unsent.
+  const draft = harness({
+    project: readyProject({ onboarding: {}, onboardingStage: "Pilot" }),
+  });
+  const notReady = await draft.route.POST(sendTo("hr-de"), ATLAS_ID);
+  expect(notReady.status).toBe(400);
+  expect(await notReady.json()).toMatchObject({
+    code: "not_ready",
+    missing: ["countryCode", "worksCouncilRelevant", "ready"],
+  });
+  expect(draft.fake.calls).toEqual([]);
+  expect(draft.store.ops()).toEqual([]);
+});
+
+test("Linked appears only after read:context confirms the promoted project, then setup advances", async () => {
+  const h = harness();
+  expect((await h.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  h.fake.onRead = h.readAs("promoted");
+  // Too soon: the first read-back waits a minute after the send.
+  h.fake.calls.length = 0;
+  expect((await h.status()).operation?.stage).toBe("submitted");
+  expect(h.fake.calls).toEqual([]);
+  h.tick(61_000);
+  const accepted = await h.status();
+  expect(accepted.operation).toMatchObject({
+    state: "promoted",
+    stage: "submitted",
+    reasonCode: "project_not_visible",
+  });
+  expect(accepted.link).toBeNull();
+  expect(h.store.links()).toEqual([]);
+  expect(h.fake.calls).toEqual([
+    `read:${os.submissionId}`,
+    "workspaces:fresh",
+    "projects:hr-de",
+  ]);
+  // Within the minute nothing is read again, however often the page asks.
+  h.fake.calls.length = 0;
+  await h.status();
+  await h.status();
+  expect(h.fake.calls).toEqual([]);
+  // Once read:context lists the project, the link is written, then shown.
+  h.fake.projects["hr-de"] = structuredClone(os.context.projectsAfterPromotion);
+  h.tick(61_000);
+  const linked = await h.status();
+  expect(linked.operation).toMatchObject({ state: "linked", stage: "linked" });
+  expect(linked.link).toMatchObject({
+    workspaceId: "hr-de",
+    osProjectId: "payroll-rollout",
+    accessState: "active",
+  });
+  expect(h.store.links()).toEqual([
+    {
+      installation_id: "atlas-test",
+      os_instance_id: os.context.instanceId,
+      workspace_id: "hr-de",
+      os_project_id: "payroll-rollout",
+      atlas_project_id: ATLAS_ID,
+      submission_id: os.submissionId,
+      linked_at: expect.any(String),
+      linked_by: "user-1",
+      source_revision: 7,
+      last_checked_at: expect.any(String),
+      access_state: "active",
+    },
+  ]);
+  h.fake.onRead = h.readAs("setupInProgress");
+  h.tick(61_000);
+  expect(await h.status()).toMatchObject({
+    operation: { stage: "setup-in-progress", setupState: "awaiting-cowork" },
+    pollable: true,
+  });
+  h.fake.onRead = h.readAs("setupComplete");
+  h.tick(61_000);
+  expect(await h.status()).toMatchObject({
+    operation: { stage: "setup-complete" },
+    pollable: false,
+  });
+  h.fake.calls.length = 0;
+  h.tick(61_000);
+  await h.status();
+  expect(h.fake.calls).toEqual([]);
+  expect(h.store.links()).toHaveLength(1);
+});
+
+test("no link without the OS instanceId, and never onto an OS project another Atlas project holds", async () => {
+  const unknown = harness();
+  await unknown.route.POST(sendTo("hr-de"), ATLAS_ID);
+  unknown.fake.onRead = unknown.readAs("promoted");
+  unknown.fake.projects["hr-de"] = structuredClone(
+    os.context.projectsAfterPromotion,
+  );
+  delete unknown.fake.workspaces.instanceId;
+  unknown.tick(61_000);
+  const blind = await unknown.status();
+  expect(blind.operation).toMatchObject({
+    stage: "submitted",
+    reasonCode: "instance_unknown",
+  });
+  expect(blind.notice).toMatch(/instance/i);
+  expect(unknown.store.links()).toEqual([]);
+
+  const taken = harness();
+  taken.store.sqlite
+    .prepare(
+      "INSERT INTO atlas_project_links (installation_id,os_instance_id,workspace_id,os_project_id,atlas_project_id,submission_id,linked_at,linked_by,source_revision,last_checked_at,access_state) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+    )
+    .run(
+      "atlas-test",
+      os.context.instanceId,
+      "hr-de",
+      "payroll-rollout",
+      "11111111-2222-4333-8444-555555555555",
+      null,
+      os.receivedAt,
+      "user-0",
+      1,
+      os.receivedAt,
+      "active",
+    );
+  await taken.route.POST(sendTo("hr-de"), ATLAS_ID);
+  taken.fake.onRead = taken.readAs("promoted");
+  taken.fake.projects["hr-de"] = structuredClone(
+    os.context.projectsAfterPromotion,
+  );
+  taken.tick(61_000);
+  const conflict = await taken.status();
+  expect(conflict.operation).toMatchObject({
+    stage: "submitted",
+    reasonCode: "link_conflict",
+  });
+  expect(conflict.link).toBeNull();
+  expect(taken.store.links()).toHaveLength(1);
+});
+
+test("needs more info reopens the draft, and the next send uses a fresh key", async () => {
+  const h = harness();
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  h.fake.onRead = h.readAs("needsMoreInfo");
+  h.tick(61_000);
+  const reopened = await h.status();
+  expect(reopened).toMatchObject({
+    operation: {
+      state: "rejected",
+      stage: "needs-more-info",
+      reasonCode: "needs-more-info",
+    },
+    canSend: true,
+    retryPending: false,
+    pollable: false,
+  });
+  h.fake.onSubmit = async () => ({
+    state: "ok",
+    data: {
+      submissionId: os.otherSubmissionId,
+      receivedAt: os.receivedAt,
+      payloadSha256: os.payloadSha256,
+      duplicate: false,
+    },
+  });
+  expect((await h.route.POST(sendTo("te-ops"), ATLAS_ID)).status).toBe(202);
+  const [first, second] = h.store.ops();
+  expect(first).toMatchObject({ state: "rejected" });
+  expect(second).toMatchObject({
+    state: "filed",
+    submission_id: os.otherSubmissionId,
+    destination_workspace_id: "te-ops",
+  });
+  expect(second.idempotency_key).not.toBe(first.idempotency_key);
+  expect(h.fake.submits[1].payload.idempotencyKey).toBe(second.idempotency_key);
+});
+
+test("definitive OS refusals close the send; an OS subject lock is adopted only when it is this project's", async () => {
+  const h = harness();
+  h.fake.onSubmit = async () => ({ state: "refused" });
+  const refused = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  expect(refused.status).toBe(502);
+  expect(await refused.json()).toMatchObject({ code: "refused" });
+  expect(h.store.ops()[0]).toMatchObject({
+    state: "refused",
+    reason_code: "refused",
+  });
+  expect((await h.status(false)).operation?.stage).toBe("not-sent");
+
+  // FlightDeck already holds a request for this subject, one Atlas has no
+  // record of: adopt it once the read-back proves it is this project's,
+  // without sending again. The read-back does not say where it was sent or
+  // which revision it carries, so Atlas claims neither: not the te-ops this
+  // request named, and not revision 7.
+  h.fake.onSubmit = async () => ({
+    state: "already_submitted",
+    submissionId: os.submissionId,
+    osState: "filed",
+  });
+  const adopted = await h.route.POST(sendTo("te-ops"), ATLAS_ID);
+  expect(adopted.status).toBe(202);
+  expect(h.store.ops()[1]).toMatchObject({
+    state: "filed",
+    submission_id: os.submissionId,
+    received_at: os.receivedAt,
+    adopted: 1,
+    request_body: null,
+  });
+  expect(h.store.ops()[1].idempotency_key).not.toBe(
+    h.store.ops()[0].idempotency_key,
+  );
+  expect((await h.status(false)).operation).toMatchObject({
+    stage: "submitted",
+    adopted: true,
+    destinationWorkspaceId: null,
+    atlasRevision: null,
+  });
+  // Once promoted, the link takes FlightDeck's workspace and no revision.
+  h.fake.onRead = h.readAs("promoted");
+  h.fake.projects["hr-de"] = structuredClone(os.context.projectsAfterPromotion);
+  h.tick(61_000);
+  expect((await h.status()).link).toMatchObject({ workspaceId: "hr-de" });
+  expect(h.store.links()).toEqual([
+    expect.objectContaining({ workspace_id: "hr-de", source_revision: null }),
+  ]);
+
+  const stranger = harness();
+  stranger.fake.onSubmit = async () => ({
+    state: "already_submitted",
+    submissionId: os.otherSubmissionId,
+    osState: "filed",
+  });
+  stranger.fake.onRead = async () => {
+    const r = await stranger.readAs("filed")();
+    return r.state === "ok"
+      ? {
+          ...r,
+          data: {
+            ...r.data,
+            submissionId: os.otherSubmissionId,
+            subject: "atlas-11111111-2222-4333-8444-555555555555",
+          },
+        }
+      : r;
+  };
+  const clash = await stranger.route.POST(sendTo("hr-de"), ATLAS_ID);
+  expect(clash.status).toBe(409);
+  expect(await clash.json()).toMatchObject({ code: "already_submitted" });
+  expect(stranger.store.ops()[0]).toMatchObject({
+    state: "refused",
+    submission_id: null,
+  });
+});
+
+test("the stage list returns stored states for visible projects, and only a Super Admin refresh reads the OS", async () => {
+  const h = harness();
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  h.fake.calls.length = 0;
+  const response = await h.route.LIST(listRequest(false));
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({
+    stages: { [ATLAS_ID]: "submitted" },
+    checked: { [ATLAS_ID]: os.receivedAt },
+    retryAfter: null,
+  });
+  // FlightDeck asks for more information. Nobody has the form open.
+  h.fake.onRead = h.readAs("needsMoreInfo");
+  h.tick(5 * 60_000);
+  expect((await h.list(false)).stages[ATLAS_ID]).toBe("submitted");
+  // A member's list never reads the OS, and a refresh is same-origin only.
+  h.as("member-1", false);
+  expect((await h.list(true)).stages[ATLAS_ID]).toBe("submitted");
+  const crossSite = await h.route.LIST(
+    listRequest(true, { "Sec-Fetch-Site": "cross-site" }),
+  );
+  expect(crossSite.status).toBe(403);
+  expect(h.fake.calls).toEqual([]);
+  // The Super Admin's list (and the dashboard, which reads it) checks the
+  // send, so every list in Atlas follows FlightDeck.
+  h.as("user-1");
+  const followed = await h.list(true);
+  expect(followed.stages[ATLAS_ID]).toBe("needs-more-info");
+  expect(followed.checked[ATLAS_ID]).toBe("2026-09-22T09:05:00.000Z");
+  expect(h.fake.calls).toEqual([`read:${os.submissionId}`]);
+  h.as("member-1", false);
+  expect((await h.list(false)).stages[ATLAS_ID]).toBe("needs-more-info");
+});
+
+test("a list refresh checks at most two due sends a call, longest unchecked first, each at most every five minutes", async () => {
+  const h = harness({ project: null });
+  const ids = [1, 2, 3, 4, 5].map(
+    (n) => `${n}${n}${n}${n}${n}${n}${n}${n}-2222-4333-8444-555555555555`,
+  );
+  const submission = (n: number) => String(n).repeat(24);
+  // Checked 20, 10, never, 30 minutes ago and just now; the fifth project's
+  // send is not visible to the caller.
+  const checked = [
+    "2026-09-22T08:40:00.000Z",
+    "2026-09-22T08:50:00.000Z",
+    null,
+    "2026-09-22T08:30:00.000Z",
+    "2026-09-22T09:00:00.000Z",
+  ];
+  ids.forEach((id, i) => h.fileOther(id, submission(i + 1), checked[i]));
+  h.fake.visible.push(...ids.slice(0, 4));
+  h.fake.onRead = async (id) => {
+    const r = await h.readAs("filed")();
+    const n = Number(id[0]);
+    return r.state === "ok"
+      ? {
+          ...r,
+          data: { ...r.data, submissionId: id, subject: `atlas-${ids[n - 1]}` },
+        }
+      : r;
+  };
+  const reads = () => h.fake.calls.filter((c) => c.startsWith("read:"));
+  await h.list(true);
+  expect(reads()).toEqual([`read:${submission(3)}`, `read:${submission(4)}`]);
+  await h.list(true);
+  expect(reads().slice(2)).toEqual([
+    `read:${submission(1)}`,
+    `read:${submission(2)}`,
+  ]);
+  // Every visible send was checked within five minutes: nothing is read.
+  await h.list(true);
+  expect(reads()).toHaveLength(4);
+  // A rate limit stops the round and is passed on.
+  h.tick(5 * 60_000);
+  h.fake.onRead = async () => ({ state: "rate_limited", retryAfter: 30 });
+  const busy = await h.list(true);
+  expect(busy.retryAfter).toBe(30);
+  expect(reads()).toHaveLength(5);
+  expect(reads().some((r) => r.endsWith(submission(5)))).toBe(false);
+});
+
+// ── Browser: the To FlightDeck form over the running Atlas ────────────────
+
+// These tests write to the dev server's own database — the one the owner's
+// Atlas reads — so a project left behind is not just a red suite, it shows up
+// in Connections → To FlightDeck beside real projects. A test that runs out of
+// time never reaches its own `finally`: Playwright has already closed the
+// page, so `removeProject` cannot run. Two habits keep that from compounding.
+// Every project this file creates carries a token unique to the run, so a
+// leftover can never collide with a later run and resolve a row locator to
+// four elements; and the sweep below deletes anything an earlier run left,
+// before the first test and again after the last.
+// Playwright's 30 s default is a budget for browser interactions. These tests
+// drive the dev server end to end — Vite, workerd and the local D1 — and the
+// longest of them saves from a second tab three times over. On a loaded
+// machine that runs out, and running out is expensive here: the page closes
+// before the test's own `finally`, so the project it made is left behind.
+test.describe.configure({ timeout: 90_000 });
+
+const QA_MARK = " QA ";
+const RUN_TOKEN = `${Date.now().toString(36)}-${process.pid.toString(36)}`;
+const qa = (name: string) => `${name}${QA_MARK}${RUN_TOKEN}`;
+async function sweepQaProjects(browser: Browser) {
+  const page = await browser.newPage();
+  try {
+    await page.goto("/");
+    await page.evaluate(async (mark) => {
+      const body = (await (await fetch("/api/projects")).json()) as {
+        projects: Project[];
+      };
+      for (const p of body.projects.filter((p) => p.name.includes(mark)))
+        await fetch(`/api/projects/${p.id}?revision=${p.revision}`, {
+          method: "DELETE",
+        });
+    }, QA_MARK);
+  } finally {
+    await page.close();
+  }
+}
+test.beforeAll(async ({ browser }) => sweepQaProjects(browser));
+test.afterAll(async ({ browser }) => sweepQaProjects(browser));
+
+/** Opens the To FlightDeck tab and waits until it is really the open one.
+ * The button is there and clickable before React has hydrated the page, so a
+ * single click straight after a reload can be swallowed: the list then stays
+ * on From FlightDeck, and everything the test asks about the row is missing
+ * for a reason that has nothing to do with what it is testing. */
+async function openToFlightDeck(page: Page) {
+  const tab = page.getByRole("button", { name: /To FlightDeck/ });
+  await expect(async () => {
+    await tab.click();
+    await expect(tab).toHaveAttribute("aria-pressed", "true", {
+      timeout: 1_000,
+    });
+  }).toPass({ timeout: 15_000 });
+}
+
+async function createProject(page: Page, fields: Partial<Project>) {
+  return page.evaluate(
+    async (body) => {
+      const r = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return ((await r.json()) as { project: Project }).project;
+    },
+    { ...examples[0], tasks: [], ...fields },
+  );
+}
+async function updateProject(
+  page: Page,
+  project: Project,
+  fields: Partial<Project>,
+) {
+  return page.evaluate(
+    async ({ project, fields }) => {
+      const r = await fetch(`/api/projects/${project.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...project,
+          activity: undefined,
+          ...fields,
+          revision: project.revision,
+        }),
+      });
+      return ((await r.json()) as { project: Project }).project;
+    },
+    { project, fields },
+  );
+}
+async function removeProject(page: Page, id: string) {
+  await page.evaluate(async (id) => {
+    const body = (await (await fetch("/api/projects")).json()) as {
+      projects: Project[];
+    };
+    const p = body.projects.find((p: { id: string }) => p.id === id);
+    if (p)
+      await fetch(`/api/projects/${id}?revision=${p.revision}`, {
+        method: "DELETE",
+      });
+  }, id);
+}
+/** Answers the sidebar and Review's destination list with the fixture. */
+async function mockContext(page: Page) {
+  await page.route("**/api/flightdeck/context", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        state: "ok",
+        workspaces: os.context.workspaces.workspaces,
+        projects: os.context.projectsBeforePromotion.projects,
+        selected: { osWorkspaceId: "te-ops", osProjectId: "general" },
+        projectFallback: false,
+        retryAfter: null,
+        checkedAt: new Date().toISOString(),
+      }),
+    }),
+  );
+}
+function statusBody(
+  stage: NonNullable<OnboardingStatus["operation"]>["stage"] | null,
+  extra: Partial<OnboardingStatus> = {},
+): OnboardingStatus {
+  const state = {
+    "not-confirmed": "reserved",
+    submitted: "filed",
+    linked: "linked",
+    "setup-in-progress": "linked",
+    "setup-complete": "linked",
+    "needs-more-info": "rejected",
+    rejected: "rejected",
+    "not-sent": "refused",
+    closed: "refused",
+  } as const;
+  return {
+    operation: stage
+      ? {
+          state: state[stage],
+          stage,
+          destinationWorkspaceId: "hr-de",
+          submittedAt: os.receivedAt,
+          reasonCode:
+            stage === "needs-more-info"
+              ? "needs-more-info"
+              : stage === "closed"
+                ? "abandoned"
+                : null,
+          setupState:
+            stage === "setup-in-progress"
+              ? "awaiting-cowork"
+              : stage === "setup-complete"
+                ? "complete"
+                : stage === "linked"
+                  ? "none"
+                  : null,
+          atlasRevision: 2,
+          adopted: false,
+          updatedAt: os.receivedAt,
+          checkedAt: null,
+        }
+      : null,
+    link: null,
+    pendingPayload: null,
+    canSend:
+      !stage ||
+      ["needs-more-info", "rejected", "not-sent", "closed"].includes(stage),
+    canClose: false,
+    retryPending: false,
+    // What the server itself calls pollable: filed, promoted, or linked
+    // before setup is complete.
+    pollable:
+      !!stage &&
+      ["submitted", "linked", "setup-in-progress"].includes(stage as string),
+    notice: null,
+    retryAfter: null,
+    ...extra,
+  };
+}
+
 test("onboarding drafts persist, export, and remove without creating an OS project", async ({
   page,
   request,
@@ -45,25 +2396,38 @@ test("onboarding drafts persist, export, and remove without creating an OS proje
   expect(
     (await request.post("/api/flightdeck/import", { data: {} })).status(),
   ).toBe(401);
+  expect(
+    (
+      await request.post(`/api/flightdeck/onboard/${ATLAS_ID}`, {
+        data: { destinationWorkspaceId: "hr-de", revision: 1 },
+      })
+    ).status(),
+  ).toBe(401);
+  expect(
+    (
+      await request.post(`/api/flightdeck/onboard/${ATLAS_ID}/close`, {
+        data: { updatedAt: new Date().toISOString() },
+      })
+    ).status(),
+  ).toBe(401);
   await page.goto("/?view=connection");
-  await expect(page.getByText("Not connected", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Import from FlightDeck:", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Not enabled", { exact: true })).toBeVisible();
   await expect(
     page.getByRole("heading", {
       name: "Your OS project list will appear here",
     }),
   ).toBeVisible();
-  const project = await page.evaluate(async (fields) => {
-    const r = await fetch("/api/projects", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...fields, name: "Bridge QA", tasks: [] }),
-    });
-    return ((await r.json()) as { project: Project }).project;
-  }, examples[0]);
+  const project = await createProject(page, { name: qa("Bridge") });
   try {
     await page.reload();
-    await page.getByRole("button", { name: /To FlightDeck/ }).click();
-    await page
+    await openToFlightDeck(page);
+    const row = page.locator("article.bridge-project", {
+      hasText: qa("Bridge"),
+    });
+    await row
       .getByRole("button", { name: "Prepare onboarding", exact: true })
       .click();
     await page.getByLabel("Proposed OS project name").fill("Operations pilot");
@@ -72,17 +2436,32 @@ test("onboarding drafts persist, export, and remove without creating an OS proje
       .fill("Operations Europe");
     await page.getByRole("button", { name: "Save onboarding draft" }).click();
     await expect(
-      page.getByText("Draft prepared", { exact: true }),
+      row.getByText("Draft prepared", { exact: true }),
+    ).toBeVisible();
+    // The badge follows client state; the reload below reads the database, so
+    // wait for the save itself to be confirmed before throwing the page away.
+    await expect(
+      page.getByRole("status").filter({ hasText: "Onboarding draft saved" }),
     ).toBeVisible();
     await page.reload();
-    await page.getByRole("button", { name: /To FlightDeck/ }).click();
-    await expect(page.getByText(/Operations Europe/)).toBeVisible();
+    await openToFlightDeck(page);
+    await expect(row.getByText(/Operations Europe/)).toBeVisible();
     const downloadPromise = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export draft" }).click();
+    await row.getByRole("button", { name: "Export draft" }).click();
     expect((await downloadPromise).suggestedFilename()).toBe(
       `flightdeck-draft-${project.id}.md`,
     );
+    // The real routes: onboarding status reads the local tables (migration
+    // 0004), a malformed send is refused before FlightDeck is contacted, and
+    // import stays disconnected. No response carries the credential.
     const responses = await page.evaluate(async (id) => {
+      const status = await fetch(`/api/flightdeck/onboard/${id}`);
+      const list = await fetch("/api/flightdeck/onboard?refresh=1");
+      const close = await fetch(`/api/flightdeck/onboard/${id}/close`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ updatedAt: new Date().toISOString() }),
+      });
       const onboard = await fetch(`/api/flightdeck/onboard/${id}`, {
         method: "POST",
       });
@@ -93,21 +2472,952 @@ test("onboarding drafts persist, export, and remove without creating an OS proje
           ref: { instanceId: "fake", workspaceId: "fake", projectId: "fake" },
         }),
       });
-      return { onboard: onboard.status, imported: imported.status };
+      return {
+        status: status.status,
+        statusBody: await status.text(),
+        list: list.status,
+        listBody: await list.text(),
+        close: close.status,
+        closeBody: await close.text(),
+        onboard: onboard.status,
+        onboardBody: await onboard.text(),
+        imported: imported.status,
+      };
     }, project.id);
-    expect(responses).toEqual({ onboard: 503, imported: 503 });
-    await page.getByRole("button", { name: "Remove draft" }).click();
-    await expect(page.getByText("Not prepared", { exact: true })).toBeVisible();
+    expect(responses).toMatchObject({
+      status: 200,
+      list: 200,
+      close: 409,
+      onboard: 415,
+      imported: 503,
+    });
+    // Nothing was sent, so there is nothing to close.
+    expect(JSON.parse(responses.closeBody)).toMatchObject({
+      code: "not_closable",
+    });
+    expect(
+      onboardStagesSchema.parse(JSON.parse(responses.listBody)).stages,
+    ).not.toHaveProperty(project.id);
+    expect(
+      onboardingStatusSchema.parse(JSON.parse(responses.statusBody)),
+    ).toMatchObject({ operation: null, link: null });
+    for (const text of [
+      responses.statusBody,
+      responses.onboardBody,
+      responses.listBody,
+      responses.closeBody,
+    ])
+      expect(text).not.toMatch(/token|bearer|ATLAS_FLIGHTDECK|INBOUND/i);
+    await row.getByRole("button", { name: "Remove draft" }).click();
+    await expect(row.getByText("Not prepared", { exact: true })).toBeVisible();
   } finally {
-    await page.evaluate(async (id) => {
+    await removeProject(page, project.id);
+  }
+});
+
+test("the three-tab form prefills Basics, meters readiness, lists every field sent and follows the status", async ({
+  page,
+}) => {
+  await page.clock.install();
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const idea = opportunities.find((o) => o.id === "hr-onboarding")!;
+  const project = await createProject(page, {
+    name: qa("Onboarding"),
+    description: "Guide new HR users through approved tools.",
+    benefit: "",
+    functionArea: "HR",
+    category: "Consultancy pilot",
+    location: "Munich, Germany",
+    dueDate: "2026-12-01",
+    sponsor: "Dana Sponsor",
+    onboardingStage: "Pilot",
+    tasks: onboardingTasks(idea).map((t, i) =>
+      i === 1 ? { ...t, assignee: "Alex Assignee" } : t,
+    ),
+  });
+  const sent: unknown[] = [];
+  let status = statusBody(null);
+  await page.route(
+    `**/api/flightdeck/onboard/${project.id}**`,
+    async (route) => {
+      const r = route.request();
+      if (r.method() === "POST") {
+        sent.push(r.postDataJSON());
+        status = statusBody("submitted");
+        return route.fulfill({
+          status: 202,
+          contentType: "application/json",
+          body: JSON.stringify(status),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(status),
+      });
+    },
+  );
+  const refreshes: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes(`/api/flightdeck/onboard/${project.id}?refresh=1`))
+      refreshes.push(r.url());
+  });
+  try {
+    await page.reload();
+    await openToFlightDeck(page);
+    const row = page.locator("article.bridge-project", {
+      hasText: qa("Onboarding"),
+    });
+    await row
+      .getByRole("button", { name: "Prepare onboarding", exact: true })
+      .click();
+    const tabs = row.getByRole("tablist", { name: "FlightDeck onboarding" });
+    await expect(tabs.getByRole("tab")).toHaveText([
+      "Basics",
+      "FlightDeck details",
+      "Review & send",
+    ]);
+    await expect(tabs.getByRole("tab", { name: "Basics" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    // Basics is prefilled from the Atlas project.
+    await expect(row.getByLabel("Proposed OS project name")).toHaveValue(
+      qa("Onboarding"),
+    );
+    await expect(row.getByLabel("Summary")).toHaveValue(
+      "Guide new HR users through approved tools.",
+    );
+    await expect(row.getByLabel("Function area")).toHaveValue("HR");
+    const meter = row.getByRole("meter", {
+      name: "Required FlightDeck details",
+    });
+    // Label, function area, category and summary are prefilled.
+    await expect(meter).toHaveAttribute("aria-valuetext", "4 of 9 required");
+    // A missing item links straight to its field.
+    await row
+      .getByRole("list", { name: "Missing details" })
+      .getByRole("button", { name: "Country" })
+      .click();
+    await expect(
+      tabs.getByRole("tab", { name: "FlightDeck details" }),
+    ).toHaveAttribute("aria-selected", "true");
+    await expect(row.getByLabel("Country")).toBeFocused();
+    // The checklist offers role titles and the pilot's success measure.
+    await row
+      .getByRole("button", { name: "Apply checklist suggestions" })
+      .click();
+    await expect(meter).toHaveAttribute("aria-valuetext", "5 of 9 required");
+    await expect(row.getByLabel("Process owner role")).toHaveValue(
+      "Process owner",
+    );
+    await expect(row.getByLabel("Support owner role")).toHaveValue(
+      "Support owner",
+    );
+    await row.getByLabel("Country").selectOption("DE");
+    await row.getByLabel("Works council relevant").selectOption("unknown");
+    await row.getByLabel("Mark this project Ready for FlightDeck").check();
+    await row.getByLabel("New data source").fill("SAP HCM");
+    await row.getByRole("button", { name: "Add data source" }).click();
+    await expect(meter).toHaveAttribute("aria-valuetext", "8 of 9 required");
+    await row.getByRole("tab", { name: "Review & send" }).click();
+    const sendButton = row.getByRole("button", { name: "Send to FlightDeck" });
+    // Unsaved edits are never what gets sent.
+    await expect(sendButton).toBeDisabled();
+    await row.getByRole("button", { name: "Save onboarding draft" }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Onboarding draft saved" }),
+    ).toBeVisible();
+    await row.getByLabel("Destination workspace").selectOption("hr-de");
+    await expect(meter).toHaveAttribute("aria-valuetext", "9 of 9 required");
+    // Every field the payload carries is listed, and nothing that is not.
+    const review = row.getByRole("region", { name: "What will be sent" });
+    const saved = await page.evaluate(
+      async (id) =>
+        (
+          (await (await fetch(`/api/projects/${id}`)).json()) as {
+            project: Project;
+          }
+        ).project,
+      project.id,
+    );
+    for (const r of reviewRows(payloadFor(saved)))
+      await expect(
+        review.getByText(r.label, { exact: true }),
+        r.path,
+      ).toBeVisible();
+    await expect(review).not.toContainText("Dana");
+    await expect(review).not.toContainText("Alex");
+    await expect(row.getByRole("list", { name: "Never sent" })).toContainText(
+      "Sponsor",
+    );
+    await expect(sendButton).toBeEnabled();
+    await sendButton.click();
+    expect(sent).toEqual([
+      { destinationWorkspaceId: "hr-de", revision: saved.revision },
+    ]);
+    const timeline = row.getByRole("list", { name: "FlightDeck status" });
+    await expect(timeline.getByRole("listitem")).toHaveText([
+      "Submitted",
+      "Linked",
+      "Setup in progress",
+      "Setup complete",
+    ]);
+    await expect(timeline.locator('[aria-current="step"]')).toHaveText(
+      "Submitted",
+    );
+    // The draft is locked while FlightDeck reviews it.
+    await row.getByRole("tab", { name: "Basics" }).click();
+    await expect(row.getByLabel("Summary")).toBeDisabled();
+    // Polled at most once a minute.
+    const before = refreshes.length;
+    status = statusBody("linked", {
+      link: {
+        workspaceId: "hr-de",
+        osProjectId: "onboarding-qa",
+        linkedAt: os.receivedAt,
+        accessState: "active",
+      },
+    });
+    await page.clock.fastForward(30_000);
+    expect(refreshes.length).toBe(before);
+    await page.clock.fastForward(31_000);
+    await expect(timeline.locator('[aria-current="step"]')).toHaveText(
+      "Linked",
+    );
+    expect(refreshes.length).toBe(before + 1);
+    await expect(
+      row.getByText("Linked", { exact: true }).first(),
+    ).toBeVisible();
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
+test("a project FlightDeck has created reads as held, not as a draft under review, and cannot be unpicked from the row", async ({
+  page,
+}) => {
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const project = await createProject(page, {
+    name: qa("Created"),
+    description: "Summary",
+    benefit: "Measure",
+    functionArea: "HR",
+    onboardingStage: "Ready for FlightDeck",
+    flightdeckDraft: { label: qa("Created"), workspaceHint: "hr-de" },
+    onboarding: { countryCode: "DE", worksCouncilRelevant: "no" },
+  });
+  await page.route(
+    (url) => url.pathname === "/api/flightdeck/onboard",
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          stages: { [project.id]: "setup-complete" },
+          checked: { [project.id]: null },
+          retryAfter: null,
+        }),
+      }),
+  );
+  await page.route(`**/api/flightdeck/onboard/${project.id}**`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        statusBody("setup-complete", {
+          link: {
+            workspaceId: "hr-de",
+            osProjectId: "created-qa",
+            linkedAt: os.receivedAt,
+            accessState: "active",
+          },
+        }),
+      ),
+    }),
+  );
+  try {
+    await page.reload();
+    await openToFlightDeck(page);
+    const row = page.locator("article.bridge-project", {
+      hasText: qa("Created"),
+    });
+    await expect(
+      row.getByText("Setup complete", { exact: true }),
+    ).toBeVisible();
+    // The project exists in FlightDeck: the row must not offer to drop the
+    // draft it was created from, and must not call reading it "editing".
+    await expect(
+      row.getByRole("button", { name: "Remove draft" }),
+    ).toBeDisabled();
+    await expect(
+      row.getByRole("button", { name: "Remove draft" }),
+    ).toHaveAttribute("title", /linked to a FlightDeck project/i);
+    await expect(
+      row.getByRole("button", { name: "Edit draft", exact: true }),
+    ).toHaveCount(0);
+    await row.getByRole("button", { name: "View status", exact: true }).click();
+    // The form is read-only, and says why instead of leaving it unexplained.
+    await expect(
+      row.getByText(
+        "Linked to FlightDeck project created-qa in HR Germany. FlightDeck holds this project now, so the Atlas draft is kept as it was sent.",
+        { exact: false },
+      ),
+    ).toBeVisible();
+    await row.getByRole("tab", { name: "Basics" }).click();
+    await expect(row.getByLabel("Summary")).toBeDisabled();
+    await expect(
+      row.getByRole("button", { name: "Save onboarding draft" }),
+    ).toBeDisabled();
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
+test("needs more info reopens the draft for editing and sending again", async ({
+  page,
+}) => {
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const project = await createProject(page, {
+    name: qa("Reopen"),
+    description: "Summary",
+    benefit: "Measure",
+    functionArea: "HR",
+    onboardingStage: "Ready for FlightDeck",
+    flightdeckDraft: { label: qa("Reopen"), workspaceHint: "" },
+    onboarding: { countryCode: "DE", worksCouncilRelevant: "no" },
+  });
+  await page.route(`**/api/flightdeck/onboard/${project.id}**`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(statusBody("needs-more-info")),
+    }),
+  );
+  try {
+    await page.reload();
+    await openToFlightDeck(page);
+    const row = page.locator("article.bridge-project", {
+      hasText: qa("Reopen"),
+    });
+    await row.getByRole("button", { name: "Edit draft", exact: true }).click();
+    await expect(
+      row.getByText("FlightDeck asked for more information", { exact: false }),
+    ).toBeVisible();
+    await expect(row.getByLabel("Summary")).toBeEnabled();
+    await row.getByLabel("Summary").fill("Summary with the missing detail.");
+    await row.getByRole("button", { name: "Save onboarding draft" }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Onboarding draft saved" }),
+    ).toBeVisible();
+    await row.getByRole("tab", { name: "Review & send" }).click();
+    await row.getByLabel("Destination workspace").selectOption("hr-de");
+    await expect(
+      row.getByRole("button", { name: "Send to FlightDeck" }),
+    ).toBeEnabled();
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
+test("the Super Admin can close an unconfirmed send from the form, and the draft opens again", async ({
+  page,
+}) => {
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const project = await createProject(page, {
+    name: qa("Close"),
+    description: "Summary",
+    benefit: "Measure",
+    functionArea: "HR",
+    onboardingStage: "Ready for FlightDeck",
+    flightdeckDraft: { label: qa("Close"), workspaceHint: "" },
+    onboarding: { countryCode: "DE", worksCouncilRelevant: "no" },
+  });
+  const pendingPayload = buildOnboardingPayload({
+    project,
+    destinationWorkspaceId: "hr-de",
+    idempotencyKey: KEY,
+    installationId: "atlas-local",
+    requestedBy: HASH,
+  });
+  let status = statusBody("not-confirmed", {
+    retryPending: true,
+    canSend: true,
+    canClose: true,
+    pendingPayload,
+  });
+  status = {
+    ...status,
+    operation: {
+      ...status.operation!,
+      atlasRevision: project.revision,
+      reasonCode: "invalid_submission",
+    },
+  };
+  const closes: unknown[] = [];
+  const sends: unknown[] = [];
+  await page.route(`**/api/flightdeck/onboard/${project.id}**`, (route) => {
+    const r = route.request();
+    if (r.method() === "POST") {
+      if (new URL(r.url()).pathname.endsWith("/close")) {
+        closes.push(r.postDataJSON());
+        status = statusBody("closed");
+      } else sends.push(r.postDataJSON());
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(status),
+    });
+  });
+  try {
+    await page.reload();
+    await openToFlightDeck(page);
+    const row = page.locator("article.bridge-project", { hasText: qa("Close") });
+    await row.getByRole("button", { name: "Edit draft", exact: true }).click();
+    // Locked while the send is unconfirmed; Retry is the normal way on.
+    await expect(
+      row.getByRole("button", { name: "Save onboarding draft" }),
+    ).toBeDisabled();
+    await row.getByRole("tab", { name: "Review & send" }).click();
+    await expect(row.getByRole("button", { name: "Retry send" })).toBeEnabled();
+    // Closing asks first and says what it means.
+    await row
+      .getByRole("button", { name: "Close this unconfirmed send" })
+      .click();
+    await expect(
+      row.getByText(/if FlightDeck did file it, the next send follows/i),
+    ).toBeVisible();
+    await row.getByRole("button", { name: "Keep it", exact: true }).click();
+    expect(closes).toEqual([]);
+    await row
+      .getByRole("button", { name: "Close this unconfirmed send" })
+      .click();
+    await row
+      .getByRole("button", { name: "Close the send", exact: true })
+      .click();
+    await expect.poll(() => closes).toEqual([{ updatedAt: os.receivedAt }]);
+    expect(sends).toEqual([]);
+    await expect(
+      row.getByText(/closed this unconfirmed send/i).first(),
+    ).toBeVisible();
+    await expect(row.getByText("Send closed", { exact: true })).toBeVisible();
+    await expect(
+      row.getByRole("button", { name: "Close this unconfirmed send" }),
+    ).toHaveCount(0);
+    await expect(
+      row.getByRole("button", { name: "Save onboarding draft" }),
+    ).toBeEnabled();
+    await expect(
+      row.getByRole("region", { name: "What will be sent" }),
+    ).toBeVisible();
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
+test("the To FlightDeck list and the dashboard follow FlightDeck without the form open, and say when it last checked", async ({
+  page,
+}) => {
+  await page.clock.install();
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const project = await createProject(page, {
+    name: qa("Follow"),
+    functionArea: "HR",
+    flightdeckDraft: { label: qa("Follow"), workspaceHint: "" },
+  });
+  let stage = "submitted";
+  let checkedAt: string | null = null;
+  const lists: string[] = [];
+  await page.route(
+    (url) => url.pathname === "/api/flightdeck/onboard",
+    (route) => {
+      lists.push(route.request().url());
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          stages: { [project.id]: stage },
+          checked: { [project.id]: checkedAt },
+          retryAfter: null,
+        }),
+      });
+    },
+  );
+  const forms: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes(`/api/flightdeck/onboard/${project.id}`))
+      forms.push(r.url());
+  });
+  try {
+    await page.reload();
+    await openToFlightDeck(page);
+    const row = page.locator("article.bridge-project", {
+      hasText: qa("Follow"),
+    });
+    await expect(row.getByText("Submitted", { exact: true })).toBeVisible();
+    await expect(
+      row.getByText("Not checked with FlightDeck yet", { exact: true }),
+    ).toBeVisible();
+    // The Super Admin's list asks the server to check FlightDeck.
+    await expect
+      .poll(() => lists.map((u) => new URL(u).search).at(-1))
+      .toBe("?refresh=1");
+    stage = "linked";
+    checkedAt = "2026-09-22T09:05:00.000Z";
+    await page.clock.fastForward(61_000);
+    await expect(row.getByText("Linked", { exact: true })).toBeVisible();
+    await expect(row.getByText(/^Last checked with FlightDeck/)).toBeVisible();
+    stage = "needs-more-info";
+    await page.clock.fastForward(61_000);
+    await expect(
+      row.getByText("Needs more info", { exact: true }),
+    ).toBeVisible();
+    // The form was never opened, and never asked.
+    await expect(row.getByRole("tablist")).toHaveCount(0);
+    expect(forms).toEqual([]);
+    // The dashboard card reads the same list.
+    await page.goto("/");
+    await expect(
+      page.getByText(
+        "Onboarding: 0 sent to FlightDeck, 0 linked, 1 need more info.",
+      ),
+    ).toBeVisible();
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
+test("one lock for both surfaces: every state the form locks shows a stage the row locks, with a reason", () => {
+  // The form knows the operation state, the list row knows only the stage.
+  // They must answer the same question the same way for every operation a
+  // status read-back can describe, or the row offers what the form forbids.
+  const reasons = [null, ...rejectionReasons, "abandoned", "os_unreachable"];
+  const setups = [null, ...setupStates];
+  const produced = new Set<OnboardingStage>();
+  for (const state of operationStates)
+    for (const setupState of setups)
+      for (const reasonCode of reasons) {
+        const stage = stageFor({ state, reasonCode, setupState });
+        if (isLockedState(state)) produced.add(stage);
+        expect({
+          state,
+          setupState,
+          reasonCode,
+          locked: isDraftLocked(stage),
+          // A locked stage always says why; an open one never claims to.
+          reason: !!lockNote(stage),
+        }).toEqual({
+          state,
+          setupState,
+          reasonCode,
+          locked: isLockedState(state),
+          reason: isLockedState(state),
+        });
+      }
+  // The derived list, pinned: a new branch in stageFor() has to be answered
+  // here and in LOCK_NOTE rather than quietly unlocking a row.
+  expect([...lockedStages].sort()).toEqual([
+    "linked",
+    "not-confirmed",
+    "setup-complete",
+    "setup-in-progress",
+    "submitted",
+  ]);
+  expect([...lockedStages].sort()).toEqual([...produced].sort());
+  // Saying when Atlas last checked is a smaller set than being locked: a
+  // status that can still move on its own is always a locked draft.
+  for (const stage of movingStages) expect(isDraftLocked(stage)).toBe(true);
+  expect(movingStages.some((s) => !lockedStages.includes(s))).toBe(false);
+  // And that smaller set is the server's own: the row promises "last
+  // checked" for exactly the sends the server still reads back.
+  for (const state of operationStates)
+    for (const setupState of setups)
+      expect({
+        state,
+        setupState,
+        moving: isStatusMoving(
+          stageFor({ state, reasonCode: null, setupState }),
+        ),
+      }).toEqual({
+        state,
+        setupState,
+        moving: isPollable({ state, setup_state: setupState }),
+      });
+  // "FlightDeck is reviewing this" is never said of a created project.
+  expect(lockNote("setup-complete")).toMatch(/linked to a FlightDeck project/i);
+  expect(lockNote("not-confirmed")).toMatch(/not confirmed/i);
+  expect(lockNote("needs-more-info")).toBe("");
+});
+
+test("the list cannot remove a draft FlightDeck is still reviewing, and offers the status instead", async ({
+  page,
+}) => {
+  await page.clock.install();
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const project = await createProject(page, {
+    name: qa("Locked Row"),
+    functionArea: "HR",
+    // No planning note: the subtitle then has to say something of its own,
+    // which is where it used to claim a workspace was still to be chosen for
+    // a project FlightDeck already held.
+    flightdeckDraft: { label: qa("Locked Row"), workspaceHint: "" },
+  });
+  let stage = "submitted";
+  await page.route(
+    (url) => url.pathname === "/api/flightdeck/onboard",
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          stages: { [project.id]: stage },
+          checked: { [project.id]: null },
+          retryAfter: null,
+        }),
+      }),
+  );
+  try {
+    await page.reload();
+    await openToFlightDeck(page);
+    const row = page.locator("article.bridge-project", {
+      hasText: qa("Locked Row"),
+    });
+    await expect(row.getByText("Submitted", { exact: true })).toBeVisible();
+    const remove = row.getByRole("button", { name: "Remove draft" });
+    const edit = row.getByRole("button", { name: "Edit draft", exact: true });
+    const status = row.getByRole("button", {
+      name: "View status",
+      exact: true,
+    });
+    // What the row says about the project, beside the badge. A project
+    // FlightDeck holds is with FlightDeck; an open draft has yet to choose
+    // where it goes, and it chooses that in Review & send, not by connecting.
+    const subtitle = row.locator("p").first();
+    // The form calls the draft locked for every state FlightDeck may hold —
+    // unconfirmed, under review, linked and set up — and the row outside the
+    // form must not be the way around that promise. Removing it would drop
+    // the name FlightDeck is reviewing, break Export draft, drop the project
+    // from this tab's count, and empty the draft a "Needs more info" reopens.
+    for (const [locked, label] of [
+      ["not-confirmed", "Not confirmed"],
+      ["submitted", "Submitted"],
+      ["linked", "Linked"],
+      ["setup-in-progress", "Setup in progress"],
+      ["setup-complete", "Setup complete"],
+    ] as const) {
+      stage = locked;
+      await page.clock.fastForward(61_000);
+      await expect(row.getByText(label, { exact: true })).toBeVisible();
+      await expect(remove).toBeVisible();
+      await expect(remove).toBeDisabled();
+      // And it says why, in words true of that stage.
+      await expect(remove).toHaveAttribute("title", lockNote(locked));
+      await expect(edit).toHaveCount(0);
+      await expect(status).toBeEnabled();
+      // Never "choose a workspace" beside a project FlightDeck already holds.
+      await expect(subtitle).toHaveText("HR · With FlightDeck");
+      // Read-only export is untouched.
+      await expect(
+        row.getByRole("button", { name: "Export draft" }),
+      ).toBeEnabled();
+    }
+    // Once FlightDeck hands it back, the row is the owner's again.
+    for (const [open, label] of [
+      ["needs-more-info", "Needs more info"],
+      ["rejected", "Declined"],
+      ["not-sent", "Not sent"],
+      ["closed", "Send closed"],
+    ] as const) {
+      stage = open;
+      await page.clock.fastForward(61_000);
+      await expect(row.getByText(label, { exact: true })).toBeVisible();
+      await expect(remove).toBeEnabled();
+      await expect(edit).toBeEnabled();
+      await expect(status).toHaveCount(0);
+      // An open draft has a destination to choose, and chooses it on Send.
+      await expect(subtitle).toHaveText("HR · Destination chosen when you send");
+    }
+    // A planning note, where there is one, is shown as the owner wrote it.
+    await updateProject(page, project, {
+      flightdeckDraft: { label: qa("Locked Row"), workspaceHint: "hr-de" },
+    });
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(subtitle).toHaveText("HR · hr-de");
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
+test("after a send the form shows where it went and which revision FlightDeck holds, never a missing destination", async ({
+  page,
+}) => {
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const first = await createProject(page, {
+    name: qa("Sent"),
+    description: "Summary v1: contact alex@example.com",
+    benefit: "Measure",
+    functionArea: "HR",
+    onboardingStage: "Ready for FlightDeck",
+    flightdeckDraft: { label: qa("Sent"), workspaceHint: "" },
+    onboarding: { countryCode: "DE", worksCouncilRelevant: "no" },
+  });
+  const sentPayload = buildOnboardingPayload({
+    project: first,
+    destinationWorkspaceId: "hr-de",
+    idempotencyKey: KEY,
+    installationId: "atlas-local",
+    requestedBy: HASH,
+  });
+  // Edited elsewhere in Atlas after the send: a new revision, clean text.
+  const project = await updateProject(page, first, {
+    description: "Summary v2: no personal data",
+  });
+  expect(project.revision).toBe(first.revision + 1);
+  const op = { atlasRevision: first.revision, destinationWorkspaceId: "hr-de" };
+  let status = statusBody("submitted");
+  status = { ...status, operation: { ...status.operation!, ...op } };
+  const posts: unknown[] = [];
+  await page.route(`**/api/flightdeck/onboard/${project.id}**`, (route) => {
+    if (route.request().method() === "POST")
+      posts.push(route.request().postDataJSON());
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(status),
+    });
+  });
+  try {
+    await page.reload();
+    await openToFlightDeck(page);
+    const row = page.locator("article.bridge-project", { hasText: qa("Sent") });
+    await row.getByRole("button", { name: "Edit draft", exact: true }).click();
+    await expect(row.getByText(/Sent for review to HR Germany/)).toBeVisible();
+    // Sent: nothing is "missing", and nothing claims to be about to be sent.
+    await expect(row.getByRole("meter")).toHaveCount(0);
+    await expect(
+      row.getByRole("list", { name: "Missing details" }),
+    ).toHaveCount(0);
+    await row.getByRole("tab", { name: "Review & send" }).click();
+    await expect(row.getByLabel("Destination workspace")).toHaveCount(0);
+    await expect(
+      row.getByRole("region", { name: "What will be sent" }),
+    ).toHaveCount(0);
+    const record = row.getByRole("region", { name: "Sent to FlightDeck" });
+    await expect(record).toContainText("HR Germany");
+    await expect(record).toContainText(`revision ${first.revision}`);
+    await expect(record).toContainText(`now at revision ${project.revision}`);
+    await expect(row.getByText("Missing", { exact: true })).toHaveCount(0);
+
+    // Not confirmed: Review lists exactly what Retry resends (revision 1,
+    // with its email), says the later edit is not in it, and Retry names
+    // that revision.
+    status = statusBody("not-confirmed", {
+      retryPending: true,
+      canSend: true,
+      pendingPayload: sentPayload,
+    });
+    status = { ...status, operation: { ...status.operation!, ...op } };
+    await page.reload();
+    await openToFlightDeck(page);
+    await row.getByRole("button", { name: "Edit draft", exact: true }).click();
+    await expect(row.getByRole("meter")).toHaveCount(0);
+    await row.getByRole("tab", { name: "Review & send" }).click();
+    const resend = row.getByRole("region", { name: "What Retry send resends" });
+    await expect(resend).toContainText("Summary v1: contact alex@example.com");
+    await expect(resend).not.toContainText("Summary v2");
+    await expect(row.getByText(/later edits are not included/i)).toBeVisible();
+    await expect(row.getByText(/HR Germany/).first()).toBeVisible();
+    await row.getByRole("button", { name: "Retry send" }).click();
+    await expect
+      .poll(() => posts)
+      .toEqual([{ destinationWorkspaceId: "hr-de", revision: first.revision }]);
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
+test("a save elsewhere while the form is open refreshes Review, and an edited draft can neither overwrite it nor be sent", async ({
+  page,
+}) => {
+  // The longest test here: three saves from another tab, each a real round
+  // trip, plus a send. It is the one that ran out of the default budget; the
+  // file's own budget above is set for it.
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const project = await createProject(page, {
+    name: qa("Stale"),
+    description: "Reviewed summary v1",
+    benefit: "Measure",
+    functionArea: "HR",
+    onboardingStage: "Ready for FlightDeck",
+    flightdeckDraft: { label: qa("Stale"), workspaceHint: "" },
+    onboarding: { countryCode: "DE", worksCouncilRelevant: "no" },
+  });
+  const posts: unknown[] = [];
+  await page.route(`**/api/flightdeck/onboard/${project.id}**`, (route) => {
+    if (route.request().method() === "POST")
+      posts.push(route.request().postDataJSON());
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        statusBody(route.request().method() === "POST" ? "submitted" : null),
+      ),
+    });
+  });
+  // Atlas reloads its projects on focus (and every minute); this is the
+  // same reload, without the wait.
+  const reloadProjects = () =>
+    page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  const latest = async () =>
+    page.evaluate(async (id) => {
       const body = (await (await fetch("/api/projects")).json()) as {
         projects: Project[];
       };
-      const p = body.projects.find((p: { id: string }) => p.id === id);
-      if (p)
-        await fetch(`/api/projects/${id}?revision=${p.revision}`, {
-          method: "DELETE",
-        });
+      return body.projects.find((p) => p.id === id)!;
     }, project.id);
+  try {
+    await page.reload();
+    await openToFlightDeck(page);
+    const row = page.locator("article.bridge-project", { hasText: qa("Stale") });
+    await row.getByRole("button", { name: "Edit draft", exact: true }).click();
+
+    // Edited here, then saved elsewhere: the edits stay, but they were made
+    // on revision 1, so neither Save nor Send may go ahead.
+    await row.getByLabel("Summary").fill("My unsaved summary");
+    const elsewhere = await updateProject(page, project, {
+      description:
+        "Changed by another editor: call Jane Doe on +49 151 23456789",
+    });
+    expect(elsewhere.revision).toBe(project.revision + 1);
+    await reloadProjects();
+    const conflict = row.getByText(
+      new RegExp(
+        `saved elsewhere \\(now revision ${elsewhere.revision}\\) after you started editing revision ${project.revision}`,
+      ),
+    );
+    await expect(conflict).toBeVisible();
+    await expect(row.getByLabel("Summary")).toHaveValue("My unsaved summary");
+    await expect(
+      row.getByRole("button", { name: "Save onboarding draft" }),
+    ).toBeDisabled();
+    await row.getByRole("tab", { name: "Review & send" }).click();
+    await row.getByLabel("Destination workspace").selectOption("hr-de");
+    const sendButton = row.getByRole("button", { name: "Send to FlightDeck" });
+    await expect(sendButton).toBeDisabled();
+    await expect(
+      row.getByText(/This project was saved elsewhere\. Load the latest/),
+    ).toBeVisible();
+    expect((await latest()).description).toBe(elsewhere.description);
+
+    // Loading the latest version shows exactly what the server would send,
+    // with the free-text warning for it.
+    await row
+      .getByRole("button", {
+        name: `Discard my edits and load revision ${elsewhere.revision}`,
+      })
+      .click();
+    await expect(conflict).toHaveCount(0);
+    const review = row.getByRole("region", { name: "What will be sent" });
+    await expect(review).toContainText("Jane Doe");
+    await expect(review).not.toContainText("My unsaved summary");
+    await expect(
+      row.getByText(/Summary is sent as written.*phone number/i),
+    ).toBeVisible();
+
+    // An untouched draft follows a save elsewhere on its own, and Send
+    // confirms the revision Review shows.
+    const third = await updateProject(page, elsewhere, {
+      description: "Summary v3 from another tab",
+    });
+    await reloadProjects();
+    await expect(review).toContainText("Summary v3 from another tab");
+    await expect(review).not.toContainText("Jane Doe");
+    await expect(
+      row.getByText(
+        new RegExp(
+          `saved elsewhere, so this form now shows revision ${third.revision}`,
+        ),
+      ),
+    ).toBeVisible();
+    await expect(sendButton).toBeEnabled();
+    await sendButton.click();
+    await expect
+      .poll(() => posts)
+      .toEqual([{ destinationWorkspaceId: "hr-de", revision: third.revision }]);
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
+test("Review warns about personal details in free text and blocks them in every other field", async ({
+  page,
+}) => {
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const project = await createProject(page, {
+    name: qa("Privacy"),
+    description: "Guide new HR users. Contact jane@example.com",
+    benefit: "Measure",
+    functionArea: "HR",
+    onboardingStage: "Ready for FlightDeck",
+    flightdeckDraft: { label: qa("Privacy"), workspaceHint: "" },
+    onboarding: { countryCode: "DE", worksCouncilRelevant: "no" },
+  });
+  await page.route(`**/api/flightdeck/onboard/${project.id}**`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(statusBody(null)),
+    }),
+  );
+  try {
+    await page.reload();
+    await openToFlightDeck(page);
+    const row = page.locator("article.bridge-project", {
+      hasText: qa("Privacy"),
+    });
+    await row.getByRole("button", { name: "Edit draft", exact: true }).click();
+    await row.getByRole("tab", { name: "Review & send" }).click();
+    const review = row.getByRole("region", { name: "What will be sent" });
+    await expect(review).toContainText("Contact jane@example.com");
+    await expect(
+      row.getByText(/Summary is sent as written.*email address/i),
+    ).toBeVisible();
+    const never = row.getByRole("list", { name: "Never sent" });
+    await expect(never).toContainText("Sponsor");
+    await expect(never).not.toContainText(/any email address/i);
+    await row.getByLabel("Destination workspace").selectOption("hr-de");
+    const sendButton = row.getByRole("button", { name: "Send to FlightDeck" });
+    await expect(sendButton).toBeEnabled();
+    // A role title is never a person: an email there blocks the send.
+    await row.getByRole("tab", { name: "FlightDeck details" }).click();
+    await row.getByLabel("Process owner role").fill("jane@example.com");
+    await expect(
+      row.getByText(
+        /Atlas will not send an email address or phone number here/,
+      ),
+    ).toBeVisible();
+    await row.getByRole("button", { name: "Save onboarding draft" }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Onboarding draft saved" }),
+    ).toBeVisible();
+    await row.getByRole("tab", { name: "Review & send" }).click();
+    await expect(sendButton).toBeDisabled();
+    await expect(
+      row.getByText(
+        /Remove the email address or phone number from: Process owner \(role title\)/,
+      ),
+    ).toBeVisible();
+  } finally {
+    await removeProject(page, project.id);
   }
 });
