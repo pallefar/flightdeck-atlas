@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ArrowUpRight,
   Check,
+  Clock,
   Layers3,
   Plus,
   Send,
@@ -29,6 +30,7 @@ import {
   fieldLabel,
   headcountBands,
   isDraftLocked,
+  onboardingSummaryLine,
   onboardErrorSchema,
   onboardStagesSchema,
   onboardingStatusSchema,
@@ -54,6 +56,9 @@ const TABS: { id: OnboardingTab; label: string }[] = [
   { id: "review", label: "Review & send" },
 ];
 const POLL_MS = 60_000;
+/** The first retry after the form could not load its status at all: the
+ * draft stays read-only until it has, so the wait starts short. */
+const FIRST_RETRY_MS = 5_000;
 const MAX_BACKOFF_MS = 15 * 60_000;
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const PREVIEW_KEY = "00000000-0000-4000-8000-000000000000";
@@ -205,7 +210,7 @@ function fieldsFrom(p: Project, d: Draft): ProjectFields {
   };
 }
 
-async function fetchStatus(projectId: string, refresh: boolean) {
+export async function fetchStatus(projectId: string, refresh: boolean) {
   try {
     const response = await fetch(
       `/api/flightdeck/onboard/${encodeURIComponent(projectId)}${refresh ? "?refresh=1" : ""}`,
@@ -233,6 +238,7 @@ function useOnboardingStatus(
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const delay = useRef(POLL_MS);
+  const firstRetry = useRef(FIRST_RETRY_MS);
   const show = useCallback(
     (next: OnboardingStatus) => {
       setStatus(next);
@@ -271,14 +277,19 @@ function useOnboardingStatus(
     };
   }, [projectId, superAdmin, settle]);
   // Everyone's open form follows the stored status; only the Super Admin's
-  // asks the server to read FlightDeck.
+  // asks the server to read FlightDeck. A form that never loaded its status
+  // keeps asking too (sooner at first), since its draft stays read-only
+  // until it knows.
   useEffect(() => {
-    if (!status?.pollable) return;
+    const unknown = !status && failed;
+    if (!status?.pollable && !unknown) return;
+    const wait = unknown ? firstRetry.current : delay.current;
     const timer = window.setTimeout(() => {
+      if (unknown) firstRetry.current = Math.min(wait * 2, POLL_MS);
       void load(superAdmin).then(() => setAttempt((n) => n + 1));
-    }, delay.current);
+    }, wait);
     return () => window.clearTimeout(timer);
-  }, [status, attempt, superAdmin, load]);
+  }, [status, failed, attempt, superAdmin, load]);
   return { status, show, failed, load };
 }
 
@@ -515,6 +526,12 @@ export function OnboardingEditor({
   // list row reads the same predicate off the same stage, so the form and the
   // row cannot disagree about whether the draft may still change.
   const locked = isDraftLocked(op?.stage);
+  // Until the status has loaded once, Atlas cannot tell whether FlightDeck
+  // holds this draft, so nothing in it may change yet — the same fail-closed
+  // rule the To FlightDeck row applies to an unknown stage. The server
+  // refuses such a save as well (PUT /api/projects/[id], draft_locked).
+  const unknown = !status;
+  const frozen = locked || unknown;
   const retrying = !!status?.retryPending;
   const sent = locked && !retrying;
   const target = locked ? op?.destinationWorkspaceId || "" : destination;
@@ -525,7 +542,7 @@ export function OnboardingEditor({
     [project, draft],
   );
   const ready = readiness(preview, target || null);
-  const suggestions = locked ? [] : checklistSuggestions(preview);
+  const suggestions = frozen ? [] : checklistSuggestions(preview);
   const payload = buildOnboardingPayload({
     project: preview,
     destinationWorkspaceId: target,
@@ -594,6 +611,7 @@ export function OnboardingEditor({
     setRefreshedTo(null);
   }
   async function save() {
+    if (frozen) return;
     setError("");
     // Saved against the revision the edits were made on, so a change saved
     // elsewhere meanwhile is refused (409), never overwritten.
@@ -702,19 +720,21 @@ export function OnboardingEditor({
   // and its text) does not decide whether it can go.
   const sendBlocked = !superAdmin
     ? "Only the Atlas Super Admin can send a project to FlightDeck."
-    : status && !status.canSend
-      ? "This project has already been sent to FlightDeck."
-      : retrying
-        ? ""
-        : stale
-          ? "This project was saved elsewhere. Load the latest version and review it before sending."
-          : dirty
-            ? "Save the draft first: FlightDeck receives the saved version."
-            : !ready.ready
-              ? `Complete the required details first (${ready.done} of ${ready.total}).`
-              : privacy.refused.length
-                ? `Remove the email address or phone number from: ${privacy.refused.map(fieldLabel).join(", ")}. FlightDeck receives role titles and system names, not personal details.`
-                : "";
+    : !status
+      ? "Atlas has not loaded this project's FlightDeck status yet."
+      : !status.canSend
+        ? "This project has already been sent to FlightDeck."
+        : retrying
+          ? ""
+          : stale
+            ? "This project was saved elsewhere. Load the latest version and review it before sending."
+            : dirty
+              ? "Save the draft first: FlightDeck receives the saved version."
+              : !ready.ready
+                ? `Complete the required details first (${ready.done} of ${ready.total}).`
+                : privacy.refused.length
+                  ? `Remove the email address or phone number from: ${privacy.refused.map(fieldLabel).join(", ")}. FlightDeck receives role titles and system names, not personal details.`
+                  : "";
   const freeTextWarnings = (warned: string[]) =>
     warned.map((path) => (
       <p key={path} className="fd-warn" role="note">
@@ -777,10 +797,21 @@ export function OnboardingEditor({
           superAdmin={superAdmin}
         />
       )}
-      {failed && (
-        <p className="fd-hint" role="status">
-          Onboarding status could not be checked. Atlas will try again.
-        </p>
+      {unknown ? (
+        <div className={`fd-banner${failed ? " warn" : ""}`} role="status">
+          {failed ? <AlertTriangle size={16} /> : <Clock size={16} />}
+          <p>
+            {failed
+              ? "FlightDeck status unavailable. Atlas cannot tell whether FlightDeck holds this draft, so it stays read-only for now. Atlas tries again shortly."
+              : "Checking FlightDeck status. The draft stays read-only until Atlas knows whether FlightDeck holds it."}
+          </p>
+        </div>
+      ) : (
+        failed && (
+          <p className="fd-hint" role="status">
+            Onboarding status could not be checked. Atlas will try again.
+          </p>
+        )
       )}
       {!locked && stale && (
         <div className="fd-banner warn" role="alert">
@@ -893,7 +924,7 @@ export function OnboardingEditor({
         </div>
       )}
       <fieldset
-        disabled={locked || busy}
+        disabled={frozen || busy}
         id={`fd-panel-${tab}`}
         role="tabpanel"
         aria-labelledby={`fd-tab-${tab}`}
@@ -1385,7 +1416,7 @@ export function OnboardingEditor({
             {sent && op && (
               <section aria-label="Sent to FlightDeck">
                 <h3>Sent to FlightDeck</h3>
-                <p>
+                <p className="fd-sent">
                   {op.adopted
                     ? "FlightDeck already held a request for this project, and Atlas now follows it. Atlas did not record where it was sent or which revision it carries: FlightDeck's record is what counts."
                     : `FlightDeck received revision ${op.atlasRevision} of this project${target ? ` for ${workspaceLabel(target)}` : ""}. FlightDeck keeps what it received.`}{" "}
@@ -1522,7 +1553,7 @@ export function OnboardingEditor({
       <div className="bridge-actions">
         <Button
           type="submit"
-          disabled={busy || locked || stale || !draft.label.trim() || !slugOk}
+          disabled={busy || frozen || stale || !draft.label.trim() || !slugOk}
         >
           Save onboarding draft
         </Button>
@@ -1548,24 +1579,11 @@ export function FlightDeckPromo({
   onOpen: () => void;
 }) {
   const { stages, failed } = useOnboardingStages(superAdmin);
-  const values = Object.values(stages ?? {});
-  const count = (list: OnboardingStage[]) =>
-    values.filter((stage) => list.includes(stage)).length;
-  const sent = count([
-    "submitted",
-    "linked",
-    "setup-in-progress",
-    "setup-complete",
-  ]);
-  const linked = count(["linked", "setup-in-progress", "setup-complete"]);
-  const moreInfo = count(["needs-more-info"]);
   const line = !stages
     ? failed
       ? "Onboarding status is unavailable right now."
       : "Checking onboarding status…"
-    : sent || moreInfo
-      ? `Onboarding: ${sent} sent to FlightDeck, ${linked} linked${moreInfo ? `, ${moreInfo} need more info` : ""}.`
-      : "Onboarding: no project sent yet. Prepare one in To FlightDeck.";
+    : onboardingSummaryLine(Object.values(stages));
   return (
     <div className="flightdeck-promo">
       <span className="promo-mark">

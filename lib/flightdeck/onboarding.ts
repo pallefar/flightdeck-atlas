@@ -482,12 +482,12 @@ export function reviewRows(
   return rows;
 }
 
-/** What the review says under "Never sent" about the free text. */
 /** Decision 6 (retention and cross-border handling) is open with Legal and
  * no agent can answer it. Stated where the Super Admin authorises the send,
  * as an open question: no legal position is taken either way. */
 export const LEGAL_OPEN_NOTE =
   "Legal has not answered owner decision 6 yet: how long FlightDeck may keep the Summary and Success measure, or how that free text may be handled across borders. Until Legal answers, FlightDeck keeps what it receives and nothing is deleted automatically. Sending does not answer this question.";
+/** What the review says under "Never sent" about the free text. */
 export const FREE_TEXT_NOTE =
   "Summary and Success measure are sent as you wrote them, including any name or email address typed there. Atlas refuses an email address or phone number in every other field, but it cannot recognise a person's name.";
 
@@ -771,6 +771,33 @@ export const lockedStages: readonly OnboardingStage[] = [
 ];
 export const isDraftLocked = (stage: OnboardingStage | null | undefined) =>
   !!stage && lockedStages.includes(stage);
+/** Whether a project save changes the onboarding draft itself: its
+ * FlightDeck label and hint, or its onboarding details. These are what the
+ * lock holds on the server (DRAFT_NOT_HELD_SQL); the rest of the project
+ * (its board status, tasks, stage) keeps moving while FlightDeck holds the
+ * draft, and later edits there are simply not sent. Compared as parsed, with
+ * keys sorted, so a save that sends the draft back unchanged never counts. */
+export function draftEdited(
+  previous: Pick<Project, "flightdeckDraft" | "onboarding">,
+  next: Pick<Project, "flightdeckDraft" | "onboarding">,
+) {
+  const canon = (value: unknown) =>
+    JSON.stringify(value ?? null, (_, v: unknown) =>
+      v && typeof v === "object" && !Array.isArray(v)
+        ? Object.fromEntries(
+            Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+          )
+        : v,
+    );
+  const onboarding = (p: Pick<Project, "onboarding">) => {
+    const parsed = onboardingSchema.safeParse(p.onboarding ?? {});
+    return parsed.success ? parsed.data : p.onboarding;
+  };
+  return (
+    canon(previous.flightdeckDraft) !== canon(next.flightdeckDraft) ||
+    canon(onboarding(previous)) !== canon(onboarding(next))
+  );
+}
 /** Why the draft is locked, one sentence per locked stage: the row's tooltip
  * and the form's banner say the same thing, and "FlightDeck is reviewing it"
  * is never claimed of a project FlightDeck has already created. */
@@ -787,6 +814,94 @@ export const LOCK_NOTE: Partial<Record<OnboardingStage, string>> = {
 };
 export const lockNote = (stage: OnboardingStage | null | undefined) =>
   (stage && LOCK_NOTE[stage]) || "";
+/** Export draft's text. What it says about FlightDeck follows the send, if
+ * there is one: a draft FlightDeck holds is never called "not submitted",
+ * and where it went is the destination it was sent to, not the owner's
+ * planning note. `sent` is the project's stored send (its stage, and the
+ * destination and revision Atlas recorded; both are null for a request
+ * Atlas adopted), or null when it has none. */
+export function exportDraftText(
+  project: Pick<
+    Project,
+    | "id"
+    | "name"
+    | "description"
+    | "functionArea"
+    | "category"
+    | "sponsor"
+    | "benefit"
+    | "flightdeckDraft"
+  >,
+  sent: {
+    stage: OnboardingStage;
+    destinationWorkspaceId: string | null;
+    atlasRevision: number | null;
+  } | null,
+) {
+  const stage = sent?.stage ?? null;
+  const filed = !!stage && stage !== "not-sent" && stage !== "closed";
+  const revision = sent?.atlasRevision ? `revision ${sent.atlasRevision}` : "";
+  const where = sent?.destinationWorkspaceId
+    ? `workspace ${sent.destinationWorkspaceId}`
+    : "";
+  const which = [revision, where].filter(Boolean).join(", ");
+  const record = `Sent to FlightDeck${which ? ` (${which})` : ""}`;
+  const closing: Record<OnboardingStage | "none", string> = {
+    none: "Prepared in Atlas. Not submitted to FlightDeck. Workspace access and final project details must be reviewed before creation.",
+    "not-sent":
+      "Prepared in Atlas. FlightDeck refused the last send, so nothing was filed. Workspace access and final project details must be reviewed before creation.",
+    closed:
+      "Prepared in Atlas. The last send was closed before FlightDeck confirmed it; if FlightDeck did file it, the next send follows that request. Workspace access and final project details must be reviewed before creation.",
+    "not-confirmed": `${record}, not yet confirmed by FlightDeck. FlightDeck's record is what counts; later edits in Atlas are not sent.`,
+    submitted: `${record} and under review there. FlightDeck's record is what counts; later edits in Atlas are not sent.`,
+    linked: `${record} and linked to a FlightDeck project. FlightDeck's record is what counts; later edits in Atlas are not sent.`,
+    "setup-in-progress": `${record} and linked to a FlightDeck project, which is being set up. FlightDeck's record is what counts; later edits in Atlas are not sent.`,
+    "setup-complete": `${record} and linked to a FlightDeck project, which is set up. FlightDeck's record is what counts; later edits in Atlas are not sent.`,
+    "needs-more-info": `${record}. FlightDeck asked for more information; this draft is open again to update and send again.`,
+    rejected: `${record}. FlightDeck declined it; this draft is open again.`,
+  };
+  const draft = project.flightdeckDraft;
+  return [
+    `# FlightDeck onboarding draft: ${draft?.label ?? ""}`,
+    `Atlas project: ${project.name}`,
+    `Atlas ID: ${project.id}`,
+    filed && sent?.destinationWorkspaceId
+      ? `Sent to workspace: ${sent.destinationWorkspaceId}`
+      : `Preferred workspace: ${draft?.workspaceHint || (filed ? "Not recorded in Atlas" : "To select")}`,
+    `Description: ${project.description}`,
+    `Function: ${project.functionArea || project.category}`,
+    `Sponsor: ${project.sponsor || "To confirm"}`,
+    `Success measure: ${project.benefit || "To define"}`,
+    "",
+    closing[stage ?? "none"],
+  ].join("\n\n");
+}
+/** The dashboard card's line for the stored stage of every visible project.
+ * "Sent" is every request FlightDeck filed, answered ones included: a
+ * declined or needs-more-info project shows "Submitted" done on its own
+ * timeline, so the card must not call it unsent. */
+export function onboardingSummaryLine(stages: readonly OnboardingStage[]) {
+  if (!stages.length)
+    return "Onboarding: no project sent yet. Prepare one in To FlightDeck.";
+  const count = (...list: OnboardingStage[]) =>
+    stages.filter((stage) => list.includes(stage)).length;
+  const linked = count("linked", "setup-in-progress", "setup-complete");
+  const moreInfo = count("needs-more-info");
+  const declined = count("rejected");
+  const sent = count("submitted") + linked + moreInfo + declined;
+  const extra = [
+    [moreInfo, "need more info"],
+    [declined, "declined"],
+    [count("not-confirmed"), "awaiting confirmation"],
+    [count("not-sent"), "not sent"],
+    [count("closed"), "closed before FlightDeck confirmed"],
+  ] as const;
+  return `Onboarding: ${[
+    `${sent} sent to FlightDeck`,
+    `${linked} linked`,
+    ...extra.filter(([n]) => n).map(([n, text]) => `${n} ${text}`),
+  ].join(", ")}.`;
+}
 /** Stages Atlas still reads back from FlightDeck (the server's own pollable
  * set, as stages): the status can change with nobody here doing anything, so
  * these are the ones that say when Atlas last checked. Every one of them is

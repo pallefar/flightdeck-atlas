@@ -25,6 +25,7 @@ import {
   REVIEW_FIELDS,
   buildOnboardingPayload,
   checklistSuggestions,
+  draftEdited,
   isDraftLocked,
   isLockedState,
   isStatusMoving,
@@ -35,6 +36,7 @@ import {
   onboardingStages,
   onboardingEnvelope,
   onboardingSchema,
+  onboardingSummaryLine,
   onboardingStatusSchema,
   operationStates,
   payloadLeafPaths,
@@ -52,7 +54,10 @@ import {
   type OnboardingStatus,
 } from "../lib/flightdeck/onboarding";
 import {
+  DRAFT_NOT_HELD_SQL,
   createOnboardRoute,
+  deleteProject,
+  draftHeld,
   forgetProject,
   isPollable,
   unconfirmedSend,
@@ -787,8 +792,11 @@ const listRequest = (refresh: boolean, headers: Record<string, string> = {}) =>
 function onboardDb() {
   const dir = new URL("../drizzle/", import.meta.url);
   const sqlite = new DatabaseSync(":memory:");
+  // Every migration, so the send and the project it belongs to share one
+  // database, as they do in D1: the reservation and the project delete are
+  // each conditional on the other table.
   for (const name of readdirSync(dir)
-    .filter((n) => /^\d{4}_\w+\.sql$/.test(n) && n >= "0004")
+    .filter((n) => /^\d{4}_\w+\.sql$/.test(n))
     .sort())
     for (const statement of readFileSync(new URL(name, dir), "utf8").split(
       "--> statement-breakpoint",
@@ -836,6 +844,21 @@ function harness(
   let clock = Date.parse("2026-09-22T09:00:00.000Z");
   let project =
     options.project === undefined ? readyProject() : options.project;
+  /** The project's own row, which the reservation requires to exist. */
+  const saveRow = (next: Project) =>
+    store.sqlite
+      .prepare(
+        "INSERT INTO atlas_projects (id,owner_id,data,source,updated_at,revision) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data,revision=excluded.revision",
+      )
+      .run(
+        next.id,
+        "user-1",
+        JSON.stringify(next),
+        next.source ?? "atlas",
+        os.receivedAt,
+        next.revision,
+      );
+  if (project) saveRow(project);
   let user = { userId: "user-1", superAdmin: options.superAdmin ?? true };
   const fake = {
     workspaces: structuredClone(os.context.workspaces) as Record<
@@ -857,6 +880,9 @@ function harness(
     visible: [] as string[],
     submits: [] as OnboardingEnvelope[],
     authorize: 0,
+    /** Awaited at the start of every workspaces() read, to hold a send
+     * between loading its project and reserving its row. */
+    beforeWorkspaces: null as null | (() => Promise<void>),
     onSubmit: (async (): Promise<SubmitResult> => ({
       state: "ok",
       data: {
@@ -883,6 +909,7 @@ function harness(
   const reader = (fresh: boolean): ContextReader => ({
     async workspaces() {
       fake.calls.push(fresh ? "workspaces:fresh" : "workspaces");
+      await fake.beforeWorkspaces?.();
       const parsed = osWorkspacesResponseSchema.parse(fake.workspaces);
       return { state: "ok", data: parsed };
     },
@@ -950,7 +977,10 @@ function harness(
     readAs,
     tick: (ms: number) => void (clock += ms),
     /** The project as edited elsewhere in Atlas after a send. */
-    setProject: (next: Project) => void (project = next),
+    setProject: (next: Project) => {
+      project = next;
+      saveRow(next);
+    },
     as: (userId: string, superAdmin = true) =>
       void (user = { userId, superAdmin }),
     async status(refresh = true) {
@@ -1702,6 +1732,199 @@ test("a project cannot be deleted under an unconfirmed send, and deleting it tak
   expect(held.store.ops()).toEqual([]);
   expect(held.store.links()).toEqual([]);
   expect(linkOther()).toBe(true);
+});
+
+/** A gate a fake can wait on: `reached` resolves once it is waiting (or once
+ * `count` callers are), `open()` lets them all through. */
+function gate(count = 1) {
+  let open!: () => void;
+  let arrive!: () => void;
+  const opened = new Promise<void>((r) => (open = r));
+  const reached = new Promise<void>((r) => (arrive = r));
+  let waiting = 0;
+  return {
+    reached,
+    open,
+    async wait() {
+      if (++waiting === count) arrive();
+      await opened;
+    },
+  };
+}
+
+test("a project deleted while its first send waits on FlightDeck is never reserved or sent, and one with a reserved send is not deleted", async () => {
+  // The delete lands after the send loaded the project and before it
+  // reserved a row: nothing is reserved and nothing reaches FlightDeck, so no
+  // copy of the summary is left in a row no route can reach.
+  const h = harness();
+  const reader = gate();
+  h.fake.beforeWorkspaces = reader.wait;
+  const sending = h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  await reader.reached;
+  expect(await deleteProject(h.store.db, ATLAS_ID, 7)).toBe("deleted");
+  reader.open();
+  const refused = await sending;
+  expect(refused.status).toBe(404);
+  expect(await refused.json()).toMatchObject({ code: "not_found" });
+  expect(h.fake.submits).toEqual([]);
+  expect(h.store.ops()).toEqual([]);
+
+  // The reservation lands first: the delete is refused in the same statement
+  // that would remove the project, so it cannot slip in between.
+  const r = harness();
+  const remote = gate();
+  r.fake.onSubmit = async () => {
+    await remote.wait();
+    return { state: "os_unreachable" };
+  };
+  const first = r.route.POST(sendTo("hr-de"), ATLAS_ID);
+  await remote.reached;
+  expect(await deleteProject(r.store.db, ATLAS_ID, 7)).toBe("unconfirmed");
+  remote.open();
+  expect((await first).status).toBe(503);
+  expect(await deleteProject(r.store.db, ATLAS_ID, 7)).toBe("unconfirmed");
+  expect(
+    r.store.sqlite.prepare("SELECT id FROM atlas_projects").all(),
+  ).toHaveLength(1);
+  // An old revision is refused as changed, whatever the send.
+  expect((await r.close(await r.status(false))).status).toBe(200);
+  expect(await deleteProject(r.store.db, ATLAS_ID, 6)).toBe("changed");
+  expect(await deleteProject(r.store.db, ATLAS_ID, 7)).toBe("deleted");
+  expect(r.store.ops()).toEqual([]);
+  expect(r.store.sqlite.prepare("SELECT id FROM atlas_projects").all()).toEqual(
+    [],
+  );
+});
+
+test("the server keeps a draft FlightDeck may hold as it was sent, whatever the form shows", async () => {
+  // The form locks itself while a send is open, but a form that has not
+  // loaded its status yet (or failed to) knows nothing: the project save
+  // must refuse on its own. Only the draft itself is held: the rest of the
+  // project keeps moving (its board status, its tasks), and later edits there
+  // are simply not sent.
+  const before = readyProject();
+  const edits: [string, Project, boolean][] = [
+    [
+      "label",
+      {
+        ...before,
+        flightdeckDraft: { ...before.flightdeckDraft!, label: "Renamed" },
+      },
+      true,
+    ],
+    ["draft removed", { ...before, flightdeckDraft: null }, true],
+    [
+      "country",
+      { ...before, onboarding: { ...before.onboarding, countryCode: "FR" } },
+      true,
+    ],
+    ["board status", { ...before, status: "On hold" }, false],
+    ["stage", { ...before, onboardingStage: "Rolled out" }, false],
+    ["as the save parses it", projectSchema.parse(before) as Project, false],
+  ];
+  for (const [name, next, changed] of edits)
+    expect(draftEdited(before, next), name).toBe(changed);
+
+  const h = harness();
+  const save = () =>
+    h.store.db
+      .prepare(
+        "UPDATE atlas_projects SET revision=revision+1 WHERE id=?" +
+          DRAFT_NOT_HELD_SQL,
+      )
+      .bind(ATLAS_ID)
+      .run();
+  expect(await draftHeld(h.store.db, ATLAS_ID)).toBe(false);
+  expect((await save()).meta.changes).toBe(1);
+  // Reserved, then filed: FlightDeck may hold it, so the draft is held.
+  const remote = gate();
+  h.fake.onSubmit = async () => {
+    await remote.wait();
+    return {
+      state: "ok",
+      data: {
+        submissionId: os.submissionId,
+        receivedAt: os.receivedAt,
+        payloadSha256: os.payloadSha256,
+        duplicate: false,
+      },
+    };
+  };
+  const sending = h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  await remote.reached;
+  expect(await draftHeld(h.store.db, ATLAS_ID)).toBe(true);
+  expect((await save()).meta.changes).toBe(0);
+  remote.open();
+  expect((await sending).status).toBe(202);
+  expect(await draftHeld(h.store.db, ATLAS_ID)).toBe(true);
+  expect((await save()).meta.changes).toBe(0);
+  // FlightDeck asks for more information: the draft opens again.
+  h.fake.onRead = h.readAs("needsMoreInfo");
+  h.tick(61_000);
+  expect((await h.status()).operation?.stage).toBe("needs-more-info");
+  expect(await draftHeld(h.store.db, ATLAS_ID)).toBe(false);
+  expect((await save()).meta.changes).toBe(1);
+});
+
+test("two sends at once reserve one row: one reaches FlightDeck, the other is told a send is in progress", async () => {
+  // Two tabs press Send together: both pass the latest-send check before
+  // either reserves, so only the one-open-send index stands between them.
+  const h = harness();
+  const reader = gate(2);
+  h.fake.beforeWorkspaces = reader.wait;
+  const a = h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  const b = h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  await reader.reached;
+  reader.open();
+  const results = await Promise.all([a, b]);
+  expect(results.map((r) => r.status).sort()).toEqual([202, 409]);
+  expect(await results.find((r) => r.status === 409)!.json()).toMatchObject({
+    code: "send_in_progress",
+  });
+  expect(h.fake.submits).toHaveLength(1);
+  expect(h.store.ops()).toEqual([
+    expect.objectContaining({
+      state: "filed",
+      idempotency_key: h.fake.submits[0].payload.idempotencyKey,
+    }),
+  ]);
+
+  // The second press arrives after the first has reserved its row, while
+  // FlightDeck has not answered: it resends that request byte for byte, under
+  // the same key, and both settle on one filed row.
+  const k = harness();
+  const remote = gate();
+  let calls = 0;
+  const receipt: SubmitResult = {
+    state: "ok",
+    data: {
+      submissionId: os.submissionId,
+      receivedAt: os.receivedAt,
+      payloadSha256: os.payloadSha256,
+      duplicate: false,
+    },
+  };
+  k.fake.onSubmit = async () => {
+    if (++calls === 1) await remote.wait();
+    return receipt;
+  };
+  const first = k.route.POST(sendTo("hr-de"), ATLAS_ID);
+  await remote.reached;
+  const second = await k.route.POST(sendTo("hr-de"), ATLAS_ID);
+  remote.open();
+  expect([(await first).status, second.status]).toEqual([202, 202]);
+  expect(k.fake.submits).toHaveLength(2);
+  expect(JSON.stringify(k.fake.submits[1])).toBe(
+    JSON.stringify(k.fake.submits[0]),
+  );
+  expect(k.store.ops()).toEqual([
+    expect.objectContaining({
+      state: "filed",
+      idempotency_key: k.fake.submits[0].payload.idempotencyKey,
+      submission_id: os.submissionId,
+      request_body: null,
+    }),
+  ]);
 });
 
 test("an email or phone number outside the summary and success measure is refused before anything is reserved or sent", async () => {
@@ -2879,7 +3102,9 @@ test("the Super Admin can close an unconfirmed send from the form, and the draft
   try {
     await page.reload();
     await openToFlightDeck(page);
-    const row = page.locator("article.bridge-project", { hasText: qa("Close") });
+    const row = page.locator("article.bridge-project", {
+      hasText: qa("Close"),
+    });
     await row.getByRole("button", { name: "Edit draft", exact: true }).click();
     // Locked while the send is unconfirmed; Retry is the normal way on.
     await expect(
@@ -2995,12 +3220,40 @@ test("the To FlightDeck list and the dashboard follow FlightDeck without the for
     await page.goto("/");
     await expect(
       page.getByText(
-        "Onboarding: 0 sent to FlightDeck, 0 linked, 1 need more info.",
+        "Onboarding: 1 sent to FlightDeck, 0 linked, 1 need more info.",
       ),
     ).toBeVisible();
   } finally {
     await removeProject(page, project.id);
   }
+});
+
+test("the dashboard counts every request FlightDeck filed as sent, answered ones included", () => {
+  const cases: [OnboardingStage[], string][] = [
+    [[], "Onboarding: no project sent yet. Prepare one in To FlightDeck."],
+    [["rejected"], "Onboarding: 1 sent to FlightDeck, 0 linked, 1 declined."],
+    [
+      ["rejected", "not-confirmed"],
+      "Onboarding: 1 sent to FlightDeck, 0 linked, 1 declined, 1 awaiting confirmation.",
+    ],
+    [
+      ["needs-more-info"],
+      "Onboarding: 1 sent to FlightDeck, 0 linked, 1 need more info.",
+    ],
+    [
+      ["submitted", "linked", "setup-in-progress", "setup-complete"],
+      "Onboarding: 4 sent to FlightDeck, 3 linked.",
+    ],
+    [
+      ["not-sent", "closed"],
+      "Onboarding: 0 sent to FlightDeck, 0 linked, 1 not sent, 1 closed before FlightDeck confirmed.",
+    ],
+  ];
+  for (const [stages, line] of cases)
+    expect(onboardingSummaryLine(stages), stages.join(",")).toBe(line);
+  // Every stage is counted somewhere: none can make a project vanish.
+  for (const stage of onboardingStages)
+    expect(onboardingSummaryLine([stage]), stage).toMatch(/[1-9]/);
 });
 
 test("one lock for both surfaces: every state the form locks shows a stage the row locks, with a reason", () => {
@@ -3136,10 +3389,14 @@ test("the list cannot remove a draft FlightDeck is still reviewing, and offers t
       await expect(status).toBeEnabled();
       // Never "choose a workspace" beside a project FlightDeck already holds.
       await expect(subtitle).toHaveText("HR · With FlightDeck");
-      // Read-only export is untouched.
+      // Read-only export is untouched, and never calls it unsent.
       await expect(
         row.getByRole("button", { name: "Export draft" }),
       ).toBeEnabled();
+      const exported = await exportText(page, row);
+      expect(exported).toContain("Sent to FlightDeck");
+      expect(exported).not.toContain("Not submitted");
+      expect(exported).not.toContain("To select");
     }
     // Once FlightDeck hands it back, the row is the owner's again.
     for (const [open, label] of [
@@ -3170,6 +3427,13 @@ test("the list cannot remove a draft FlightDeck is still reviewing, and offers t
     await removeProject(page, project.id);
   }
 });
+
+/** Presses the row's Export draft and returns the file it downloads. */
+async function exportText(page: Page, row: ReturnType<Page["locator"]>) {
+  const download = page.waitForEvent("download");
+  await row.getByRole("button", { name: "Export draft" }).click();
+  return readFileSync((await (await download).path())!, "utf8");
+}
 
 test("after a send the form shows where it went and which revision FlightDeck holds, never a missing destination", async ({
   page,
@@ -3230,7 +3494,18 @@ test("after a send the form shows where it went and which revision FlightDeck ho
     await expect(record).toContainText("HR Germany");
     await expect(record).toContainText(`revision ${first.revision}`);
     await expect(record).toContainText(`now at revision ${project.revision}`);
+    // In the panel's own type, not body size.
+    await expect(record.locator("p")).toHaveCSS("font-size", "13px");
     await expect(row.getByText("Missing", { exact: true })).toHaveCount(0);
+    // Export draft says what FlightDeck holds, not "Not submitted".
+    await row.getByRole("button", { name: "Close", exact: true }).click();
+    const exported = await exportText(page, row);
+    expect(exported).toContain("Sent to workspace: hr-de");
+    expect(exported).toContain(
+      `Sent to FlightDeck (revision ${first.revision}, workspace hr-de) and under review there.`,
+    );
+    expect(exported).not.toContain("Not submitted");
+    expect(exported).not.toContain("To select");
 
     // Not confirmed: Review lists exactly what Retry resends (revision 1,
     // with its email), says the later edit is not in it, and Retry names
@@ -3303,7 +3578,9 @@ test("a save elsewhere while the form is open refreshes Review, and an edited dr
   try {
     await page.reload();
     await openToFlightDeck(page);
-    const row = page.locator("article.bridge-project", { hasText: qa("Stale") });
+    const row = page.locator("article.bridge-project", {
+      hasText: qa("Stale"),
+    });
     await row.getByRole("button", { name: "Edit draft", exact: true }).click();
 
     // Edited here, then saved elsewhere: the edits stay, but they were made
@@ -3651,6 +3928,166 @@ test("a stage list Atlas could not read locks the row instead of offering to dro
     await expect(row.getByText(/could not check/i)).toBeVisible();
   } finally {
     await removeProject(page, project.id);
+  }
+});
+
+/** Runs `fn` against the dev server's local D1 database (the miniflare
+ * sqlite file that holds the onboarding tables). */
+function devDb<T>(fn: (db: DatabaseSync) => T): T {
+  const folder = ".wrangler/state/v3/d1/miniflare-D1DatabaseObject";
+  for (const file of readdirSync(folder).filter(
+    (p) => p.endsWith(".sqlite") && p !== "metadata.sqlite",
+  )) {
+    const db = new DatabaseSync(`${folder}/${file}`);
+    try {
+      if (
+        db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE name='atlas_flightdeck_operations'",
+          )
+          .get()
+      )
+        return fn(db);
+    } finally {
+      db.close();
+    }
+  }
+  throw Error("The dev server's D1 database was not found.");
+}
+
+test("the form stays read-only until Atlas knows FlightDeck does not hold the draft, and the server refuses to save over one it holds", async ({
+  page,
+}) => {
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const project = await createProject(page, {
+    name: qa("Form Lock"),
+    functionArea: "HR",
+    flightdeckDraft: { label: qa("Form Lock"), workspaceHint: "" },
+  });
+  // Never sent, as far as the list knows.
+  await page.route(
+    (url) => url.pathname === "/api/flightdeck/onboard",
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ stages: {}, checked: {}, retryAfter: null }),
+      }),
+  );
+  // The form's own status: held, then failing, then never sent.
+  const statusGate = gate();
+  const answer = { mode: "hold" as "hold" | "fail" | "ok" };
+  await page.route(
+    `**/api/flightdeck/onboard/${project.id}**`,
+    async (route) => {
+      if (answer.mode === "hold") await statusGate.wait();
+      if (answer.mode !== "ok")
+        return route.fulfill({ status: 503, body: "{}" }).catch(() => {});
+      return route
+        .fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(statusBody(null)),
+        })
+        .catch(() => {});
+    },
+  );
+  const puts: string[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "PUT" && r.url().includes(`/api/projects/${project.id}`))
+      puts.push(r.url());
+  });
+  try {
+    await page.reload();
+    await openToFlightDeck(page);
+    const row = page.locator("article.bridge-project", {
+      hasText: qa("Form Lock"),
+    });
+    await row.getByRole("button", { name: "Edit draft", exact: true }).click();
+    const name = row.getByLabel("Proposed OS project name");
+    const save = row.getByRole("button", { name: "Save onboarding draft" });
+    // Still loading: FlightDeck may hold this draft, so nothing may change.
+    await statusGate.reached;
+    await expect(row.getByText("Checking FlightDeck status")).toBeVisible();
+    await expect(name).toBeDisabled();
+    await expect(save).toBeDisabled();
+    // The status could not be read: still read-only, and it says why.
+    answer.mode = "fail";
+    statusGate.open();
+    await expect(row.getByText("FlightDeck status unavailable")).toBeVisible();
+    await expect(name).toBeDisabled();
+    await expect(save).toBeDisabled();
+    await name.press("Enter").catch(() => {});
+    // Atlas tries again on its own; once it knows nothing is held, the
+    // draft opens.
+    answer.mode = "ok";
+    await expect(name).toBeEnabled({ timeout: 15_000 });
+    await expect(row.getByText("FlightDeck status unavailable")).toHaveCount(0);
+    expect(puts).toEqual([]);
+
+    // The server keeps the promise on its own. A send FlightDeck holds (a
+    // linked project, set up) is written straight into the dev database.
+    devDb((db) =>
+      db
+        .prepare(
+          "INSERT INTO atlas_flightdeck_operations (id,atlas_project_id,atlas_revision,idempotency_key,destination_workspace_id,proposed_label,state,setup_state,created_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        )
+        .run(
+          `op-${project.id}`,
+          project.id,
+          project.revision,
+          crypto.randomUUID(),
+          "hr-de",
+          qa("Form Lock"),
+          "linked",
+          "complete",
+          "qa",
+          new Date().toISOString(),
+        ),
+    );
+    const put = (fields: Partial<Project>) =>
+      page.evaluate(
+        async ({ project, fields }) => {
+          const r = await fetch(`/api/projects/${project.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...project,
+              activity: undefined,
+              ...fields,
+              revision: project.revision,
+            }),
+          });
+          return {
+            status: r.status,
+            body: (await r.json()) as { project?: Project; code?: string },
+          };
+        },
+        { project, fields },
+      );
+    const renamed = await put({
+      flightdeckDraft: { label: qa("Form Lock edited"), workspaceHint: "" },
+    });
+    expect(renamed).toMatchObject({
+      status: 409,
+      body: { code: "draft_locked" },
+    });
+    expect((await put({ onboarding: { countryCode: "FR" } })).status).toBe(409);
+    // The rest of the project keeps moving.
+    const moved = await put({ status: "On hold" });
+    expect(moved.status).toBe(200);
+    expect(moved.body.project).toMatchObject({
+      status: "On hold",
+      flightdeckDraft: { label: qa("Form Lock") },
+    });
+  } finally {
+    await removeProject(page, project.id);
+    devDb((db) =>
+      db
+        .prepare("DELETE FROM atlas_flightdeck_operations WHERE id=?")
+        .run(`op-${project.id}`),
+    );
   }
 });
 

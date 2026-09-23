@@ -30,9 +30,11 @@ import {
   OnboardingEditor,
   STAGE_LABEL,
   checkedLine,
+  fetchStatus,
   useOnboardingStages,
 } from "./flightdeck-onboarding";
 import {
+  exportDraftText,
   isDraftLocked,
   isStatusMoving,
   lockNote,
@@ -519,20 +521,38 @@ export default function FlightDeckConnection({
                                   throw Error(
                                     "This onboarding draft is no longer available.",
                                   );
+                                // What the file says about FlightDeck comes
+                                // from the stored send (the stage, where it
+                                // went, which revision), never from fixed
+                                // text: a draft FlightDeck holds is not "not
+                                // submitted". Without a status, the row's
+                                // stage still keeps it true.
+                                const status = await fetchStatus(
+                                  current.id,
+                                  false,
+                                );
+                                if (!status && !onboarding.stages)
+                                  throw Error(
+                                    "Atlas could not check FlightDeck, so the export cannot say whether FlightDeck holds this draft. Try again.",
+                                  );
+                                const op = status?.operation;
+                                const sentAs = op
+                                  ? {
+                                      stage: op.stage,
+                                      destinationWorkspaceId:
+                                        op.destinationWorkspaceId,
+                                      atlasRevision: op.atlasRevision,
+                                    }
+                                  : stage
+                                    ? {
+                                        stage,
+                                        destinationWorkspaceId: null,
+                                        atlasRevision: null,
+                                      }
+                                    : null;
                                 downloadText(
                                   `flightdeck-draft-${current.id}.md`,
-                                  [
-                                    `# FlightDeck onboarding draft: ${current.flightdeckDraft!.label}`,
-                                    `Atlas project: ${current.name}`,
-                                    `Atlas ID: ${current.id}`,
-                                    `Preferred workspace: ${current.flightdeckDraft!.workspaceHint || "To select"}`,
-                                    `Description: ${current.description}`,
-                                    `Function: ${current.functionArea || current.category}`,
-                                    `Sponsor: ${current.sponsor || "To confirm"}`,
-                                    `Success measure: ${current.benefit || "To define"}`,
-                                    "",
-                                    "Prepared in Atlas. Not submitted to FlightDeck. Workspace access and final project details must be reviewed before creation.",
-                                  ].join("\n\n"),
+                                  exportDraftText(current, sentAs),
                                 );
                               } catch (e) {
                                 setError((e as Error).message);

@@ -1,6 +1,6 @@
 // The /api/flightdeck/onboard handlers, with their dependencies passed in so
 // the tests run exactly this code over a fake OS and a local database built
-// from migration 0004. The route files wire in the real authorisation, OS
+// from the migrations. The route files wire in the real authorisation, OS
 // clients and D1 binding. No Worker bindings are imported here.
 //
 // Sending files a proposal of kind "project-onboarding" in the OS; an OS
@@ -31,6 +31,7 @@ import {
 } from "./context-client";
 import {
   buildOnboardingPayload,
+  lockedStates,
   onboardingEnvelope,
   onboardingEnvelopeSchema,
   onboardingSubject,
@@ -282,6 +283,49 @@ export async function unconfirmedSend(db: OnboardDb, atlasProjectId: string) {
   const op = await latestOperation(db, atlasProjectId);
   return op && isClosable(op) ? op : null;
 }
+/** The sends that stop a delete, as SQL over atlas_flightdeck_operations:
+ * exactly the rows `isClosable` accepts. */
+const CLOSABLE_SQL = `(state='reserved' OR (state='filed' AND reason_code='${NOT_FOUND}'))`;
+/** Deletes an Atlas project unless a send of it is still unconfirmed, then
+ * forgets its send history and link. The check and the delete are one
+ * statement, and the reservation in POST is conditional on the project
+ * existing, so a send and a delete racing each other cannot both win: either
+ * the row is reserved first and the delete is refused, or the project is gone
+ * first and nothing is reserved or sent. */
+export async function deleteProject(
+  db: OnboardDb,
+  atlasProjectId: string,
+  revision: number,
+): Promise<"deleted" | "unconfirmed" | "changed"> {
+  const result = await db
+    .prepare(
+      `DELETE FROM atlas_projects WHERE id=? AND revision=? AND NOT EXISTS(SELECT 1 FROM atlas_flightdeck_operations WHERE atlas_project_id=? AND ${CLOSABLE_SQL})`,
+    )
+    .bind(atlasProjectId, revision, atlasProjectId)
+    .run();
+  if (!result.meta.changes)
+    return (await unconfirmedSend(db, atlasProjectId))
+      ? "unconfirmed"
+      : "changed";
+  await forgetProject(db, atlasProjectId);
+  return "deleted";
+}
+const HELD_SQL = `state IN (${lockedStates.map((s) => `'${s}'`).join(",")})`;
+/** Appended to the project UPDATE when a save changes the onboarding draft:
+ * the save lands only while no send FlightDeck may hold is open, in the same
+ * statement, so a send reserved between the check and the write still wins. */
+export const DRAFT_NOT_HELD_SQL = ` AND NOT EXISTS(SELECT 1 FROM atlas_flightdeck_operations WHERE atlas_project_id=atlas_projects.id AND ${HELD_SQL})`;
+/** Whether a send FlightDeck may hold is open for this project, so its
+ * draft must stay exactly as it was sent: the server's side of the lock the
+ * form and the To FlightDeck row show (isDraftLocked). */
+export async function draftHeld(db: OnboardDb, atlasProjectId: string) {
+  return !!(await db
+    .prepare(
+      `SELECT 1 AS held FROM atlas_flightdeck_operations WHERE atlas_project_id=? AND ${HELD_SQL} LIMIT 1`,
+    )
+    .bind(atlasProjectId)
+    .first());
+}
 /** Atlas's own record of a project that is being deleted: every send of it
  * and its FlightDeck link. Both are keyed by the Atlas project id alone, so
  * once the project is gone no route can read, close or clear them. Call it
@@ -318,16 +362,25 @@ async function linkFor(
 }
 const uniqueViolation = (error: unknown) =>
   /UNIQUE constraint failed/i.test(String((error as Error)?.message));
-async function insert(db: OnboardDb, table: string, row: object) {
+/** Inserts a row: false on a UNIQUE violation, and "skipped" when `where`
+ * (a condition on other tables) does not hold. */
+async function insert(
+  db: OnboardDb,
+  table: string,
+  row: object,
+  where?: { sql: string; values: unknown[] },
+): Promise<boolean | "skipped"> {
   const keys = Object.keys(row);
   try {
-    await db
+    const result = await db
       .prepare(
-        `INSERT INTO ${table} (${keys.join(",")}) VALUES (${keys.map(() => "?").join(",")})`,
+        where
+          ? `INSERT INTO ${table} (${keys.join(",")}) SELECT ${keys.map(() => "?").join(",")} WHERE ${where.sql}`
+          : `INSERT INTO ${table} (${keys.join(",")}) VALUES (${keys.map(() => "?").join(",")})`,
       )
-      .bind(...Object.values(row))
+      .bind(...Object.values(row), ...(where?.values ?? []))
       .run();
-    return true;
+    return where && !result.meta.changes ? "skipped" : true;
   } catch (error) {
     if (uniqueViolation(error)) return false;
     throw error;
@@ -789,8 +842,17 @@ export function createOnboardRoute<A extends OnboardAccess>(
           adopted: 0,
         };
         // Reserved BEFORE the remote call. The partial unique index allows
-        // one open send per project, so a second tab loses here.
-        if (!(await insert(db, "atlas_flightdeck_operations", op)))
+        // one open send per project, so a second tab loses here. And only
+        // while the project still exists: it was loaded before the OS lists
+        // were read, and a delete in between would otherwise leave this
+        // request text in a row no route can reach (see deleteProject).
+        const reserved = await insert(db, "atlas_flightdeck_operations", op, {
+          sql: "EXISTS(SELECT 1 FROM atlas_projects WHERE id=?)",
+          values: [project.id],
+        });
+        if (reserved === "skipped")
+          return refuse(404, "not_found", "Project not found.");
+        if (!reserved)
           return refuse(
             409,
             "send_in_progress",

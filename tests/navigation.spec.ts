@@ -206,15 +206,29 @@ test("Kanban moves projects and tasks durably with drag and keyboard alternative
   const p = await create(page);
   await page.reload();
   await page.getByRole("button", { name: "Board", exact: true }).click();
-  await page
-    .locator(".board-card")
-    .filter({ hasText: p.name })
-    .dragTo(
-      page.getByRole("region", { name: "In progress projects", exact: true }),
-    );
-  await expect(page.getByLabel("Status for " + p.name)).toHaveValue(
-    "In progress",
+  // The board renders before React has attached its drag handlers, so under
+  // load a drag made straight after the reload can be lost and the card stays
+  // in Planning. Repeat the drag until it lands (a second drop onto the same
+  // column changes nothing), and let the save finish before reloading.
+  const saved = page.waitForResponse(
+    (r) =>
+      r.request().method() === "PUT" &&
+      new URL(r.url()).pathname === `/api/projects/${p.id}` &&
+      r.ok(),
   );
+  await expect(async () => {
+    await page
+      .locator(".board-card")
+      .filter({ hasText: p.name })
+      .dragTo(
+        page.getByRole("region", { name: "In progress projects", exact: true }),
+      );
+    await expect(page.getByLabel("Status for " + p.name)).toHaveValue(
+      "In progress",
+      { timeout: 2_000 },
+    );
+  }).toPass({ timeout: 20_000 });
+  await saved;
   await page.reload();
   await expect(page.getByLabel("Status for " + p.name)).toHaveValue(
     "In progress",

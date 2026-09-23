@@ -1089,6 +1089,10 @@
 .fd-review dd.missing {
   color: var(--orange);
 }
+.fd-review .fd-sent {
+  font-size: 13px;
+  line-height: 1.5;
+}
 .fd-never li {
   font-size: 13px;
   line-height: 1.7;
