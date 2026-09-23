@@ -36,7 +36,7 @@ node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1
 npm run dev
 ```
 
-Before starting development, create an ignored `.env.local` containing `ATLAS_SUPERADMIN_EMAIL=seedy@sites.test` for the loopback fixture. Apply each migration once per local database. `npm run dev` prints the local URL. The bundled local sign-in flow supplies a development-only identity on loopback. Production identity comes from the private hosting dispatcher; do not expose a bare Worker that trusts arbitrary identity headers.
+Before starting development, create an ignored `.env.local` containing `ATLAS_SUPERADMIN_EMAIL=seedy@sites.test` for the loopback fixture. Keep `.env.local` readable only by you (`chmod 600 .env.local`): it can hold the FlightDeck inbound credential, and `npm run dev` prints a warning when group or others can access it. Apply each migration once per local database. `npm run dev` prints the local URL. The bundled local sign-in flow supplies a development-only identity on loopback. Production identity comes from the private hosting dispatcher; do not expose a bare Worker that trusts arbitrary identity headers.
 
 ```sh
 npx tsc --noEmit
