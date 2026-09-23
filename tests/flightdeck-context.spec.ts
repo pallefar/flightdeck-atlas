@@ -935,3 +935,40 @@ test("the live context route stays same-origin, signed-in and free of the creden
   );
   expect(direct).toEqual([]);
 });
+
+test("Connections links a Super Admin to FlightDeck's developer reference, and the public /integration page carries no OS address", async ({
+  page,
+  request,
+}) => {
+  // The FlightDeck app entry's url is what /api/workspace fills from
+  // ATLAS_FLIGHTDECK_URL for signed-in users; pin it so the hrefs are exact.
+  await page.route("**/api/workspace", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const res = await route.fetch();
+    const body = (await res.json()) as { apps?: Array<{ id: string; url: string }> };
+    body.apps = (body.apps ?? []).map((a) =>
+      a.id === "flightdeck" ? { ...a, url: "http://os.example:4173/" } : a,
+    );
+    await route.fulfill({ response: res, json: body });
+  });
+  await page.goto("/?view=connection");
+  await expect(
+    page.getByRole("heading", { name: "FlightDeck developer reference" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: /Quickstart for Atlas/ }),
+  ).toHaveAttribute(
+    "href",
+    "http://os.example:4173/console/help?article=developers-quickstart-atlas",
+  );
+  await expect(
+    page.getByRole("link", { name: /Inbound API reference/ }),
+  ).toHaveAttribute(
+    "href",
+    "http://os.example:4173/console/help?article=developers-api-reference",
+  );
+  // /integration is public: it must not become a way to learn where the OS lives.
+  const pub = await request.get("/integration");
+  expect(pub.status()).toBe(200);
+  expect(await pub.text()).not.toMatch(/console\/help\?article=developers/);
+});

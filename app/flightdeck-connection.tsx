@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   ArrowDownToLine,
   ArrowUpRight,
+  BookOpen,
   Check,
   Download,
   Link2,
@@ -25,6 +26,7 @@ import {
 } from "@/lib/flightdeck/bridge";
 import { downloadText } from "@/lib/briefing";
 import { useFlightDeckContext } from "./flightdeck-context-switcher";
+import { useWorkspace } from "./workspace-tools";
 import {
   CHECK_NOTE,
   OnboardingEditor,
@@ -132,6 +134,12 @@ export default function FlightDeckConnection({
   const onboarding = useOnboardingStages(superAdmin);
   const [importing, setImporting] = useState<string | null>(null);
   const context = useFlightDeckContext(superAdmin);
+  // The OS's origin, for LINKS only: the url of the built-in "FlightDeck OS"
+  // app entry, which /api/workspace fills from ATLAS_FLIGHTDECK_URL for signed-in
+  // users (never the credential). /integration is public, so the address is
+  // shown here, in the signed-in Connections view, and not there.
+  const { data: workspace } = useWorkspace();
+  const osUrl = (workspace?.apps.find((x) => x.id === "flightdeck")?.url ?? "").replace(/\/+$/, "");
   const contextRow =
     contextStatus[!superAdmin ? "not_permitted" : context.state || "checking"];
   async function refresh(cursor?: string) {
@@ -604,6 +612,35 @@ export default function FlightDeckConnection({
           })}
         </section>
       )}
+      {superAdmin && osUrl ? (
+        <section className="hub-card advantage-connect" aria-labelledby="fd-dev-ref">
+          <BookOpen size={25} />
+          <div>
+            <h2 id="fd-dev-ref">FlightDeck developer reference</h2>
+            <p className="hub-muted">
+              How Atlas's credential, the read-only workspace and project
+              context, and onboarding requests work, as FlightDeck documents
+              them. Opens in FlightDeck and needs a FlightDeck sign-in.
+            </p>
+            <a
+              className="text-link"
+              href={`${osUrl}/console/help?article=developers-quickstart-atlas`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Quickstart for Atlas <ArrowUpRight size={14} />
+            </a>{" "}
+            <a
+              className="text-link"
+              href={`${osUrl}/console/help?article=developers-api-reference`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Inbound API reference <ArrowUpRight size={14} />
+            </a>
+          </div>
+        </section>
+      ) : null}
       <section className="hub-card advantage-connect">
         <Target size={25} />
         <div>
