@@ -2,6 +2,10 @@
 @import "tw-animate-css";
 @import "../vendor/shadcn-tailwind-4.13.0.css";
 @import url("/cesium/Widgets/widgets.css");
+/* lib/motion mirrors the OS motion layer (JS only). Its comments name Tailwind
+   classes (duration-500, ease-out, static) that no Atlas element uses; not
+   scanning it keeps this stylesheet exactly what Atlas's markup needs. */
+@source not "../lib/motion";
 :root {
   --background: #101214;
   --foreground: #f0f1f2;
