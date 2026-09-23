@@ -12,6 +12,7 @@ import {
   type AppEntry,
 } from "@/lib/collaboration";
 import { keptSelection } from "@/lib/flightdeck/context-route";
+import { osOrigin } from "@/lib/flightdeck/os-server";
 export const dynamic = "force-dynamic";
 export async function GET() {
   const a = await authorize("projects.read");
@@ -28,6 +29,17 @@ export async function GET() {
     })) as AppEntry[];
     if (!catalog.some((x) => x.id === "flightdeck"))
       catalog.push(flightdeckApp);
+    // Atlas ships a FEATURED built-in "FlightDeck OS" entry whose `url` is ""
+    // (lib/collaboration.ts), so the card has always rendered and has never
+    // been openable. Fill it from the same configured origin this Worker
+    // already calls — `osOrigin()` returns only the url half of that config,
+    // never the credential — and ONLY when it is empty, so an operator who set
+    // their own url in Connections & admin always wins. Unconfigured returns
+    // "" and the entry keeps its empty url, which is the honest state.
+    const osUrl = osOrigin();
+    if (osUrl)
+      for (const entry of catalog)
+        if (entry.id === "flightdeck" && !entry.url) entry.url = osUrl;
     const apps = catalog
       .filter(
         (x) =>

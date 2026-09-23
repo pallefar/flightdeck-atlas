@@ -36,6 +36,22 @@ export function osSubmissions() {
   const c = config();
   return c ? createGuardedSubmissions(createSubmissionClient(c), cache) : null;
 }
+/** The OS's origin, for a LINK in the UI — never for a call.
+ *
+ * ⛔ WHY THIS IS SAFE TO HAND THE BROWSER when nothing else in this module is:
+ * it returns ONLY the url half of the same config. The inbound credential
+ * stays where this file's header put it — the Authorization header of
+ * server-side calls — and cannot ride along, because it is never read here.
+ * Keeping the accessor in this module rather than reading `env` from a route
+ * is the point: every OS wiring decision stays in one server-only place.
+ *
+ * "" when FlightDeck is not configured, so a caller renders no link rather
+ * than one to nowhere. The trailing slash is stripped so callers can append a
+ * path without doubling it.
+ */
+export function osOrigin(): string {
+  return (env.ATLAS_FLIGHTDECK_URL ?? "").trim().replace(/\/+$/, "");
+}
 const INSTALLATION_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** Scopes Atlas's link records. Unset means the one local installation;
  * set it once, before the first send, and never change it. An invalid
