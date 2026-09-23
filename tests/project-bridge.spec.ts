@@ -321,6 +321,38 @@ test("the onboarding payload is the §3 allowlist only: key snapshot, no sponsor
     { ...payload, facts: { ...payload.facts, assigneeEmail: "a@b.c" } },
   ])
     expect(projectOnboardingPayloadSchema.safeParse(bad).success).toBe(false);
+  // Both ids are refused here exactly where the OS refuses them: zod 4's
+  // uuid (the OS) wants an RFC version and variant, zod 3's (Atlas) any hex
+  // 8-4-4-4-12. Upper case is refused too, so the subject stays the OS's
+  // lower-cased `atlas-<id>`.
+  for (const id of [
+    "11111111-1111-1111-1111-111111111111",
+    "12345678-1234-1234-1234-123456789abc",
+    "00000000-0000-0000-0000-000000000000",
+    ATLAS_ID.toUpperCase(),
+  ]) {
+    expect(
+      projectOnboardingPayloadSchema.safeParse({
+        ...payload,
+        atlasProjectId: id,
+      }).success,
+      id,
+    ).toBe(false);
+    expect(
+      projectOnboardingPayloadSchema.safeParse({
+        ...payload,
+        idempotencyKey: id,
+      }).success,
+      id,
+    ).toBe(false);
+  }
+  expect(
+    projectOnboardingPayloadSchema.safeParse({
+      ...payload,
+      atlasProjectId: "11111111-2222-4333-8444-555555555555",
+      idempotencyKey: crypto.randomUUID(),
+    }).success,
+  ).toBe(true);
   // The saved draft cannot hold a person either: its schema is strict too.
   expect(onboardingSchema.safeParse({ sponsor: "Dana" }).success).toBe(false);
   expect(
@@ -523,6 +555,16 @@ test("submit() POSTs the envelope with only the bearer credential and never X-Wo
     submissionId: os.submissionId,
     osState: "filed",
   });
+  // The OS's two other 409s each name their own cause.
+  expect(await outcome(() => fromFixture(os.submit.lockUnreadable))).toEqual({
+    state: "lock_unreadable",
+  });
+  expect(await outcome(() => fromFixture(os.submit.keyConflict))).toEqual({
+    state: "idempotency_key_conflict",
+  });
+  expect(
+    await outcome(() => jsonResponse(409, { code: "something_new" })),
+  ).toEqual({ state: "invalid_response" });
   expect(await outcome(() => fromFixture(os.submit.invalid))).toEqual({
     state: "invalid_submission",
   });
@@ -598,6 +640,7 @@ test("readSubmission() reads back only this submission, maps each OS state and d
       state: "filed",
       promoted: null,
       reasonCode: null,
+      outcomeWithheld: null,
     },
   });
   expect(seen[0].url).toBe(
@@ -629,7 +672,40 @@ test("readSubmission() reads back only this submission, maps each OS state and d
   expect(JSON.stringify(promoted)).not.toContain("reviewer-jane");
   expect(
     await read(() => jsonResponse(200, readBack("promotedNotShared"))),
-  ).toMatchObject({ state: "ok", data: { state: "promoted", promoted: null } });
+  ).toMatchObject({
+    state: "ok",
+    data: { state: "promoted", promoted: null, outcomeWithheld: null },
+  });
+  // Why a promoted answer has no outcome: two causes, two different fixes.
+  expect(
+    await read(() => jsonResponse(200, readBack("promotedWithheldScope"))),
+  ).toMatchObject({
+    state: "ok",
+    data: { state: "promoted", promoted: null, outcomeWithheld: "scope" },
+  });
+  expect(
+    await read(() => jsonResponse(200, readBack("promotedWithheldNotShared"))),
+  ).toMatchObject({
+    state: "ok",
+    data: {
+      state: "promoted",
+      promoted: null,
+      outcomeWithheld: "workspace-not-shared",
+    },
+  });
+  // A cause word this Atlas does not know is not a broken read-back.
+  expect(
+    await read(() =>
+      jsonResponse(200, {
+        ...readBack("promoted"),
+        outcome: undefined,
+        outcomeWithheld: "later",
+      }),
+    ),
+  ).toMatchObject({
+    state: "ok",
+    data: { state: "promoted", promoted: null, outcomeWithheld: null },
+  });
   expect(
     await read(() => jsonResponse(200, readBack("needsMoreInfo"))),
   ).toMatchObject({
@@ -903,6 +979,7 @@ function harness(
         state: "filed",
         promoted: null,
         reasonCode: null,
+        outcomeWithheld: null,
       },
     })) as (id: string) => Promise<ReadSubmissionResult>,
   };
@@ -967,6 +1044,7 @@ function harness(
         state: body.state,
         promoted: body.state === "promoted" ? (body.outcome ?? null) : null,
         reasonCode: body.state === "rejected" ? body.outcome.reasonCode : null,
+        outcomeWithheld: body.outcomeWithheld ?? null,
       },
     };
   };
@@ -2237,6 +2315,44 @@ test("no link without the OS instanceId, and never onto an OS project another At
   expect(taken.store.links()).toHaveLength(1);
 });
 
+test("a promoted request FlightDeck withholds says which fix it needs: re-mint the credential, or share the workspace", async () => {
+  const cases = [
+    {
+      name: "promotedWithheldScope",
+      reasonCode: "credential_scope",
+      notice: /read:context/,
+    },
+    {
+      name: "promotedWithheldNotShared",
+      reasonCode: "destination_not_shared",
+      notice: /not shared with Atlas/,
+    },
+    // An OS from before the cause word: the old reading stands.
+    {
+      name: "promotedNotShared",
+      reasonCode: "destination_not_shared",
+      notice: /not shared with Atlas/,
+    },
+  ];
+  for (const c of cases) {
+    const h = harness();
+    await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+    h.fake.onRead = h.readAs(c.name);
+    h.tick(61_000);
+    const held = await h.status();
+    expect(held.operation, c.name).toMatchObject({
+      state: "filed",
+      stage: "submitted",
+      reasonCode: c.reasonCode,
+    });
+    expect(held.notice, c.name).toMatch(c.notice);
+    expect(held.link, c.name).toBeNull();
+    if (c.reasonCode === "credential_scope")
+      expect(held.notice).not.toMatch(/not shared/);
+    expect(h.store.links(), c.name).toEqual([]);
+  }
+});
+
 test("needs more info reopens the draft, and the next send uses a fresh key", async () => {
   const h = harness();
   await h.route.POST(sendTo("hr-de"), ATLAS_ID);
@@ -2349,6 +2465,75 @@ test("definitive OS refusals close the send; an OS subject lock is adopted only 
     state: "refused",
     submission_id: null,
   });
+});
+
+test("an unreadable OS lock keeps the reservation and asks for an operator; a key FlightDeck holds for another project closes the send", async () => {
+  // lock_unreadable: FlightDeck cannot tell whether it holds this request,
+  // so Atlas keeps the key, and says who has to act.
+  const locked = harness();
+  locked.fake.onSubmit = async () => ({ state: "lock_unreadable" });
+  const first = await locked.route.POST(sendTo("hr-de"), ATLAS_ID);
+  expect(first.status).toBe(409);
+  const body = (await first.json()) as { code: string; error: string };
+  expect(body.code).toBe("lock_unreadable");
+  expect(body.error).toMatch(/operator/);
+  expect(locked.store.ops()).toEqual([
+    expect.objectContaining({
+      state: "reserved",
+      reason_code: "lock_unreadable",
+    }),
+  ]);
+  expect(await locked.status(false)).toMatchObject({
+    retryPending: true,
+    canClose: true,
+  });
+  // Once the operator has fixed the lock, the retry reuses the same key.
+  locked.fake.onSubmit = duplicateReceipt;
+  expect((await locked.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  expect(locked.fake.submits[1].payload.idempotencyKey).toBe(
+    locked.fake.submits[0].payload.idempotencyKey,
+  );
+  expect(locked.store.ops()).toEqual([
+    expect.objectContaining({ state: "filed", reason_code: null }),
+  ]);
+
+  // idempotency_key_conflict: this key names another Atlas project in
+  // FlightDeck, so nothing of this project was filed under it — first
+  // attempt or retry. The send closes, and the next one takes a fresh key.
+  for (const retry of [false, true]) {
+    const clash = harness();
+    if (retry) {
+      clash.fake.onSubmit = async () => ({ state: "os_unreachable" });
+      await clash.route.POST(sendTo("hr-de"), ATLAS_ID);
+    }
+    clash.fake.onSubmit = async () => ({ state: "idempotency_key_conflict" });
+    const refused = await clash.route.POST(sendTo("hr-de"), ATLAS_ID);
+    expect(refused.status, `retry=${retry}`).toBe(409);
+    expect(await refused.json()).toMatchObject({
+      code: "idempotency_key_conflict",
+    });
+    expect(clash.store.ops()).toEqual([
+      expect.objectContaining({
+        state: "refused",
+        reason_code: "idempotency_key_conflict",
+        request_body: null,
+      }),
+    ]);
+    clash.fake.onSubmit = async () => ({
+      state: "ok",
+      data: {
+        submissionId: os.submissionId,
+        receivedAt: os.receivedAt,
+        payloadSha256: os.payloadSha256,
+        duplicate: false,
+      },
+    });
+    expect((await clash.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(
+      202,
+    );
+    const [closed, fresh] = clash.store.ops();
+    expect(fresh.idempotency_key).not.toBe(closed.idempotency_key);
+  }
 });
 
 test("the stage list returns stored states for visible projects, and only a Super Admin refresh reads the OS", async () => {

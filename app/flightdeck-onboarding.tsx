@@ -101,6 +101,12 @@ const REASON_TEXT: Record<string, string> = {
     "FlightDeck accepted it and is creating the project; Atlas is waiting to see it listed.",
   destination_not_shared:
     "FlightDeck accepted it into a workspace that is not shared with Atlas, so Atlas cannot confirm it.",
+  credential_scope:
+    "FlightDeck accepted it, but Atlas's credential lacks read:context, so Atlas cannot see the outcome.",
+  lock_unreadable:
+    "FlightDeck needs an operator to inspect this request's lock.",
+  idempotency_key_conflict:
+    "FlightDeck holds this request's key for a different Atlas project, so nothing was filed.",
   instance_unknown:
     "FlightDeck does not publish its instance id yet, so Atlas cannot record the link.",
   link_conflict:

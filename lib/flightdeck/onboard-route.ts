@@ -579,6 +579,44 @@ export function createOnboardRoute<A extends OnboardAccess>(
           { status: await status() },
         );
       }
+      case "lock_unreadable":
+        // FlightDeck cannot read its own lock for this request, so it cannot
+        // say whether it holds it: keep the reservation, and a retry reuses
+        // the key once an operator has fixed the lock.
+        await patch(
+          db,
+          op.id,
+          { reason_code: "lock_unreadable", updated_at: stamp },
+          ["reserved"],
+        );
+        return refuse(
+          409,
+          "lock_unreadable",
+          "FlightDeck needs an operator to inspect this request's lock. Ask the OS admin to check it, then Retry send: Atlas keeps this request and its key, so it resends the same request.",
+          { status: await status() },
+        );
+      case "idempotency_key_conflict":
+        // FlightDeck holds this key for another Atlas project, so nothing of
+        // this project was filed under it, on a first attempt or a retry
+        // (a key it holds for this project is answered as a duplicate).
+        // Close it: the next send takes a fresh key.
+        await patch(
+          db,
+          op.id,
+          {
+            state: "refused",
+            reason_code: "idempotency_key_conflict",
+            request_body: null,
+            updated_at: stamp,
+          },
+          ["reserved"],
+        );
+        return refuse(
+          409,
+          "idempotency_key_conflict",
+          "FlightDeck holds this request's key for a different Atlas project, so nothing was filed for this one. Send again: the next send uses a fresh key.",
+          { status: await status() },
+        );
       case "invalid_submission":
       case "unauthorized":
       case "refused":
@@ -1036,6 +1074,18 @@ export function createOnboardRoute<A extends OnboardAccess>(
         };
       case "promoted": {
         if (!s.promoted) {
+          // FlightDeck withholds the outcome and says why: the two causes
+          // need different fixes. An OS from before `outcomeWithheld` sends
+          // neither word, and the old reading stands.
+          if (s.outcomeWithheld === "scope") {
+            await touch({ ...receipt, reason_code: "credential_scope" });
+            return {
+              notice:
+                "FlightDeck accepted the request, but Atlas's FlightDeck credential lacks read:context, so Atlas cannot see the outcome. Ask the OS admin to re-mint Atlas's credential with read:context.",
+              retryAfter: null,
+              stop: false,
+            };
+          }
           await touch({ ...receipt, reason_code: "destination_not_shared" });
           return {
             notice:

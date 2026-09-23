@@ -81,13 +81,22 @@ export const onboardingSchema = z
   .strict();
 export type OnboardingDraft = z.infer<typeof onboardingSchema>;
 
+/** An RFC 9562 UUID (version 1-8, variant 10xx), lower case. Not
+ * `z.string().uuid()`: the OS validates with zod 4, whose uuid demands the
+ * version and variant, while Atlas's zod 3 accepts any 8-4-4-4-12 hex. A
+ * value in between would pass here and be refused 400 by the OS. Lower case
+ * only, so `subject` equals the OS's lower-cased `atlas-<id>`.
+ * `crypto.randomUUID()` always matches. */
+const RFC_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
 /** Plan §4.2, verbatim: the OS validates the same schema and answers 400
  * without echoing keys. Checked here first so an extra key is never sent. */
 export const projectOnboardingPayloadSchema = z
   .object({
     schema: z.literal(ONBOARDING_SCHEMA_ID),
-    idempotencyKey: z.string().uuid(),
-    atlasProjectId: z.string().uuid(),
+    idempotencyKey: z.string().regex(RFC_UUID_RE),
+    atlasProjectId: z.string().regex(RFC_UUID_RE),
     atlasRevision: z.number().int().positive(),
     installationId: slug,
     /** sha256 of the Atlas user id, never a name or email. */
@@ -640,6 +649,11 @@ export const osAlreadySubmittedSchema = z.object({
   submissionId: submissionIdSchema.optional(),
   state: z.string().max(40).optional(),
 });
+/** The OS's other two 409s (OS server/routes/inbound.ts). Neither says
+ * whether this request was filed; each has its own remedy. */
+export const osSubmitConflictSchema = z.object({
+  code: z.enum(["lock_unreadable", "idempotency_key_conflict"]),
+});
 const osPromotedSchema = z.object({
   workspaceId: osIdSchema,
   projectId: osIdSchema,
@@ -654,7 +668,15 @@ const osSubmissionStatusSchema = z.object({
   payloadSha256: z.union([sha256Schema, z.literal("")]),
   state: z.enum(["filed", "promoted", "rejected", "promoted-or-withdrawn"]),
   outcome: z.unknown().optional(),
+  // Read leniently below: a cause word this Atlas does not know yet must not
+  // fail the whole read-back.
+  outcomeWithheld: z.unknown().optional(),
 });
+/** Why the OS answered `promoted` without an outcome: Atlas's credential
+ * lacks read:context (`scope`: re-mint it), or the destination is not in
+ * readWorkspaces (`workspace-not-shared`: share it). */
+export const outcomeWithheldCauses = ["scope", "workspace-not-shared"] as const;
+export type OutcomeWithheld = (typeof outcomeWithheldCauses)[number];
 export type OsSubmissionStatus = {
   submissionId: string;
   kind: string;
@@ -665,6 +687,9 @@ export type OsSubmissionStatus = {
   /** Only when promoted AND the destination is in readWorkspaces. */
   promoted: z.infer<typeof osPromotedSchema> | null;
   reasonCode: RejectionReason | null;
+  /** Only when promoted without an outcome, and the OS said why. Null from
+   * an OS that predates the field, or for a cause Atlas does not know. */
+  outcomeWithheld: OutcomeWithheld | null;
 };
 export function parseSubmissionStatus(
   body: unknown,
@@ -676,6 +701,10 @@ export function parseSubmissionStatus(
     s.state === "promoted" ? osPromotedSchema.safeParse(s.outcome) : null;
   const rejected =
     s.state === "rejected" ? osRejectedSchema.safeParse(s.outcome) : null;
+  const withheld =
+    s.state === "promoted" && !promoted?.success
+      ? z.enum(outcomeWithheldCauses).safeParse(s.outcomeWithheld)
+      : null;
   return {
     submissionId: s.submissionId,
     kind: s.kind,
@@ -689,6 +718,7 @@ export function parseSubmissionStatus(
         ? rejected.data.reasonCode
         : "other"
       : null,
+    outcomeWithheld: withheld?.success ? withheld.data : null,
   };
 }
 
