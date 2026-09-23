@@ -971,4 +971,18 @@ test("Connections links a Super Admin to FlightDeck's developer reference, and t
   const pub = await request.get("/integration");
   expect(pub.status()).toBe(200);
   expect(await pub.text()).not.toMatch(/console\/help\?article=developers/);
+  // What a visitor reads there must neither name an OS host, port or console
+  // path, nor say the OS integration is "not deployed" now that the OS
+  // integration line ships the project-onboarding kind and instanceId.
+  await page.goto("/integration");
+  const shown = await page.locator("main").innerText();
+  expect(shown).not.toMatch(/not deployed/i);
+  expect(shown).not.toMatch(/127\.0\.0\.1|localhost|:4173|console\//);
+  // The way back is a client-side link, not a full page reload.
+  const back = page.getByRole("link", { name: /Back to connections/ });
+  await expect(back).toHaveAttribute("href", "/?view=connection");
+  await back.click();
+  await expect(
+    page.getByRole("heading", { name: "FlightDeck developer reference" }),
+  ).toBeVisible();
 });
