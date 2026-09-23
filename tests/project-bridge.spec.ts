@@ -64,11 +64,12 @@ import {
   type OnboardDb,
 } from "../lib/flightdeck/onboard-route";
 
-// Nothing in this file contacts FlightDeck OS. The OS side of the
-// project-onboarding kind (W1) is not deployed yet, so its responses come from
-// a fixture recorded from the contract, the route handlers run over a fake OS
-// and a SQLite database built from the real migration 0004, and browser calls
-// to Atlas's FlightDeck routes are answered with page.route.
+// Nothing in this file contacts FlightDeck OS. The OS's responses for the
+// project-onboarding kind come from a fixture recorded from the OS
+// apiReference schemas at OS commit 0f2b3a1e (not a live capture: a real
+// submit would file a proposal), the route handlers run over a fake OS and a
+// SQLite database built from the real migration 0004, and browser calls to
+// Atlas's FlightDeck routes are answered with page.route.
 const os = JSON.parse(
   readFileSync(
     new URL("./fixtures/os-project-onboarding.json", import.meta.url),
@@ -84,7 +85,6 @@ const FAKE_CREDENTIAL = "fake-credential-for-tests-0123456789";
 const config = { baseUrl: "http://127.0.0.1:4173", token: FAKE_CREDENTIAL };
 const readBack = (name: string) => ({
   ...os.readBack.base,
-  subject: `atlas-${ATLAS_ID}`,
   ...os.readBack[name],
 });
 const jsonResponse = (
@@ -571,6 +571,9 @@ test("submit() POSTs the envelope with only the bearer credential and never X-Wo
   expect(await outcome(() => fromFixture(os.submit.scopeMissing))).toEqual({
     state: "refused",
   });
+  expect(await outcome(() => fromFixture(os.submit.kindNotEnabled))).toEqual({
+    state: "refused",
+  });
   expect(await outcome(() => fromFixture(os.submit.unauthorized))).toEqual({
     state: "unauthorized",
   });
@@ -777,6 +780,52 @@ test("one rate limit covers the whole credential: context reads, submits and rea
   expect(calls).toEqual(["read"]);
 });
 
+test("the OS fixture is recorded from the OS's published schemas, not from a pre-deployment guess", () => {
+  // The OS publishes its response schemas (strict, every key required unless
+  // optional) in server/inbound/apiReference.ts. The fixture must carry the
+  // same keys, so a test that passes here passes against the real OS answer.
+  expect(os._about).not.toMatch(/not deployed/i);
+  expect(os._about).toMatch(/apiReference/);
+  // ContextWorkspacesResponse declares instanceId as z.string().uuid().
+  expect(os.context.instanceId).toMatch(UUID_RE);
+  expect(os.context.workspaces.instanceId).toBe(os.context.instanceId);
+  const keys = (body: object) => Object.keys(body).sort();
+  // SubmissionStatus: subject is required.
+  expect(os.readBack.base.subject).toBe(`atlas-${ATLAS_ID}`);
+  expect(keys(os.readBack.base)).toEqual(
+    [
+      "fieldNames",
+      "integrationId",
+      "kind",
+      "payloadBytes",
+      "payloadSha256",
+      "receivedAt",
+      "subject",
+      "submissionId",
+    ].sort(),
+  );
+  // OnboardingAlreadySubmitted: error, code, submissionId, state.
+  expect(keys(os.submit.alreadySubmitted.body)).toEqual(
+    ["code", "error", "state", "submissionId"].sort(),
+  );
+  // InvalidOnboardingPayload: issues carry a path and a Zod code, no message.
+  expect(os.submit.invalid.body).toMatchObject({
+    error: "invalid project-onboarding submission",
+    reason: "invalid-payload",
+  });
+  for (const issue of os.submit.invalid.body.issues)
+    expect(keys(issue)).toEqual(["code", "path"]);
+  // InvalidCredential and KindNotEnabled.
+  expect(os.submit.unauthorized.body).toEqual({
+    error: "invalid or unauthorized credential",
+  });
+  expect(os.submit.kindNotEnabled).toMatchObject({
+    status: 403,
+    body: { reason: "kind-not-enabled" },
+  });
+  expect(keys(os.submit.kindNotEnabled.body)).toEqual(["error", "reason"]);
+});
+
 test("read:context accepts any OS instanceId value it has not seen, and still rejects any other new key", async () => {
   const { instanceId, ...without } = os.context.workspaces;
   expect(instanceId).toBe(os.context.instanceId);
@@ -784,10 +833,11 @@ test("read:context accepts any OS instanceId value it has not seen, and still re
     osWorkspacesResponseSchema.safeParse(os.context.workspaces).success,
   ).toBe(true);
   expect(osWorkspacesResponseSchema.safeParse(without).success).toBe(true);
-  // Atlas has never seen the OS mint an instance id, so its format is a
-  // guess. A guess that turns out wrong must degrade onboarding only (the
-  // link is held, see "no link without the OS instanceId"), never take the
-  // whole read:context response — and with it the context switcher — down.
+  // The OS declares instanceId a UUID today (apiReference), but Atlas keeps
+  // it opaque on purpose: if the OS ever changes the format, that must
+  // degrade onboarding only (the link is held, see "no link without the OS
+  // instanceId"), never take the whole read:context response — and with it
+  // the context switcher — down.
   for (const odd of [
     "flightdeck.local",
     "te-ops:9f2c",

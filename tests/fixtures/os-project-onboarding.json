@@ -1,5 +1,5 @@
 {
-  "_about": "OS responses for the project-onboarding kind, recorded from the contract (onboarding plan §4.2, §4.3, §4.6; public-inbound-http-api proposal §8b) because W1 is not deployed yet. Replace with a live capture once the OS ships the kind; the tests read this file, never a running OS.",
+  "_about": "OS responses for the project-onboarding kind, recorded from the OS apiReference schemas at OS commit 0f2b3a1e (flightdeck/server/inbound/apiReference.ts on integration/unified-2026-09-22: every body here parses with its strict response schema, and instanceId is a UUID as ContextWorkspacesResponse declares). Deliberately not a live capture: a real submit would file a proposal in the OS. The tests read this file, never a running OS.",
   "submissionId": "0a1b2c3d4e5f60718293a4b5",
   "otherSubmissionId": "ffeeddccbbaa998877665544",
   "payloadSha256": "5d41402abc4b2a76b9719d911017c592aa5f1b1c1c7c2a6f0b1c2d3e4f5a6b7c",
@@ -23,6 +23,7 @@
     "alreadySubmitted": {
       "status": 409,
       "body": {
+        "error": "this Atlas project already has an open or promoted onboarding request",
         "code": "already_submitted",
         "submissionId": "0a1b2c3d4e5f60718293a4b5",
         "state": "filed"
@@ -31,8 +32,11 @@
     "invalid": {
       "status": 400,
       "body": {
-        "error": "invalid submission",
-        "issues": [{ "path": ["payload"], "message": "Unrecognized key" }]
+        "error": "invalid project-onboarding submission",
+        "reason": "invalid-payload",
+        "issues": [
+          { "path": ["payload", "target", "workspaceId"], "code": "invalid_format" }
+        ]
       }
     },
     "scopeMissing": {
@@ -44,7 +48,14 @@
     },
     "unauthorized": {
       "status": 401,
-      "body": { "error": "invalid credential" }
+      "body": { "error": "invalid or unauthorized credential" }
+    },
+    "kindNotEnabled": {
+      "status": 403,
+      "body": {
+        "error": "the project-onboarding kind is not enabled for this integration",
+        "reason": "kind-not-enabled"
+      }
     },
     "lockUnreadable": {
       "status": 409,
@@ -71,6 +82,7 @@
       "submissionId": "0a1b2c3d4e5f60718293a4b5",
       "integrationId": "atlas",
       "kind": "project-onboarding",
+      "subject": "atlas-4f7d1c2a-8b3e-4c5d-9e6f-a1b2c3d4e5f6",
       "receivedAt": "2026-09-22T09:00:00.000Z",
       "payloadSha256": "5d41402abc4b2a76b9719d911017c592aa5f1b1c1c7c2a6f0b1c2d3e4f5a6b7c",
       "payloadBytes": 1432,
@@ -133,10 +145,10 @@
     "notFound": { "status": 404, "body": { "error": "no such submission" } }
   },
   "context": {
-    "instanceId": "os-7c1e2f0a9b3d4c5e",
+    "instanceId": "0b6f3c1e-2d4a-4e8b-9c7f-5a1d2e3f4b6c",
     "workspaces": {
       "integrationId": "atlas",
-      "instanceId": "os-7c1e2f0a9b3d4c5e",
+      "instanceId": "0b6f3c1e-2d4a-4e8b-9c7f-5a1d2e3f4b6c",
       "workspaces": [
         {
           "id": "te-ops",
