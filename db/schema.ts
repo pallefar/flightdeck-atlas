@@ -173,7 +173,10 @@ export const flightdeckOperations = sqliteTable(
     /** The exact envelope reserved with the key. A retry resends these bytes
      * and never rebuilds them, because FlightDeck keeps what the key first
      * filed. Held only while the send is unconfirmed; cleared once FlightDeck
-     * files or refuses it, so Atlas keeps no second copy of the free text. */
+     * files or refuses it, or once the Super Admin closes the send, so Atlas
+     * keeps no second copy of the free text. Deleting the project cannot
+     * strand it either: the project delete refuses while a send is
+     * unconfirmed, and takes this row with the project once it is not. */
     requestBody: text("request_body"),
     /** FlightDeck already held a request for this project that Atlas had no
      * record of, and Atlas adopted it after the read-back matched the
@@ -190,7 +193,10 @@ export const flightdeckOperations = sqliteTable(
 );
 /** Confirmed Atlas <-> OS project links (PROJECT-BRIDGE-CONTRACT.md:27-32).
  * Written only after the OS read-back says promoted AND read:context lists
- * the project. Installation-scoped, outside the editable project JSON. */
+ * the project. Installation-scoped, outside the editable project JSON.
+ * Deleted with its Atlas project: `uniq_atlas_project_links_os` would
+ * otherwise hold the OS project against a project Atlas no longer has, and
+ * every later promotion onto it would answer `link_conflict` for good. */
 export const projectLinks = sqliteTable(
   "atlas_project_links",
   {

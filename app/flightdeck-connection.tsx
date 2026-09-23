@@ -430,12 +430,20 @@ export default function FlightDeckConnection({
                       {p.name}
                       <ArrowUpRight size={14} />
                     </button>
+                    {/* Locked first: a project FlightDeck holds always has a
+                        saved draft (a send needs one), so asking about the
+                        draft first made "With FlightDeck" unreachable and
+                        left a linked project reading as one still choosing a
+                        workspace. And the draft's own line no longer says
+                        "when connected": read-only context is live, and the
+                        destination is chosen in Review & send, not here. The
+                        hint is the owner's planning note, shown as written. */}
                     <p>
                       {p.functionArea || p.category}
-                      {p.flightdeckDraft
-                        ? ` · ${p.flightdeckDraft.workspaceHint || "Choose workspace when connected"}`
-                        : locked
-                          ? " · With FlightDeck"
+                      {locked
+                        ? " · With FlightDeck"
+                        : p.flightdeckDraft
+                          ? ` · ${p.flightdeckDraft.workspaceHint || "Destination chosen when you send"}`
                           : " · Atlas only"}
                     </p>
                     {isStatusMoving(stage) && (

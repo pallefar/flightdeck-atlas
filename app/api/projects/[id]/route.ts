@@ -17,6 +17,7 @@ import {
   recordChanges,
 } from "@/lib/server-projects";
 import { projectFor, activeProjectPeople } from "@/lib/project-access";
+import { forgetProject, unconfirmedSend } from "@/lib/flightdeck/onboard-route";
 import { applyWorkRules, stampTimeEntries } from "@/lib/work-management";
 import { projectSchema } from "@/lib/projects";
 export const dynamic = "force-dynamic";
@@ -34,6 +35,19 @@ export async function DELETE(
     return json({ error: "A current project revision is required." }, 400);
   try {
     const db = database();
+    // A send FlightDeck has not confirmed still holds the exact request body
+    // it would resend, summary and success measure included. Deleting the
+    // project would leave that copy in a row no route can reach, so the send
+    // is closed first — the same lock the To FlightDeck row shows on the
+    // draft, applied to the project the draft belongs to.
+    if (await unconfirmedSend(db, id))
+      return json(
+        {
+          error:
+            "FlightDeck has not confirmed this project's send. Close the unconfirmed send in Connections → To FlightDeck before deleting the project.",
+        },
+        409,
+      );
     const result = await db
       .prepare("DELETE FROM atlas_projects WHERE id = ? AND revision = ?")
       .bind(id, revision)
@@ -43,6 +57,10 @@ export async function DELETE(
         { error: "Project changed or was not found. Reload before deleting." },
         409,
       );
+    // The project is gone, so its send history and its FlightDeck link go
+    // with it: nothing else can read them, and a link left behind would hold
+    // its OS project against every later Atlas project for good.
+    await forgetProject(db, id);
     return new Response(null, { status: 204 });
   } catch {
     return json(

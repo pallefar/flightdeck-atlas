@@ -486,17 +486,38 @@ export function reviewRows(
 export const FREE_TEXT_NOTE =
   "Summary and Success measure are sent as you wrote them, including any name or email address typed there. Atlas refuses an email address or phone number in every other field, but it cannot recognise a person's name.";
 
-const personalShape = (text: string): "email" | "phone" | null => {
+/** A phone number, not any long run of digits. The two callers ask different
+ * questions because the cost of being wrong is not the same. The free text is
+ * only warned about, so it casts wide: nine digits anywhere in a run of phone
+ * punctuation. A strict field is refused outright, with no override, so it
+ * asks for a shape only a phone number has — seven digits running together,
+ * or an international `+` prefix — and never adds up digits across separate
+ * groups. Otherwise a role title with a plant number and a year range ("Head
+ * of Quality, Plant 4 (2024-2026)"), an ERP version ("SAP ECC 6.0 / S4
+ * 2021-2024") or a cost centre ("100-200-300-400") could not be sent at all,
+ * and the refusal would name a phone number that is not there — while owner
+ * decision 4 asks for exactly those titles in place of a person's name. A
+ * value that is itself nine digits in a row (a bare VAT or entity number)
+ * still reads as a phone number; grouping it sends it. */
+const personalShape = (
+  text: string,
+  strict = false,
+): "email" | "phone" | null => {
   if (text.includes("@")) return "email";
-  for (const match of text.matchAll(/\+?\(?\d[\d\s().\/-]{6,}\d/g))
-    if (match[0].replace(/\D/g, "").length >= 9) return "phone";
+  for (const match of text.matchAll(/\+?\(?\d[\d\s().\/-]{6,}\d/g)) {
+    if (match[0].replace(/\D/g, "").length < 9) continue;
+    if (!strict) return "phone";
+    const runs = match[0].match(/\d+/g) ?? [];
+    if (match[0].startsWith("+") || runs.some((run) => run.length >= 7))
+      return "phone";
+  }
   return null;
 };
 /** A hint under a field. Free text (summary, success measure) is only
  * warned about: the owner chose to send it (decision 5). Every other field
  * is `strict`: the server refuses an email or phone-number shape there. */
 export function personalDataHint(text: string, strict = false) {
-  const shape = personalShape(text);
+  const shape = personalShape(text, strict);
   if (!shape) return null;
   if (strict)
     return "Atlas will not send an email address or phone number here. Use a role title or a system name.";
@@ -533,11 +554,14 @@ const textsAt = (payload: ProjectOnboardingPayload, path: string) => {
 /** Review paths whose text looks like an email address or phone number. The
  * route refuses `refused`; the form warns about `warned`. Never the values. */
 export function personalDataIn(payload: ProjectOnboardingPayload) {
-  const hit = (paths: string[]) =>
+  const hit = (paths: string[], strict: boolean) =>
     paths.filter((path) =>
-      textsAt(payload, path).some((text) => personalShape(text)),
+      textsAt(payload, path).some((text) => personalShape(text, strict)),
     );
-  return { refused: hit(STRICT_TEXT_FIELDS), warned: hit(FREE_TEXT_FIELDS) };
+  return {
+    refused: hit(STRICT_TEXT_FIELDS, true),
+    warned: hit(FREE_TEXT_FIELDS, false),
+  };
 }
 export const fieldLabel = (path: string) =>
   REVIEW_FIELDS.find((f) => f.path === path)?.label ?? path;

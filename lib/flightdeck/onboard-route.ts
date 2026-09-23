@@ -269,6 +269,41 @@ async function latestOperation(db: OnboardDb, atlasProjectId: string) {
     .bind(atlasProjectId)
     .first<OperationRow>();
 }
+/** The unconfirmed send that must be resolved before its project may be
+ * deleted, or null. `reserved` is the only state that still holds
+ * `request_body` — the exact envelope, free text and all — so deleting the
+ * project under it would strand a verbatim copy of the summary and success
+ * measure in a row no route can reach: POST, GET and CLOSE all answer 404
+ * once the project is gone, and the list sweep never selects `reserved`.
+ * Nothing is deleted automatically here (owner decision 6): these are exactly
+ * the states the form offers "Close this unconfirmed send" for, so the Super
+ * Admin closes it — which clears the body — and the delete goes through. */
+export async function unconfirmedSend(db: OnboardDb, atlasProjectId: string) {
+  const op = await latestOperation(db, atlasProjectId);
+  return op && isClosable(op) ? op : null;
+}
+/** Atlas's own record of a project that is being deleted: every send of it
+ * and its FlightDeck link. Both are keyed by the Atlas project id alone, so
+ * once the project is gone no route can read, close or clear them. Call it
+ * only after the project row is really gone, and only once `unconfirmedSend`
+ * is null, so no request body can outlive its project. Dropping the link also
+ * frees the OS project: `uniq_atlas_project_links_os` would otherwise hold it
+ * against a deleted Atlas project for good, and every later promotion onto
+ * that OS project would answer `link_conflict` with no way to clear it. */
+export async function forgetProject(db: OnboardDb, atlasProjectId: string) {
+  const operations = await db
+    .prepare("DELETE FROM atlas_flightdeck_operations WHERE atlas_project_id=?")
+    .bind(atlasProjectId)
+    .run();
+  const links = await db
+    .prepare("DELETE FROM atlas_project_links WHERE atlas_project_id=?")
+    .bind(atlasProjectId)
+    .run();
+  return {
+    operations: operations.meta.changes,
+    links: links.meta.changes,
+  };
+}
 async function linkFor(
   db: OnboardDb,
   installationId: string,
