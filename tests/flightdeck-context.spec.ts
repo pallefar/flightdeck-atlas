@@ -169,23 +169,24 @@ test("context transport sends only the bearer credential and maps every OS outco
         }),
     ),
   ).toEqual({ state: "invalid_response" });
-  // The OS's stable instanceId (proposal §8b decision 10) is accepted before
-  // the OS starts sending it; any other new key still rejects the response.
+  // The OS's stable instanceId (proposal §8b decision 10), a UUID as the OS
+  // apiReference declares it, is accepted; any other new key still rejects
+  // the response.
   expect(
     await outcome(
       () =>
         jsonResponse(200, {
           integrationId: "atlas",
-          instanceId: "os-7c1e2f0a9b3d4c5e",
+          instanceId: "0b6f3c1e-2d4a-4e8b-9c7f-5a1d2e3f4b6c",
           workspaces: fixture().workspaces,
           generatedAt: at,
         }),
       "workspaces",
     ),
-  ).toMatchObject({ state: "ok", data: { instanceId: "os-7c1e2f0a9b3d4c5e" } });
-  // Its format is a guess Atlas has never seen the OS make, so the value is
-  // taken as opaque: a shape Atlas did not predict must not fail the whole
-  // response and black out the context switcher.
+  ).toMatchObject({ state: "ok", data: { instanceId: "0b6f3c1e-2d4a-4e8b-9c7f-5a1d2e3f4b6c" } });
+  // Atlas still takes the value as opaque: if the OS ever changes its
+  // format, the new shape must not fail the whole response and black out the
+  // context switcher.
   expect(
     await outcome(
       () =>
