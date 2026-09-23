@@ -2,7 +2,7 @@
 
 Decision recorded 2026-09-18: use the owner's existing self-hosted/local Supabase installation as the common identity provider. FlightDeck is moving login to Supabase Auth. Do not create a separate Supabase project or a second password directory for Atlas.
 
-Status: migration target and implementation handoff. Supabase login is not active in Atlas. The running local instance, its reachable endpoint, deployed Auth version and the OS migration branch still need verification. No production identity, data or access-policy changes have been made for this handoff.
+Status: migration target and implementation handoff. Supabase login is not active in Atlas or in the OS. The local instance, its loopback endpoint and its Auth version were checked on 2026-09-24 (see Local and hosted connectivity). The OS migration branch still needs verification. No production identity, data or access-policy changes have been made for this handoff.
 
 ## What the repository currently establishes
 
@@ -63,7 +63,13 @@ Atlas verifies identity server-side. Never authorize from a client-supplied user
 
 ## Local and hosted connectivity
 
-The owner's local Supabase host and URL are still required. No running Supabase container was found in this Mac's current Docker context; this does not establish where the existing installation is running.
+Checked 2026-09-24 on the owner's Mac with `docker ps` (read-only; no keys or credentials were read). The FlightDeck compose stack is running there:
+
+- Auth: `supabase/gotrue:v2.158.1`, published only on loopback at `127.0.0.1:54324`. This is the same version as the image pinned in the repository, so the OAuth/OIDC server caveat above still applies to the running instance.
+- Postgres (`127.0.0.1:54322`) and Studio (`127.0.0.1:54323`) are also bound to loopback only. None of these ports is reachable from another machine.
+- OS login has not moved to it. FlightDeck integration `c44d665b` still signs in against its own `auth_users` and `auth_sessions` tables (`flightdeck/server/services/auth.ts`) and contains no GoTrue client. A running Auth container does not mean Supabase login is active in either application.
+
+This records where the local instance runs today. It does not decide the deployment topology for shared sign-in.
 
 A hosted Atlas server cannot reach another computer's `localhost`. Establish a deliberate HTTPS gateway/private connectivity route, or run Atlas beside FlightDeck locally. Keep Postgres and Studio private; Atlas needs the approved Auth/SDK HTTP interface, not a raw database port.
 
