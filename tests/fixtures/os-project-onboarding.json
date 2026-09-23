@@ -46,6 +46,20 @@
       "status": 401,
       "body": { "error": "invalid credential" }
     },
+    "lockUnreadable": {
+      "status": 409,
+      "body": {
+        "error": "an intake lock for this request is unreadable; an operator must inspect it",
+        "code": "lock_unreadable"
+      }
+    },
+    "keyConflict": {
+      "status": 409,
+      "body": {
+        "error": "this idempotency key was already used for a different Atlas project",
+        "code": "idempotency_key_conflict"
+      }
+    },
     "rateLimited": {
       "status": 429,
       "headers": { "Retry-After": "12" },
@@ -84,6 +98,14 @@
       }
     },
     "promotedNotShared": { "state": "promoted" },
+    "promotedWithheldScope": {
+      "state": "promoted",
+      "outcomeWithheld": "scope"
+    },
+    "promotedWithheldNotShared": {
+      "state": "promoted",
+      "outcomeWithheld": "workspace-not-shared"
+    },
     "setupInProgress": {
       "state": "promoted",
       "outcome": {

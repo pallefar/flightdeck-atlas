@@ -25,6 +25,7 @@ import {
   onboardingEnvelopeSchema,
   osAlreadySubmittedSchema,
   osSubmitAcceptedSchema,
+  osSubmitConflictSchema,
   osSubmitDuplicateSchema,
   parseSubmissionStatus,
   type OnboardingEnvelope,
@@ -357,6 +358,12 @@ export type SubmitResult =
       submissionId: string | null;
       osState: string | null;
     }
+  /** OS 409: its intake lock for this request is torn; an operator must
+   * inspect it. The OS may or may not hold the request. */
+  | { state: "lock_unreadable" }
+  /** OS 409: this key was used for a different Atlas project, so nothing of
+   * this project was filed under it. */
+  | { state: "idempotency_key_conflict" }
   | TransportFailure;
 export type ReadSubmissionResult =
   | { state: "ok"; data: OsSubmissionStatus }
@@ -402,12 +409,15 @@ export function createSubmissionClient(
       if (!isJson(response)) return { state: "invalid_response" };
       if (response.status === 409) {
         const lock = osAlreadySubmittedSchema.safeParse(body);
-        return lock.success
-          ? {
-              state: "already_submitted",
-              submissionId: lock.data.submissionId ?? null,
-              osState: lock.data.state ?? null,
-            }
+        if (lock.success)
+          return {
+            state: "already_submitted",
+            submissionId: lock.data.submissionId ?? null,
+            osState: lock.data.state ?? null,
+          };
+        const conflict = osSubmitConflictSchema.safeParse(body);
+        return conflict.success
+          ? { state: conflict.data.code }
           : { state: "invalid_response" };
       }
       if (response.status === 202) {

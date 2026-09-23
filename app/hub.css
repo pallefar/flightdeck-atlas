@@ -827,6 +827,26 @@
 }
 .bridge-actions .text-link {
   font-size: 12px;
+  cursor: pointer;
+}
+/* A locked or unavailable action looks it, without a hover. */
+.bridge-actions .text-link:disabled,
+.bridge-actions .text-link[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.fd-lock-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+.fd-lock-note > svg {
+  flex-shrink: 0;
+  margin-top: 3px;
 }
 .bridge-draft {
   background: var(--background);
@@ -1068,6 +1088,10 @@
 }
 .fd-review dd.missing {
   color: var(--orange);
+}
+.fd-review .fd-sent {
+  font-size: 13px;
+  line-height: 1.5;
 }
 .fd-never li {
   font-size: 13px;

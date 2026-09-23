@@ -17,7 +17,12 @@ import {
   recordChanges,
 } from "@/lib/server-projects";
 import { projectFor, activeProjectPeople } from "@/lib/project-access";
-import { forgetProject, unconfirmedSend } from "@/lib/flightdeck/onboard-route";
+import {
+  DRAFT_NOT_HELD_SQL,
+  deleteProject,
+  draftHeld,
+} from "@/lib/flightdeck/onboard-route";
+import { draftEdited } from "@/lib/flightdeck/onboarding";
 import { applyWorkRules, stampTimeEntries } from "@/lib/work-management";
 import { projectSchema } from "@/lib/projects";
 export const dynamic = "force-dynamic";
@@ -34,13 +39,18 @@ export async function DELETE(
   if (!Number.isInteger(revision) || revision < 1)
     return json({ error: "A current project revision is required." }, 400);
   try {
-    const db = database();
     // A send FlightDeck has not confirmed still holds the exact request body
     // it would resend, summary and success measure included. Deleting the
     // project would leave that copy in a row no route can reach, so the send
     // is closed first — the same lock the To FlightDeck row shows on the
-    // draft, applied to the project the draft belongs to.
-    if (await unconfirmedSend(db, id))
+    // draft, applied to the project the draft belongs to. The check is part
+    // of the delete itself, and the send's reservation needs the project, so
+    // a send pressed meanwhile cannot slip in between. A deleted project's
+    // send history and FlightDeck link go with it: nothing else can read
+    // them, and a link left behind would hold its OS project against every
+    // later Atlas project for good.
+    const outcome = await deleteProject(database(), id, revision);
+    if (outcome === "unconfirmed")
       return json(
         {
           error:
@@ -48,19 +58,11 @@ export async function DELETE(
         },
         409,
       );
-    const result = await db
-      .prepare("DELETE FROM atlas_projects WHERE id = ? AND revision = ?")
-      .bind(id, revision)
-      .run();
-    if (!result.meta.changes)
+    if (outcome === "changed")
       return json(
         { error: "Project changed or was not found. Reload before deleting." },
         409,
       );
-    // The project is gone, so its send history and its FlightDeck link go
-    // with it: nothing else can read them, and a link left behind would hold
-    // its OS project against every later Atlas project for good.
-    await forgetProject(db, id);
     return new Response(null, { status: 204 });
   } catch {
     return json(
@@ -121,6 +123,20 @@ export async function PUT(
         },
         409,
       );
+    // While FlightDeck may hold a send, the draft stays exactly as it was
+    // sent. The form and the To FlightDeck row lock it too, but a form that
+    // has not loaded its status knows nothing, so the save refuses on its
+    // own, and the UPDATE below re-checks it in the same statement.
+    const draftEdit = draftEdited(previous, fields);
+    if (draftEdit && (await draftHeld(db, id)))
+      return json(
+        {
+          error:
+            "FlightDeck may hold this project's onboarding draft, so it stays as it was sent. Nothing was saved.",
+          code: "draft_locked",
+        },
+        409,
+      );
     const updatedAt = new Date().toISOString();
     try {
       fields = stampTimeEntries(fields, previous, auth.access.email);
@@ -160,6 +176,7 @@ export async function PUT(
       db
         .prepare(
           "UPDATE atlas_projects SET data = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND revision = ?" +
+            (draftEdit ? DRAFT_NOT_HELD_SQL : "") +
             guardSQL(dependencyGuards),
         )
         .bind(
