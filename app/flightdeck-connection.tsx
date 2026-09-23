@@ -7,6 +7,7 @@ import {
   Check,
   Download,
   Link2,
+  Lock,
   Plus,
   RefreshCw,
   Search,
@@ -419,6 +420,18 @@ export default function FlightDeckConnection({
             // read the same predicate off the same stage, so neither can
             // offer what the other forbids.
             const locked = isDraftLocked(stage);
+            // Until the stage list has loaded once, Atlas cannot tell whether
+            // FlightDeck holds this draft: the row neither claims a
+            // destination is still to be chosen nor offers to drop it.
+            const unknown = !!p.flightdeckDraft && !onboarding.stages;
+            const lockReason = !p.flightdeckDraft
+              ? ""
+              : unknown
+                ? onboarding.failed
+                  ? "Atlas could not check FlightDeck, so it cannot tell whether FlightDeck holds this draft. It tries again shortly."
+                  : "Atlas is checking whether FlightDeck holds this draft."
+                : lockNote(stage);
+            const reasonId = `fd-lock-${p.id}`;
             return (
               <article className="bridge-project" key={p.id}>
                 <div className="bridge-row">
@@ -442,9 +455,13 @@ export default function FlightDeckConnection({
                       {p.functionArea || p.category}
                       {locked
                         ? " · With FlightDeck"
-                        : p.flightdeckDraft
-                          ? ` · ${p.flightdeckDraft.workspaceHint || "Destination chosen when you send"}`
-                          : " · Atlas only"}
+                        : unknown
+                          ? onboarding.failed
+                            ? " · FlightDeck status unavailable"
+                            : " · Checking FlightDeck status"
+                          : p.flightdeckDraft
+                            ? ` · ${p.flightdeckDraft.workspaceHint || (stage ? "Destination chosen when you send again" : "Destination chosen when you send")}`
+                            : " · Atlas only"}
                     </p>
                     {isStatusMoving(stage) && (
                       <p className="fd-hint">
@@ -475,76 +492,92 @@ export default function FlightDeckConnection({
                     onStage={onboarding.mark}
                   />
                 ) : (
-                  <div className="bridge-actions">
-                    <Button
-                      variant="outline"
-                      disabled={busy || p.canEdit === false}
-                      onClick={() => {
-                        setEditing(p.id);
-                        setMessage("");
-                      }}
-                    >
-                      {locked
-                        ? "View status"
-                        : p.flightdeckDraft
-                          ? "Edit draft"
-                          : "Prepare onboarding"}
-                    </Button>
-                    {p.flightdeckDraft && (
-                      <>
-                        <Button
-                          variant="outline"
-                          onClick={async () => {
-                            try {
-                              const current = await freshProject(p.id);
-                              if (!current.flightdeckDraft)
-                                throw Error(
-                                  "This onboarding draft is no longer available.",
+                  <>
+                    <div className="bridge-actions">
+                      <Button
+                        variant="outline"
+                        disabled={busy || p.canEdit === false}
+                        onClick={() => {
+                          setEditing(p.id);
+                          setMessage("");
+                        }}
+                      >
+                        {locked
+                          ? "View status"
+                          : p.flightdeckDraft
+                            ? "Edit draft"
+                            : "Prepare onboarding"}
+                      </Button>
+                      {p.flightdeckDraft && (
+                        <>
+                          <Button
+                            variant="outline"
+                            onClick={async () => {
+                              try {
+                                const current = await freshProject(p.id);
+                                if (!current.flightdeckDraft)
+                                  throw Error(
+                                    "This onboarding draft is no longer available.",
+                                  );
+                                downloadText(
+                                  `flightdeck-draft-${current.id}.md`,
+                                  [
+                                    `# FlightDeck onboarding draft: ${current.flightdeckDraft!.label}`,
+                                    `Atlas project: ${current.name}`,
+                                    `Atlas ID: ${current.id}`,
+                                    `Preferred workspace: ${current.flightdeckDraft!.workspaceHint || "To select"}`,
+                                    `Description: ${current.description}`,
+                                    `Function: ${current.functionArea || current.category}`,
+                                    `Sponsor: ${current.sponsor || "To confirm"}`,
+                                    `Success measure: ${current.benefit || "To define"}`,
+                                    "",
+                                    "Prepared in Atlas. Not submitted to FlightDeck. Workspace access and final project details must be reviewed before creation.",
+                                  ].join("\n\n"),
                                 );
-                              downloadText(
-                                `flightdeck-draft-${current.id}.md`,
-                                [
-                                  `# FlightDeck onboarding draft: ${current.flightdeckDraft!.label}`,
-                                  `Atlas project: ${current.name}`,
-                                  `Atlas ID: ${current.id}`,
-                                  `Preferred workspace: ${current.flightdeckDraft!.workspaceHint || "To select"}`,
-                                  `Description: ${current.description}`,
-                                  `Function: ${current.functionArea || current.category}`,
-                                  `Sponsor: ${current.sponsor || "To confirm"}`,
-                                  `Success measure: ${current.benefit || "To define"}`,
-                                  "",
-                                  "Prepared in Atlas. Not submitted to FlightDeck. Workspace access and final project details must be reviewed before creation.",
-                                ].join("\n\n"),
+                              } catch (e) {
+                                setError((e as Error).message);
+                              }
+                            }}
+                          >
+                            <Download size={14} />
+                            Export draft
+                          </Button>
+                          {/* Locked is announced, not just greyed: it stays
+                            focusable (aria-disabled, not disabled) so a
+                            keyboard or screen-reader user reaches it and
+                            hears why, and the reason is printed on the row
+                            below, so touch needs no hover either. */}
+                          <button
+                            type="button"
+                            className="text-link"
+                            disabled={busy || p.canEdit === false}
+                            aria-disabled={lockReason ? true : undefined}
+                            aria-describedby={lockReason ? reasonId : undefined}
+                            onClick={async () => {
+                              if (lockReason) return;
+                              const saved = await onSave(
+                                { ...p, flightdeckDraft: null },
+                                p,
                               );
-                            } catch (e) {
-                              setError((e as Error).message);
-                            }
-                          }}
-                        >
-                          <Download size={14} />
-                          Export draft
-                        </Button>
-                        <button
-                          className="text-link"
-                          disabled={busy || p.canEdit === false || locked}
-                          title={locked ? lockNote(stage) : undefined}
-                          onClick={async () => {
-                            const saved = await onSave(
-                              { ...p, flightdeckDraft: null },
-                              p,
-                            );
-                            if (saved)
-                              setMessage(
-                                "Onboarding draft removed. Your Atlas project is unchanged.",
-                              );
-                          }}
-                        >
-                          <X size={14} />
-                          Remove draft
-                        </button>
-                      </>
+                              if (saved)
+                                setMessage(
+                                  "Onboarding draft removed. Your Atlas project is unchanged.",
+                                );
+                            }}
+                          >
+                            <X size={14} />
+                            Remove draft
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    {lockReason && (
+                      <p className="fd-lock-note" id={reasonId}>
+                        <Lock size={13} aria-hidden="true" />
+                        {lockReason}
+                      </p>
                     )}
-                  </div>
+                  </>
                 )}
               </article>
             );

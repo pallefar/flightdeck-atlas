@@ -32,6 +32,7 @@ import {
   lockedStages,
   movingStages,
   onboardStagesSchema,
+  onboardingStages,
   onboardingEnvelope,
   onboardingSchema,
   onboardingStatusSchema,
@@ -45,6 +46,7 @@ import {
   reviewRows,
   setupStates,
   stageFor,
+  timelineSteps,
   type OnboardingEnvelope,
   type OnboardingStage,
   type OnboardingStatus,
@@ -2754,7 +2756,7 @@ test("a project FlightDeck has created reads as held, not as a draft under revie
     ).toBeDisabled();
     await expect(
       row.getByRole("button", { name: "Remove draft" }),
-    ).toHaveAttribute("title", /linked to a FlightDeck project/i);
+    ).toHaveAccessibleDescription(/linked to a FlightDeck project/i);
     await expect(
       row.getByRole("button", { name: "Edit draft", exact: true }),
     ).toHaveCount(0);
@@ -2905,7 +2907,15 @@ test("the Super Admin can close an unconfirmed send from the form, and the draft
     await expect(
       row.getByText(/closed this unconfirmed send/i).first(),
     ).toBeVisible();
-    await expect(row.getByText("Send closed", { exact: true })).toBeVisible();
+    // The row's badge and the form's timeline both say so.
+    await expect(
+      row.locator("span.status", { hasText: "Send closed" }),
+    ).toBeVisible();
+    await expect(
+      row
+        .getByRole("list", { name: "FlightDeck status" })
+        .locator('li[aria-current="step"]'),
+    ).toHaveText("Send closed");
     await expect(
       row.getByRole("button", { name: "Close this unconfirmed send" }),
     ).toHaveCount(0);
@@ -3117,8 +3127,11 @@ test("the list cannot remove a draft FlightDeck is still reviewing, and offers t
       await expect(row.getByText(label, { exact: true })).toBeVisible();
       await expect(remove).toBeVisible();
       await expect(remove).toBeDisabled();
-      // And it says why, in words true of that stage.
-      await expect(remove).toHaveAttribute("title", lockNote(locked));
+      // And it says why, in words true of that stage, on the row itself.
+      await expect(remove).toHaveAccessibleDescription(lockNote(locked));
+      await expect(
+        row.getByText(lockNote(locked), { exact: true }),
+      ).toBeVisible();
       await expect(edit).toHaveCount(0);
       await expect(status).toBeEnabled();
       // Never "choose a workspace" beside a project FlightDeck already holds.
@@ -3141,8 +3154,11 @@ test("the list cannot remove a draft FlightDeck is still reviewing, and offers t
       await expect(remove).toBeEnabled();
       await expect(edit).toBeEnabled();
       await expect(status).toHaveCount(0);
-      // An open draft has a destination to choose, and chooses it on Send.
-      await expect(subtitle).toHaveText("HR · Destination chosen when you send");
+      // A draft FlightDeck handed back chooses its destination on the next
+      // send; it is not a project that was never sent.
+      await expect(subtitle).toHaveText(
+        "HR · Destination chosen when you send again",
+      );
     }
     // A planning note, where there is one, is shown as the owner wrote it.
     await updateProject(page, project, {
@@ -3417,6 +3433,289 @@ test("Review warns about personal details in free text and blocks them in every 
         /Remove the email address or phone number from: Process owner \(role title\)/,
       ),
     ).toBeVisible();
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
+// ---- W3 review round 3 -------------------------------------------------
+
+/** Screenshots for review, kept with the test's own output. */
+const shot = (name: string) => test.info().outputPath(name);
+/** What a Remove draft button looks like, so a locked one can be told apart
+ * from a live one without hovering. */
+const looks = (button: ReturnType<Page["locator"]>) =>
+  button.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return { opacity: Number(s.opacity), cursor: s.cursor };
+  });
+/** Serves the stage list: held until `release()`, then `stage`, or a failure
+ * while `fail` is set. */
+async function stageList(page: Page, projectId: string) {
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  const state = { stage: "submitted" as OnboardingStage, fail: false };
+  await page.route(
+    (url) => url.pathname === "/api/flightdeck/onboard",
+    async (route) => {
+      await held;
+      if (state.fail)
+        return route.fulfill({ status: 503, body: "{}" }).catch(() => {});
+      return route
+        .fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            stages: { [projectId]: state.stage },
+            checked: { [projectId]: null },
+            retryAfter: null,
+          }),
+        })
+        .catch(() => {});
+    },
+  );
+  return { state, release };
+}
+
+test("every stage has a place on the status timeline, and an answered request shows it was submitted", () => {
+  const answered = ["needs-more-info", "rejected"];
+  const filed = ["linked", "setup-in-progress", "setup-complete", ...answered];
+  for (const stage of onboardingStages) {
+    const steps = timelineSteps(stage);
+    // The stage the project is in is always the one step marked current:
+    // never a timeline with nothing on it.
+    expect({
+      stage,
+      current: steps.filter((s) => s.state === "current").map((s) => s.stage),
+    }).toEqual({ stage, current: [stage] });
+    // "Submitted" is done exactly when FlightDeck filed it and moved on.
+    expect({
+      stage,
+      submitted: steps.some(
+        (s) => s.stage === "submitted" && s.state === "done",
+      ),
+    }).toEqual({ stage, submitted: filed.includes(stage) });
+  }
+  const shape = (stage: OnboardingStage) =>
+    timelineSteps(stage).map((s) => [s.stage, s.state]);
+  expect(shape("needs-more-info")).toEqual([
+    ["submitted", "done"],
+    ["needs-more-info", "current"],
+  ]);
+  expect(shape("rejected")).toEqual([
+    ["submitted", "done"],
+    ["rejected", "current"],
+  ]);
+  // Refused before filing, or closed unconfirmed: never claims a filing.
+  expect(shape("not-sent")).toEqual([["not-sent", "current"]]);
+  expect(shape("closed")).toEqual([["closed", "current"]]);
+  expect(shape("not-confirmed")).toEqual([
+    ["not-confirmed", "current"],
+    ["linked", "upcoming"],
+    ["setup-in-progress", "upcoming"],
+    ["setup-complete", "upcoming"],
+  ]);
+  expect(shape("linked")).toEqual([
+    ["submitted", "done"],
+    ["linked", "current"],
+    ["setup-in-progress", "upcoming"],
+    ["setup-complete", "upcoming"],
+  ]);
+});
+
+test("a locked Remove draft looks and announces locked, says why on the row, and refuses mouse, keyboard and touch", async ({
+  page,
+  browser,
+}) => {
+  await page.clock.install();
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const project = await createProject(page, {
+    name: qa("Lock Look"),
+    functionArea: "HR",
+    flightdeckDraft: { label: qa("Lock Look"), workspaceHint: "" },
+  });
+  const list = await stageList(page, project.id);
+  const puts: string[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "PUT" && r.url().includes(project.id))
+      puts.push(r.url());
+  });
+  try {
+    await page.reload();
+    await openToFlightDeck(page);
+    const row = page.locator("article.bridge-project", {
+      hasText: qa("Lock Look"),
+    });
+    const subtitle = row.locator("p").first();
+    const remove = row.getByRole("button", { name: "Remove draft" });
+    // Before Atlas knows whether FlightDeck holds the draft, the row neither
+    // claims a destination is still to be chosen nor offers to drop it.
+    await expect(subtitle).toHaveText("HR · Checking FlightDeck status");
+    await expect(remove).toHaveAttribute("aria-disabled", "true");
+    list.release();
+    await expect(row.getByText("Submitted", { exact: true })).toBeVisible();
+    await expect(subtitle).toHaveText("HR · With FlightDeck");
+    // Announced locked, and still reachable so the reason can be heard.
+    await expect(remove).toBeDisabled();
+    await expect(remove).toHaveAttribute("aria-disabled", "true");
+    await expect(remove).toHaveAccessibleDescription(lockNote("submitted"));
+    // The reason is on the row itself, not behind a hover.
+    await expect(
+      row.getByText(lockNote("submitted"), { exact: true }),
+    ).toBeVisible();
+    const locked = await looks(remove);
+    expect(locked.cursor).toBe("not-allowed");
+    expect(locked.opacity).toBeLessThanOrEqual(0.6);
+    await page.screenshot({ path: shot("locked-row-1440.png") });
+    // Mouse, keyboard: nothing is removed.
+    await remove.click({ force: true });
+    await remove.focus();
+    await expect(remove).toBeFocused();
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Space");
+    // Touch, at phone width: the same.
+    const touch = await browser.newContext({
+      baseURL: "http://localhost:5173",
+      hasTouch: true,
+      isMobile: true,
+      viewport: { width: 390, height: 844 },
+    });
+    const phone = await touch.newPage();
+    try {
+      await mockContext(phone);
+      const phoneList = await stageList(phone, project.id);
+      phoneList.release();
+      await phone.goto("/?view=connection");
+      await openToFlightDeck(phone);
+      const phoneRow = phone.locator("article.bridge-project", {
+        hasText: qa("Lock Look"),
+      });
+      await expect(
+        phoneRow.getByText(lockNote("submitted"), { exact: true }),
+      ).toBeVisible();
+      await phoneRow
+        .getByRole("button", { name: "Remove draft" })
+        .tap({ force: true });
+      await phoneRow.scrollIntoViewIfNeeded();
+      await phone.screenshot({ path: shot("locked-row-390.png") });
+    } finally {
+      await touch.close();
+    }
+    expect(puts).toEqual([]);
+    await expect(remove).toBeVisible();
+    // Handed back: live again, looks live, no reason shown, and the subtitle
+    // speaks of the next send, not of one never made.
+    list.state.stage = "needs-more-info";
+    await page.clock.fastForward(61_000);
+    await expect(
+      row.getByText("Needs more info", { exact: true }),
+    ).toBeVisible();
+    await expect(remove).toBeEnabled();
+    await expect(remove).not.toHaveAttribute("aria-disabled", "true");
+    await expect(row.getByText(lockNote("submitted"))).toHaveCount(0);
+    expect(await looks(remove)).toEqual({ opacity: 1, cursor: "pointer" });
+    await expect(subtitle).toHaveText(
+      "HR · Destination chosen when you send again",
+    );
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
+test("a stage list Atlas could not read locks the row instead of offering to drop a draft FlightDeck may hold", async ({
+  page,
+}) => {
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const project = await createProject(page, {
+    name: qa("Unknown Stage"),
+    functionArea: "HR",
+    flightdeckDraft: { label: qa("Unknown Stage"), workspaceHint: "" },
+  });
+  const list = await stageList(page, project.id);
+  list.state.fail = true;
+  list.release();
+  try {
+    await page.reload();
+    await openToFlightDeck(page);
+    const row = page.locator("article.bridge-project", {
+      hasText: qa("Unknown Stage"),
+    });
+    await expect(row.locator("p").first()).toHaveText(
+      "HR · FlightDeck status unavailable",
+    );
+    const remove = row.getByRole("button", { name: "Remove draft" });
+    await expect(remove).toHaveAttribute("aria-disabled", "true");
+    await expect(remove).toHaveAccessibleDescription(/could not check/i);
+    await expect(row.getByText(/could not check/i)).toBeVisible();
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
+test("the timeline shows an answered request, every tab's aria-controls names a panel in the page, and Review & send states the open Legal question", async ({
+  page,
+}) => {
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const project = await createProject(page, {
+    name: qa("Answered"),
+    description: "Summary",
+    benefit: "Measure",
+    functionArea: "HR",
+    onboardingStage: "Ready for FlightDeck",
+    flightdeckDraft: { label: qa("Answered"), workspaceHint: "" },
+    onboarding: { countryCode: "DE", worksCouncilRelevant: "no" },
+  });
+  await page.route(`**/api/flightdeck/onboard/${project.id}**`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(statusBody("needs-more-info")),
+    }),
+  );
+  try {
+    await page.reload();
+    await openToFlightDeck(page);
+    const row = page.locator("article.bridge-project", {
+      hasText: qa("Answered"),
+    });
+    await row.getByRole("button", { name: "Edit draft", exact: true }).click();
+    // An answered request reads as sent and answered, not as never sent.
+    const timeline = row.getByRole("list", { name: "FlightDeck status" });
+    await expect(timeline.locator("li.done")).toHaveText(["Submitted"]);
+    await expect(timeline.locator('li[aria-current="step"]')).toHaveText(
+      "Needs more info",
+    );
+    // Every tab's aria-controls resolves, on every tab.
+    for (const name of ["Basics", "FlightDeck details", "Review & send"]) {
+      await row.getByRole("tab", { name }).click();
+      const dangling = await row.evaluate((el) =>
+        [...el.querySelectorAll('[role="tab"]')]
+          .map((t) => t.getAttribute("aria-controls"))
+          .filter((id) => id && !document.getElementById(id)),
+      );
+      expect({ name, dangling }).toEqual({ name, dangling: [] });
+      const selected = row.getByRole("tab", { name });
+      const panel = await selected.getAttribute("aria-controls");
+      await expect(row.locator(`[id="${panel}"]`)).toHaveAttribute(
+        "role",
+        "tabpanel",
+      );
+    }
+    // Where the Super Admin authorises the send, the open Legal question is
+    // stated as open, not answered.
+    const legal = row.getByRole("note", { name: "Open Legal question" });
+    await expect(legal).toBeVisible();
+    await expect(legal).toContainText("decision 6");
+    await expect(legal).toContainText("Summary and Success measure");
+    await expect(legal).toContainText(/not answered/i);
+    await expect(
+      row.getByRole("button", { name: "Send to FlightDeck" }),
+    ).toHaveAccessibleDescription(/decision 6/);
+    await legal.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: shot("review-legal-1440.png") });
   } finally {
     await removeProject(page, project.id);
   }

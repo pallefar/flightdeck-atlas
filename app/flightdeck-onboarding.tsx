@@ -20,8 +20,8 @@ import type { OsContextEntry } from "@/lib/flightdeck/context";
 import {
   FREE_TEXT_NOTE,
   ISO_COUNTRY_CODES,
+  LEGAL_OPEN_NOTE,
   NEVER_SENT,
-  TIMELINE,
   accessLevels,
   buildOnboardingPayload,
   checklistSuggestions,
@@ -29,7 +29,6 @@ import {
   fieldLabel,
   headcountBands,
   isDraftLocked,
-  lockNote,
   onboardErrorSchema,
   onboardStagesSchema,
   onboardingStatusSchema,
@@ -37,6 +36,7 @@ import {
   personalDataIn,
   readiness,
   reviewRows,
+  timelineSteps,
   type OnboardingDraft,
   type OnboardingStage,
   type OnboardingStatus,
@@ -345,16 +345,15 @@ export function useOnboardingStages(superAdmin: boolean) {
 }
 
 export function OnboardingTimeline({ stage }: { stage: OnboardingStage }) {
-  const current = TIMELINE.findIndex((step) => step.stage === stage);
   return (
     <ol className="fd-timeline" aria-label="FlightDeck status">
-      {TIMELINE.map((step, i) => (
+      {timelineSteps(stage).map((step) => (
         <li
           key={step.stage}
-          className={current >= 0 && i < current ? "done" : ""}
-          aria-current={i === current ? "step" : undefined}
+          className={step.state === "done" ? "done" : ""}
+          aria-current={step.state === "current" ? "step" : undefined}
         >
-          {step.label}
+          {STAGE_LABEL[step.stage]}
         </li>
       ))}
     </ol>
@@ -818,7 +817,9 @@ export function OnboardingEditor({
               tabRefs.current[t.id] = el;
             }}
             aria-selected={tab === t.id}
-            aria-controls={`fd-panel-${t.id}`}
+            // Only the chosen tab's panel is rendered, so only that tab
+            // names one: an id that is not in the page is a dead reference.
+            aria-controls={tab === t.id ? `fd-panel-${t.id}` : undefined}
             tabIndex={tab === t.id ? 0 : -1}
             className={tab === t.id ? "chosen" : ""}
             onClick={() => setTab(t.id)}
@@ -1444,9 +1445,20 @@ export function OnboardingEditor({
             Sending files a request for review in FlightDeck. An OS admin
             decides; nothing becomes OS data until they accept it.
           </p>
+          <p
+            className="fd-warn"
+            role="note"
+            aria-labelledby={`fd-legal-title-${project.id}`}
+          >
+            <strong id={`fd-legal-title-${project.id}`}>
+              Open Legal question.
+            </strong>{" "}
+            <span id={`fd-legal-${project.id}`}>{LEGAL_OPEN_NOTE}</span>
+          </p>
           {superAdmin && (
             <Button
               type="button"
+              aria-describedby={`fd-legal-${project.id}`}
               disabled={!!sendBlocked || sending || !target}
               onClick={() => void send()}
             >

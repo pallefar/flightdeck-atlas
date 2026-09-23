@@ -483,6 +483,11 @@ export function reviewRows(
 }
 
 /** What the review says under "Never sent" about the free text. */
+/** Decision 6 (retention and cross-border handling) is open with Legal and
+ * no agent can answer it. Stated where the Super Admin authorises the send,
+ * as an open question: no legal position is taken either way. */
+export const LEGAL_OPEN_NOTE =
+  "Legal has not answered owner decision 6 yet: how long FlightDeck may keep the Summary and Success measure, or how that free text may be handled across borders. Until Legal answers, FlightDeck keeps what it receives and nothing is deleted automatically. Sending does not answer this question.";
 export const FREE_TEXT_NOTE =
   "Summary and Success measure are sent as you wrote them, including any name or email address typed there. Atlas refuses an email address or phone number in every other field, but it cannot recognise a person's name.";
 
@@ -799,6 +804,43 @@ export const TIMELINE = [
   { stage: "setup-in-progress", label: "Setup in progress" },
   { stage: "setup-complete", label: "Setup complete" },
 ] as const;
+export type TimelineStep = {
+  stage: OnboardingStage;
+  state: "done" | "current" | "upcoming";
+};
+/** The status timeline for a stage. Every stage is on it as the current
+ * step, so no status ever shows an empty timeline. The four happy-path steps
+ * are the frame; the other five stages take the place where they happened:
+ * an unconfirmed send stands where "Submitted" would, an answer (needs more
+ * info, declined) follows a done "Submitted" and ends the line, and a send
+ * refused before filing or closed unconfirmed stands alone, never claiming a
+ * filing that FlightDeck did not confirm. */
+export function timelineSteps(stage: OnboardingStage): TimelineStep[] {
+  const frame = TIMELINE.map((step) => step.stage as OnboardingStage);
+  const at = frame.indexOf(stage);
+  if (at >= 0)
+    return frame.map((s, i) => ({
+      stage: s,
+      state: i < at ? "done" : i === at ? "current" : "upcoming",
+    }));
+  switch (stage) {
+    case "not-confirmed":
+      return [
+        { stage, state: "current" },
+        ...frame
+          .slice(1)
+          .map((s) => ({ stage: s, state: "upcoming" as const })),
+      ];
+    case "needs-more-info":
+    case "rejected":
+      return [
+        { stage: "submitted", state: "done" },
+        { stage, state: "current" },
+      ];
+    default:
+      return [{ stage, state: "current" }];
+  }
+}
 export const onboardingStatusSchema = z
   .object({
     operation: z
