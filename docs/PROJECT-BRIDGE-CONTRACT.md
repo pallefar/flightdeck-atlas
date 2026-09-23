@@ -1,6 +1,6 @@
 # FlightDeck ↔ Atlas project onboarding
 
-Status: proposed SDK contract. Atlas supports saved onboarding drafts, and (since 2026-09-22) sending a draft to FlightDeck OS **as a proposal** for an OS admin to review: see "Onboarding as a proposal" below. That path is built and tested in Atlas against a recorded contract fixture; it works end to end only once the OS ships the `project-onboarding` kind. Discovery, import and direct OS creation stay disabled until the delegated SDK and access enforcement below are available.
+Status: proposed SDK contract. Atlas supports saved onboarding drafts, and (since 2026-09-22) sending a draft to FlightDeck OS **as a proposal** for an OS admin to review: see "Onboarding as a proposal" below. That path is built and tested in Atlas against a recorded contract fixture. The OS's `project-onboarding` kind is shipped on the OS integration line and enabled locally (decision 11, D-035 item 6), not yet exercised end to end against the live OS. Discovery, import and direct OS creation stay disabled until the delegated SDK and access enforcement below are available.
 
 ## User flows
 

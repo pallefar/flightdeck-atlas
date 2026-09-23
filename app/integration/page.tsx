@@ -1,13 +1,17 @@
+import Link from "next/link";
+
 export default function Integration() {
   return (
     <main className="document-page">
-      <a href="/?view=connection">← Back to connections</a>
+      <Link href="/?view=connection">← Back to connections</Link>
       <h1>Ready for the FlightDeck SDK</h1>
       <p>
-        Atlas stores your projects and tasks now. FlightDeck is not deployed
-        yet, so shared sign-in and project synchronization are pending the new
-        SDK. The current OS source has been reviewed and a typed project reader
-        is prepared for its authenticated transport.
+        Atlas stores your projects and tasks now. On a local install connected
+        to FlightDeck OS, the Atlas Super Admin sees read-only workspace and
+        project context and can send a complete saved onboarding draft to
+        FlightDeck as a proposal. An OS admin reviews each proposal; nothing is
+        created automatically. Shared sign-in, project import, synchronization
+        and FlightDeck AI remain pending the new SDK.
       </p>
       <h2>What the SDK needs to provide</h2>
       <ul>
@@ -49,10 +53,12 @@ export default function Integration() {
       </p>
       <h2>Projects in both directions</h2>
       <p>
-        Connections now includes an OS intake list and saved Atlas onboarding
-        drafts. When the SDK is connected, you will be able to create an Atlas
-        counterpart for an accessible OS project, or create an OS project from a
-        reviewed Atlas draft.
+        Connections shows the Atlas Super Admin read-only FlightDeck workspace
+        and project lists next to saved Atlas onboarding drafts. A complete
+        draft can be sent to FlightDeck as a proposal once FlightDeck has
+        project onboarding enabled for Atlas; an OS admin decides whether a
+        project is created. When the SDK is connected, you will also be able to
+        create an Atlas counterpart for an accessible OS project.
       </p>
       <p>
         The SDK needs scoped project creation, stable instance/workspace/project
