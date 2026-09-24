@@ -7,7 +7,7 @@ import {
   projectPolicy,
   type AccessProfile,
 } from "../lib/access-policy";
-import { examples, projectSchema } from "../lib/projects";
+import { examples, projectSchema, type Task } from "../lib/projects";
 import { portfolioAdvice } from "../lib/advisor";
 import { createDeck } from "../lib/presentations";
 const cleanup: { table: string; id: string }[] = [];
@@ -218,7 +218,7 @@ test("collaboration, sharing, recurrence, attachments and deck persistence enfor
     ).status(),
   ).toBe(200);
   const update = await api.put(`/api/projects/${p.id}`, {
-    data: { ...p, tasks: p.tasks.map((t: any) => ({ ...t, done: true })) },
+    data: { ...p, tasks: p.tasks.map((t: Task) => ({ ...t, done: true })) },
   });
   expect(update.status()).toBe(200);
   p = (await update.json()).project;

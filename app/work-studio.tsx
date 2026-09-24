@@ -49,7 +49,31 @@ type RecordItem = {
   updated_at: string;
   available_at: string;
   closed: number;
-  data: Record<string, any>;
+  data: RecordData;
+};
+// Stored record JSON differs by kind (timer, form, request, note, template);
+// these are the fields this screen reads. Any other stored key stays unknown.
+type RecordData = {
+  [key: string]: unknown;
+  title: string;
+  name: string;
+  body: string;
+  description?: string;
+  status?: string;
+  enabled?: boolean;
+  reviewer?: string;
+  reviewedBy?: string;
+  submittedBy?: string;
+  reason?: string;
+  questions?: string[];
+  answers: string[];
+  targetType?: string;
+  targetId?: string;
+  taskId?: string;
+  dueDate?: string;
+  startedAt: string;
+  token?: string;
+  tasks: unknown[];
 };
 type WorkData = {
   requestsCursor: string | null;
