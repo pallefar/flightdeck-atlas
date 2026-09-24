@@ -244,7 +244,7 @@ export function evaluateRules(fields: ProjectFields, previous: Project) {
     applied: string[] = [];
   const tasks = fields.tasks.map((t) => {
     const old = previous.tasks.find((x) => x.id === t.id);
-    let next = { ...t };
+    const next = { ...t };
     for (const rule of fields.work?.rules || []) {
       const fires =
         rule.trigger === "created"
@@ -395,7 +395,7 @@ export function reschedule(tasks: Task[], external: Project[] = []) {
     if (updated.has(t.id)) return updated.get(t.id)!;
     if (visiting.has(t.id)) throw Error("Dependency cycle");
     visiting.add(t.id);
-    let start = t.startDate || t.dueDate;
+    const start = t.startDate || t.dueDate;
     if (!start || !Number.isFinite(dateNumber(start))) {
       visiting.delete(t.id);
       updated.set(t.id, t);

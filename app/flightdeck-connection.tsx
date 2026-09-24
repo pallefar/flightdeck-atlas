@@ -618,7 +618,7 @@ export default function FlightDeckConnection({
           <div>
             <h2 id="fd-dev-ref">FlightDeck developer reference</h2>
             <p className="hub-muted">
-              How Atlas's credential, the read-only workspace and project
+              How Atlas&apos;s credential, the read-only workspace and project
               context, and onboarding requests work, as FlightDeck documents
               them. Opens in FlightDeck and needs a FlightDeck sign-in.
             </p>
