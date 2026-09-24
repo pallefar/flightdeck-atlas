@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type * as CesiumType from "cesium";
 import { ArrowRight, Globe2, Minus, Plus, X, Orbit, Pause } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -91,7 +91,6 @@ export default function Globe({
     >("orange"),
     [sceneMessage, setSceneMessage] = useState("");
   const drawRef = useRef(drawType);
-  drawRef.current = drawType;
   const [sourceStatus, setSourceStatus] = useState({
       terrain: "Loading",
       buildings: "Loading",
@@ -116,7 +115,6 @@ export default function Globe({
     } | null>(null);
   const flyTicket = useRef(0),
     flightComplete = useRef(onFlightComplete);
-  flightComplete.current = onFlightComplete;
   const [orbit, setOrbit] = useState(false);
   const orbitCleanup = useRef<(() => void) | null>(null);
   const [flightLens, setFlightLens] = useState<{
@@ -137,13 +135,19 @@ export default function Globe({
     interaction.current?.();
   }
   const control = useRef(takeControl);
-  control.current = takeControl;
   const interaction = useRef(onInteract);
-  interaction.current = onInteract;
   const selectionChange = useRef(onSelectionChange);
-  selectionChange.current = onSelectionChange;
-  currentProjects.current = projects;
-  currentSettings.current = settings;
+  // Cesium callbacks and timers read the latest render's values through
+  // these refs; they are updated after each commit, before other effects.
+  useLayoutEffect(() => {
+    drawRef.current = drawType;
+    flightComplete.current = onFlightComplete;
+    control.current = takeControl;
+    interaction.current = onInteract;
+    selectionChange.current = onSelectionChange;
+    currentProjects.current = projects;
+    currentSettings.current = settings;
+  });
   async function fly(p: Project, close = false, complete?: () => void) {
     const C = cesiumRef.current,
       v = viewer.current;
@@ -210,26 +214,24 @@ export default function Globe({
       },
     });
   }
-  function choose(p: Project) {
-    stopOrbit();
+  function flyToChoice(p: Project) {
+    orbitCleanup.current?.();
+    orbitCleanup.current = null;
     generation.current++;
     flyTicket.current++;
+    selectionChange.current?.(p);
+    fly(p);
+  }
+  function choose(p: Project) {
+    setOrbit(false);
     setJourney(false);
     setEntering(false);
     setSelected(p);
-    selectionChange.current?.(p);
-    fly(p);
+    flyToChoice(p);
   }
   useEffect(() => {
     let disposed = false;
     active.current = true;
-    setReady(false);
-    setError("");
-    setSourceStatus({
-      terrain: "Loading",
-      buildings: "Loading",
-      imagery: "Loading",
-    });
     let handler: CesiumType.ScreenSpaceEventHandler | undefined;
     let removeOcclusion: (() => void) | undefined;
     let removeMouseLeave: (() => void) | undefined;
@@ -621,20 +623,36 @@ export default function Globe({
   useEffect(() => {
     if (ready && resetCommand) reset();
   }, [ready, resetCommand]);
+  // Commands and setting changes adjust React state while rendering; the
+  // effects below only drive the Cesium camera.
+  const [stopSeen, setStopSeen] = useState(stopCommand);
+  if (stopSeen !== stopCommand) {
+    setStopSeen(stopCommand);
+    if (stopCommand) {
+      setOrbit(false);
+      setEntering(false);
+    }
+  }
   useEffect(() => {
     if (!stopCommand) return;
-    stopOrbit();
+    orbitCleanup.current?.();
+    orbitCleanup.current = null;
     viewer.current?.camera.cancelFlight();
     generation.current++;
-    setEntering(false);
   }, [stopCommand]);
+  const [motionSeen, setMotionSeen] = useState(settings.motion);
+  if (motionSeen !== settings.motion) {
+    setMotionSeen(settings.motion);
+    setEntering(false);
+    if (settings.motion === "instant") setJourney(false);
+    setOrbit(false);
+    setFlightLens(null);
+  }
   useEffect(() => {
     viewer.current?.camera.cancelFlight();
     generation.current++;
-    setEntering(false);
-    if (settings.motion === "instant") setJourney(false);
-    stopOrbit();
-    setFlightLens(null);
+    orbitCleanup.current?.();
+    orbitCleanup.current = null;
   }, [settings.motion]);
   useEffect(() => {
     if (!flightLens) return;
@@ -645,9 +663,11 @@ export default function Globe({
     }, 100);
     return () => clearInterval(id);
   }, [flightLens]);
-  useEffect(() => {
+  const [zoomLensSeen, setZoomLensSeen] = useState(settings.zoomLens);
+  if (zoomLensSeen !== settings.zoomLens) {
+    setZoomLensSeen(settings.zoomLens);
     if (!settings.zoomLens) setFlightLens(null);
-  }, [settings.zoomLens]);
+  }
   useEffect(() => {
     const v = viewer.current,
       C = cesiumRef.current;
@@ -789,14 +809,28 @@ export default function Globe({
       });
     v.scene.requestRender();
   }, [ready, projects, settings.labels, settings.markerColor]);
+  // A new target (once the globe is ready) selects it now and flies there
+  // after the commit, as choose() does for a click.
+  const [chosenFrom, setChosenFrom] = useState({ ready, target });
+  if (chosenFrom.ready !== ready || chosenFrom.target !== target) {
+    setChosenFrom({ ready, target });
+    if (ready && target) {
+      setOrbit(false);
+      setJourney(false);
+      setEntering(false);
+      setSelected(target);
+    }
+  }
   useEffect(() => {
-    if (ready && target) choose(target);
+    if (ready && target) flyToChoice(target);
   }, [ready, target]);
-  useEffect(() => {
+  const [projectsFrom, setProjectsFrom] = useState(projects);
+  if (projectsFrom !== projects) {
+    setProjectsFrom(projects);
     setSelected((previous) =>
       previous ? projects.find((p) => p.id === previous.id) || null : null,
     );
-  }, [projects]);
+  }
   useEffect(() => {
     const C = cesiumRef.current,
       v = viewer.current;
@@ -1533,6 +1567,12 @@ export default function Globe({
             variant="outline"
             onClick={() => {
               setReady(false);
+              setError("");
+              setSourceStatus({
+                terrain: "Loading",
+                buildings: "Loading",
+                imagery: "Loading",
+              });
               setRetry((r) => r + 1);
             }}
           >

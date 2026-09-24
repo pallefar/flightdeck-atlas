@@ -551,6 +551,8 @@ export function TeamHub({
 }) {
   const capacityDirty = useRef(false);
   const capacityBase = useRef<WorkspaceData | null>(null);
+  // Mirrors capacityDirty for rendering the Discard button.
+  const [capacityEdited, setCapacityEdited] = useState(false);
   const w = useWorkspace(),
     [tab, setTab] = useState("inbox"),
     [team, setTeam] = useState<Team | null>(null),
@@ -826,6 +828,7 @@ export function TeamHub({
                   }))
                 ) {
                   capacityDirty.current = false;
+                  setCapacityEdited(false);
                   capacityBase.current = null;
                 }
               }}
@@ -842,6 +845,7 @@ export function TeamHub({
                       onChange={(e) => {
                         capacityBase.current ||= w.data;
                         capacityDirty.current = true;
+                        setCapacityEdited(true);
                         setHours(e.target.value);
                       }}
                     />
@@ -853,6 +857,7 @@ export function TeamHub({
                       onChange={(e) => {
                         capacityBase.current ||= w.data;
                         capacityDirty.current = true;
+                        setCapacityEdited(true);
                         setLeave(e.target.value);
                       }}
                     />
@@ -865,13 +870,14 @@ export function TeamHub({
                     onChange={(e) => {
                       capacityBase.current ||= w.data;
                       capacityDirty.current = true;
+                      setCapacityEdited(true);
                       setShareCapacity(e.target.checked);
                     }}
                   />
                   Share working hours and leave dates with my Atlas teams
                 </label>
                 <Button>Save capacity</Button>
-                {capacityDirty.current && (
+                {capacityEdited && (
                   <Button
                     type="button"
                     variant="outline"
@@ -883,6 +889,7 @@ export function TeamHub({
                       }
                       capacityBase.current = null;
                       capacityDirty.current = false;
+                      setCapacityEdited(false);
                     }}
                   >
                     Discard capacity changes

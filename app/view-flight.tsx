@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { studioLight, woodTexture } from "@/lib/scene-lighting";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
@@ -38,13 +38,17 @@ export default function ViewFlight({
       : "Returning to your workspace",
   );
   const complete = useRef(false);
-  target.current = to;
-  finish.current = onComplete;
+  useLayoutEffect(() => {
+    target.current = to;
+    finish.current = onComplete;
+  });
   useEffect(() => {
     const node = snapshotMount.current;
     const surface = document.querySelector<HTMLElement>(".dashboard");
-    const copy =
-      snapshot || (surface?.cloneNode(true) as HTMLElement | undefined);
+    // Work on a copy so the snapshot prop itself is never changed.
+    const copy = (snapshot || surface)?.cloneNode(true) as
+      | HTMLElement
+      | undefined;
     if (copy && node) {
       copy.removeAttribute("id");
       copy.removeAttribute("role");
