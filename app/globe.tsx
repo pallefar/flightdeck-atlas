@@ -69,7 +69,6 @@ export default function Globe({
     generation = useRef(0);
   const [ready, setReady] = useState(false),
     [error, setError] = useState(""),
-    [selected, setSelected] = useState<Project | null>(null),
     [journey, setJourney] = useState(false),
     [entering, setEntering] = useState(false),
     [mapMode, setMapMode] = useState("Satellite imagery"),
@@ -90,6 +89,40 @@ export default function Globe({
       "orange" | "blue" | "green" | "white" | "red"
     >("orange"),
     [sceneMessage, setSceneMessage] = useState("");
+  // The selected project and the inputs it was last reconciled with: a new
+  // target (once the globe is ready) selects it, and a new project list keeps
+  // it only while it is still listed. This is adjusted while rendering, and
+  // it is one state value on purpose. With the inputs in a separate state,
+  // React could drop the selection update while keeping the new inputs. That
+  // happens when a lower-priority update is still pending, for example the
+  // reset effect's "select nothing". The card then stayed shut after a click
+  // (project-scan spec, 2 to 3 failures in 6 runs). Kept together, a dropped
+  // update also drops the recorded inputs, so the next render redoes it.
+  const [selection, setSelection] = useState<{
+    project: Project | null;
+    ready: boolean;
+    target: Project | null;
+    projects: Project[];
+  }>(() => ({ project: null, ready, target, projects }));
+  const selected = selection.project;
+  function setSelected(project: Project | null) {
+    setSelection((s) => ({ ...s, project }));
+  }
+  if (
+    selection.ready !== ready ||
+    selection.target !== target ||
+    selection.projects !== projects
+  )
+    setSelection((s) => {
+      let project = s.project;
+      if ((s.ready !== ready || s.target !== target) && ready && target)
+        project = target;
+      if (s.projects !== projects && project) {
+        const id = project.id;
+        project = projects.find((p) => p.id === id) || null;
+      }
+      return { project, ready, target, projects };
+    });
   const drawRef = useRef(drawType);
   const [sourceStatus, setSourceStatus] = useState({
       terrain: "Loading",
@@ -818,19 +851,11 @@ export default function Globe({
       setOrbit(false);
       setJourney(false);
       setEntering(false);
-      setSelected(target);
     }
   }
   useEffect(() => {
     if (ready && target) flyToChoice(target);
   }, [ready, target]);
-  const [projectsFrom, setProjectsFrom] = useState(projects);
-  if (projectsFrom !== projects) {
-    setProjectsFrom(projects);
-    setSelected((previous) =>
-      previous ? projects.find((p) => p.id === previous.id) || null : null,
-    );
-  }
   useEffect(() => {
     const C = cesiumRef.current,
       v = viewer.current;
