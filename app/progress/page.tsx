@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 export default function BuildProgress() {
   const [data, setData] = useState<{
     updated: string;
@@ -24,7 +25,7 @@ export default function BuildProgress() {
   }, []);
   return (
     <main className="document-page">
-      <a href="/">← Back to Atlas</a>
+      <Link href="/">← Back to Atlas</Link>
       <h1>Atlas build progress</h1>
       <p>This page refreshes while the app takes shape.</p>
       <p>

@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState, useRef } from "react";
+import Link from "next/link";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -440,7 +441,18 @@ export default function Atlas() {
         className={`atlas-shell ${view === "globe" ? "immersive-globe" : ""}`}
       >
         <aside className="sidebar">
-          <a className="brand" href="/" aria-label="Atlas home">
+          {/* Atlas keeps its view in its own history entries, so a plain
+              click goes through navigate(); modified clicks still open the
+              href in a new tab or window. */}
+          <Link
+            className="brand"
+            href="/"
+            aria-label="Atlas home"
+            onNavigate={(e) => {
+              e.preventDefault();
+              navigate(settings.startView);
+            }}
+          >
             <img
               src="/te-logo.png"
               alt="TE Connectivity"
@@ -451,7 +463,7 @@ export default function Atlas() {
             <span className="atlas-wordmark">
               ATLAS<span>Project workspace</span>
             </span>
-          </a>
+          </Link>
           <AtlasNavigation
             view={view}
             tool={tool}
@@ -491,14 +503,18 @@ export default function Atlas() {
               <Menu size={20} />
             </button>
             {view === "globe" && (
-              <a
+              <Link
                 className="globe-top-brand"
                 href="/?view=dashboard"
                 aria-label="Atlas dashboard"
+                onNavigate={(e) => {
+                  e.preventDefault();
+                  navigate("dashboard");
+                }}
               >
                 <img src="/te-logo.png" alt="TE Connectivity" />
                 <span>ATLAS</span>
-              </a>
+              </Link>
             )}
             <div className="view-tabs-bar">
               <div

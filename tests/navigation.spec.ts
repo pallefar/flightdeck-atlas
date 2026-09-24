@@ -341,3 +341,30 @@ test("help search and keyboard or tap explanations lead to real destinations on 
     ),
   ).toBe(true);
 });
+test("the Atlas brand, the globe brand and the build-progress back link return to the portfolio", async ({
+  page,
+}) => {
+  const dashboard = page.getByRole("tabpanel", { name: "Dashboard" });
+  await page.goto("/?view=help");
+  await expect(
+    page.getByRole("heading", { name: "Find your next move." }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Atlas home", exact: true }).click();
+  await expect(dashboard).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Find your next move." }),
+  ).toHaveCount(0);
+  await page.goto("/?view=globe");
+  await expect(dashboard).toHaveCount(0);
+  await page
+    .getByRole("link", { name: "Atlas dashboard", exact: true })
+    .click();
+  await expect(dashboard).toBeVisible();
+  await expect(page).toHaveURL(/[?&]view=dashboard/);
+  await page.goto("/progress");
+  await expect(
+    page.getByRole("heading", { name: "Atlas build progress" }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "← Back to Atlas" }).click();
+  await expect(dashboard).toBeVisible();
+});
