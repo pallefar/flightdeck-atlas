@@ -22,6 +22,12 @@ type AccessData = {
   }[];
   events: { action: string; target: string; created_at: string }[];
 };
+async function fetchAccess() {
+  const r = await fetch("/api/access");
+  const body = (await r.json()) as AccessData & { error?: string };
+  if (!r.ok) throw Error(body.error || "Access could not be loaded.");
+  return body;
+}
 export default function AccessManagement() {
   const [data, setData] = useState<AccessData | null>(null),
     [error, setError] = useState(""),
@@ -35,13 +41,10 @@ export default function AccessManagement() {
     "briefings.read",
   ]);
   async function load() {
-    const r = await fetch("/api/access");
-    const body = (await r.json()) as AccessData & { error?: string };
-    if (!r.ok) throw Error(body.error || "Access could not be loaded.");
-    setData(body);
+    setData(await fetchAccess());
   }
   useEffect(() => {
-    void load().catch((e) => setError(e.message));
+    fetchAccess().then(setData, (e) => setError(e.message));
   }, []);
   async function change(body: Record<string, unknown>, success: string) {
     setBusy(true);

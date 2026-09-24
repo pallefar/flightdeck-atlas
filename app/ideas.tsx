@@ -9,6 +9,18 @@ import {
 } from "@/lib/opportunities";
 import { newsSources, type NewsItem } from "@/lib/ai-news";
 import type { Project } from "@/lib/projects";
+async function fetchNews() {
+  const r = await fetch("/api/ai-news");
+  const data = (await r.json()) as {
+    items: NewsItem[];
+    checkedAt: string;
+    unavailable: string[];
+    stale?: boolean;
+    error?: string;
+  };
+  if (!r.ok) throw Error(data.error || "AI updates could not be loaded.");
+  return data;
+}
 export default function Ideas({
   projects,
   onCreate,
@@ -33,16 +45,7 @@ export default function Ideas({
     setLoading(true);
     setError("");
     try {
-      const r = await fetch("/api/ai-news");
-      const data = (await r.json()) as {
-        items: NewsItem[];
-        checkedAt: string;
-        unavailable: string[];
-        stale?: boolean;
-        error?: string;
-      };
-      if (!r.ok) throw Error(data.error || "AI updates could not be loaded.");
-      setNews(data);
+      setNews(await fetchNews());
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -50,7 +53,10 @@ export default function Ideas({
     }
   }
   useEffect(() => {
-    void refresh();
+    // loading starts true and error empty, as refresh() would set them.
+    fetchNews()
+      .then(setNews, (e) => setError((e as Error).message))
+      .finally(() => setLoading(false));
   }, []);
   return (
     <main className="hub-page">

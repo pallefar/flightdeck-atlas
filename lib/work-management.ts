@@ -43,7 +43,7 @@ export function applyWorkRules(fields: ProjectFields, previous: Project) {
   const tasks = fields.tasks.map((t) => {
     const old = previous.tasks.find((x) => x.id === t.id);
     if (!old || t.done) return t;
-    let next = { ...t };
+    const next = { ...t };
     if (
       fields.automations?.blockedToHigh &&
       t.workflow === "blocked" &&

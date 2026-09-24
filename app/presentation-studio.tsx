@@ -13,6 +13,23 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { createDeck, templates, type Deck } from "@/lib/presentations";
 import type { Project } from "@/lib/projects";
+async function fetchDecks(offset: number, scopedProjectId?: string) {
+  const r = await fetch(
+      "/api/decks?offset=" +
+        offset +
+        (scopedProjectId
+          ? "&project=" + encodeURIComponent(scopedProjectId)
+          : ""),
+    ),
+    b = (await r.json()) as {
+      error: string;
+      deck: Deck;
+      decks: Deck[];
+      nextOffset: number | null;
+    };
+  if (!r.ok) throw Error(b.error);
+  return b;
+}
 export default function PresentationStudio({
   projects,
   demo,
@@ -40,20 +57,7 @@ export default function PresentationStudio({
     [dirty, setDirty] = useState(false);
   async function load(offset = 0) {
     try {
-      const r = await fetch(
-          "/api/decks?offset=" +
-            offset +
-            (scopedProjectId
-              ? "&project=" + encodeURIComponent(scopedProjectId)
-              : ""),
-        ),
-        b = (await r.json()) as {
-          error: string;
-          deck: Deck;
-          decks: Deck[];
-          nextOffset: number | null;
-        };
-      if (!r.ok) throw Error(b.error);
+      const b = await fetchDecks(offset, scopedProjectId);
       setDecks((old) => (offset ? [...old, ...b.decks] : b.decks));
       setNextOffset(b.nextOffset);
     } catch (e) {
@@ -61,7 +65,13 @@ export default function PresentationStudio({
     }
   }
   useEffect(() => {
-    void load();
+    fetchDecks(0, scopedProjectId).then(
+      (b) => {
+        setDecks(b.decks);
+        setNextOffset(b.nextOffset);
+      },
+      (e) => setError((e as Error).message),
+    );
   }, [scopedProjectId]);
   useEffect(() => {
     if (!present) return;

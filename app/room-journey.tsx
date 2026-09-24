@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { studioLight, woodTexture } from "@/lib/scene-lighting";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
@@ -25,7 +25,9 @@ export default function RoomJourney({
   const [mountNode, setMountNode] = useState<HTMLDivElement | null>(null),
     finish = useRef(onComplete),
     [phase, setPhase] = useState("ENTERING THE ROOM");
-  finish.current = onComplete;
+  useLayoutEffect(() => {
+    finish.current = onComplete;
+  });
   useEffect(() => {
     if (!mountNode) return;
     let frame = 0,
@@ -35,8 +37,10 @@ export default function RoomJourney({
     try {
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     } catch {
-      setPhase("WORKSPACE READY");
-      return;
+      // No WebGL: show the ready caption from the next animation frame,
+      // the same way the journey's own frames update the caption.
+      frame = requestAnimationFrame(() => setPhase("WORKSPACE READY"));
+      return () => cancelAnimationFrame(frame);
     }
     renderer.setPixelRatio(Math.min(devicePixelRatio, 1.8));
     renderer.shadowMap.enabled = true;

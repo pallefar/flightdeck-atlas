@@ -1,5 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState, useRef } from "react";
+import Link from "next/link";
+import { useHydrated } from "@/hooks/use-hydrated";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -102,6 +104,37 @@ const blank: ProjectFields = {
   color: "orange",
   tasks: [],
 };
+async function fetchProjects() {
+  const r = await fetch("/api/projects");
+  const body = (await r.json()) as {
+    projects: Project[];
+    access?: AccessProfile;
+    error?: string;
+  };
+  if (!r.ok) throw Error(body.error || "Projects could not be loaded.");
+  return body;
+}
+// Where Atlas opens: saved settings, a ?look= override, and the URL's view,
+// tool and workspace.
+function startingPoint() {
+  const settings = readSettings();
+  const params = new URLSearchParams(location.search);
+  const look = params.get("look");
+  if (
+    look &&
+    ["normal", "crt", "nvg", "thermal", "anime", "noir", "snow"].includes(look)
+  )
+    settings.globe.look = look as AtlasSettings["globe"]["look"];
+  const v = params.get("view");
+  return {
+    settings,
+    view: validViews.includes(v as View) ? (v as View) : settings.startView,
+    portfolioView:
+      v === "globe" || v === "dashboard" ? v : settings.startView,
+    tool: workTool(params.get("tool")),
+    workspaceId: params.get("workspace") || "",
+  };
+}
 export default function Atlas() {
   const { theme, setTheme } = useTheme();
   const [access, setAccess] = useState<AccessProfile | null>(null);
@@ -154,68 +187,60 @@ export default function Atlas() {
     [creating, setCreating] = useState(false),
     [saving, setSaving] = useState(false),
     [flightTarget, setFlightTarget] = useState<Project | null>(null);
-  const load = useCallback(async () => {
-    try {
-      const r = await fetch("/api/projects");
-      const body = (await r.json()) as {
-        projects: Project[];
-        access?: AccessProfile;
-        error?: string;
-      };
-      if (!r.ok) throw Error(body.error || "Projects could not be loaded.");
-      setAccess(body.access || null);
-      setProjects(body.projects);
-      const url = new URL(location.href);
-      const requested = url.searchParams.get("project");
-      if (requested) {
-        const found = (body.projects.length ? body.projects : examples).find(
-          (p) => p.id === requested,
-        );
-        if (found) {
-          const destination = url.searchParams.has("work")
-            ? workTool(url.searchParams.get("work"))
-            : "list";
-          setView("manage");
-          setTool(destination);
-          workspaceRef.current = found.id;
-          setWorkspaceId(found.id);
-          url.searchParams.set("view", "manage");
-          url.searchParams.set("workspace", found.id);
-          url.searchParams.set("tool", destination);
-          for (const key of ["project", "work", "scope"])
-            url.searchParams.delete(key);
-          history.replaceState(null, "", url);
-        } else
-          setError("That project is unavailable or you do not have access.");
-      }
-      setDemo(body.projects.length === 0);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoaded(true);
-    }
-  }, []);
+  const load = useCallback(
+    () =>
+      fetchProjects()
+        .then((body) => {
+          setAccess(body.access || null);
+          setProjects(body.projects);
+          const url = new URL(location.href);
+          const requested = url.searchParams.get("project");
+          if (requested) {
+            const found = (
+              body.projects.length ? body.projects : examples
+            ).find((p) => p.id === requested);
+            if (found) {
+              const destination = url.searchParams.has("work")
+                ? workTool(url.searchParams.get("work"))
+                : "list";
+              setView("manage");
+              setTool(destination);
+              workspaceRef.current = found.id;
+              setWorkspaceId(found.id);
+              url.searchParams.set("view", "manage");
+              url.searchParams.set("workspace", found.id);
+              url.searchParams.set("tool", destination);
+              for (const key of ["project", "work", "scope"])
+                url.searchParams.delete(key);
+              history.replaceState(null, "", url);
+            } else
+              setError(
+                "That project is unavailable or you do not have access.",
+              );
+          }
+          setDemo(body.projects.length === 0);
+        })
+        .catch((e) => setError((e as Error).message))
+        .finally(() => setLoaded(true)),
+    [],
+  );
+  // Settings and the URL's view live in the browser: apply them once the
+  // page runs there, while rendering, and keep the refs in step after commit.
+  const hydrated = useHydrated();
+  const [restored, setRestored] = useState(false);
+  if (hydrated && !restored) {
+    setRestored(true);
+    const start = startingPoint();
+    setSettings(start.settings);
+    setView(start.view);
+    setTool(start.tool);
+    setWorkspaceId(start.workspaceId);
+  }
   useEffect(() => {
     void load();
-    const restored = readSettings();
-    const look = new URLSearchParams(location.search).get("look");
-    if (
-      look &&
-      ["normal", "crt", "nvg", "thermal", "anime", "noir", "snow"].includes(
-        look,
-      )
-    )
-      restored.globe.look = look as AtlasSettings["globe"]["look"];
-    setSettings(restored);
-    const v = new URLSearchParams(location.search).get("view");
-    if (v === "globe" || v === "dashboard") lastPortfolioView.current = v;
-    else lastPortfolioView.current = restored.startView;
-    setView(validViews.includes(v as View) ? (v as View) : restored.startView);
-    setTool(workTool(new URLSearchParams(location.search).get("tool")));
-    const requestedWorkspace =
-      new URLSearchParams(location.search).get("workspace") || "";
-    workspaceRef.current = requestedWorkspace;
-    setWorkspaceId(requestedWorkspace);
+    const start = startingPoint();
+    lastPortfolioView.current = start.portfolioView;
+    workspaceRef.current = start.workspaceId;
   }, [load]);
   useEffect(() => {
     function restoreNavigation() {
@@ -440,7 +465,18 @@ export default function Atlas() {
         className={`atlas-shell ${view === "globe" ? "immersive-globe" : ""}`}
       >
         <aside className="sidebar">
-          <a className="brand" href="/" aria-label="Atlas home">
+          {/* Atlas keeps its view in its own history entries, so a plain
+              click goes through navigate(); modified clicks still open the
+              href in a new tab or window. */}
+          <Link
+            className="brand"
+            href="/"
+            aria-label="Atlas home"
+            onNavigate={(e) => {
+              e.preventDefault();
+              navigate(settings.startView);
+            }}
+          >
             <img
               src="/te-logo.png"
               alt="TE Connectivity"
@@ -451,7 +487,7 @@ export default function Atlas() {
             <span className="atlas-wordmark">
               ATLAS<span>Project workspace</span>
             </span>
-          </a>
+          </Link>
           <AtlasNavigation
             view={view}
             tool={tool}
@@ -491,14 +527,18 @@ export default function Atlas() {
               <Menu size={20} />
             </button>
             {view === "globe" && (
-              <a
+              <Link
                 className="globe-top-brand"
                 href="/?view=dashboard"
                 aria-label="Atlas dashboard"
+                onNavigate={(e) => {
+                  e.preventDefault();
+                  navigate("dashboard");
+                }}
               >
                 <img src="/te-logo.png" alt="TE Connectivity" />
                 <span>ATLAS</span>
-              </a>
+              </Link>
             )}
             <div className="view-tabs-bar">
               <div
@@ -1330,9 +1370,15 @@ function ProjectForm({
   onSave: (fields: ProjectFields, existing?: Project) => Promise<unknown>;
 }) {
   const [fields, setFields] = useState<ProjectFields>(blank);
-  useEffect(() => {
+  // Opening the dialog, or switching its project while open, resets the form.
+  const [shown, setShown] = useState<{
+    open: boolean;
+    project: Project | null;
+  }>({ open: false, project: null });
+  if (shown.open !== open || shown.project !== project) {
+    setShown({ open, project });
     if (open) setFields(project ? { ...project } : { ...blank, tasks: [] });
-  }, [open, project]);
+  }
   return (
     <Dialog
       open={open}

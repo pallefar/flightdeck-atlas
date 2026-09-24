@@ -1,5 +1,11 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   SlidersHorizontal,
   CalendarRange,
@@ -49,7 +55,31 @@ type RecordItem = {
   updated_at: string;
   available_at: string;
   closed: number;
-  data: Record<string, any>;
+  data: RecordData;
+};
+// Stored record JSON differs by kind (timer, form, request, note, template);
+// these are the fields this screen reads. Any other stored key stays unknown.
+type RecordData = {
+  [key: string]: unknown;
+  title: string;
+  name: string;
+  body: string;
+  description?: string;
+  status?: string;
+  enabled?: boolean;
+  reviewer?: string;
+  reviewedBy?: string;
+  submittedBy?: string;
+  reason?: string;
+  questions?: string[];
+  answers: string[];
+  targetType?: string;
+  targetId?: string;
+  taskId?: string;
+  dueDate?: string;
+  startedAt: string;
+  token?: string;
+  tasks: unknown[];
 };
 type WorkData = {
   requestsCursor: string | null;
@@ -65,7 +95,9 @@ function useWork(project: Project, onReload?: () => void) {
     [busy, setBusy] = useState(false);
   const olderCursor = useRef<string | null | undefined>(undefined);
   const reloadRef = useRef(onReload);
-  reloadRef.current = onReload;
+  useLayoutEffect(() => {
+    reloadRef.current = onReload;
+  });
   const load = useCallback(async () => {
     if (project.id.startsWith("demo-")) return;
     try {
@@ -153,7 +185,9 @@ export function LiveWorkStatus({
   const w = useWork(project),
     session = useRef("");
   const reload = useRef(onReload);
-  reload.current = onReload;
+  useLayoutEffect(() => {
+    reload.current = onReload;
+  });
   useEffect(() => {
     if (project.id.startsWith("demo-")) return;
     session.current = crypto.randomUUID();
@@ -1136,7 +1170,7 @@ function TimeCosts({
 }: Props & { w: WorkHook }) {
   const [taskId, setTaskId] = useState(""),
     [at, setAt] = useState(""),
-    [now, setNow] = useState(Date.now()),
+    [now, setNow] = useState(Date.now),
     [minutes, setMinutes] = useState(""),
     [expense, setExpense] = useState({
       date: localDate(),
@@ -1538,8 +1572,8 @@ function Requests({ project, readOnly, w }: Props & { w: WorkHook }) {
     }),
     [message, setMessage] = useState(""),
     [reason, setReason] = useState<Record<string, string>>({}),
-    requestId = useRef("");
-  if (!requestId.current) requestId.current = crypto.randomUUID();
+    [firstRequestId] = useState(() => crypto.randomUUID()),
+    requestId = useRef(firstRequestId);
   const forms = w.data?.records.filter((r) => r.kind === "form") || [],
     active =
       forms.find((f) => f.id === selected) || forms.find((f) => f.data.enabled),
@@ -1915,8 +1949,8 @@ function Requests({ project, readOnly, w }: Props & { w: WorkHook }) {
 function LiveNotes({ readOnly, w }: Props & { w: WorkHook }) {
   const [draft, setDraft] = useState({ title: "", body: "" }),
     [editing, setEditing] = useState<RecordItem | null>(null),
-    id = useRef("");
-  if (!id.current) id.current = crypto.randomUUID();
+    [firstId] = useState(() => crypto.randomUUID()),
+    id = useRef(firstId);
   const blocks = w.data?.records.filter((r) => r.kind === "block") || [];
   return (
     <>

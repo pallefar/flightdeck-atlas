@@ -1,5 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { examples, projectSchema, type Project } from "../lib/projects";
+import {
+  examples,
+  projectSchema,
+  type Project,
+  type ProjectEvent,
+  type Task,
+} from "../lib/projects";
 import {
   applyWorkRules,
   filteredTasks,
@@ -221,7 +227,7 @@ test("work management persists dates, views, effort and exactly-once recipe effe
   try {
     const payload = {
       ...p,
-      tasks: p.tasks.map((t: any) =>
+      tasks: p.tasks.map((t: Task) =>
         t.id === "scope"
           ? {
               ...t,
@@ -262,10 +268,10 @@ test("work management persists dates, views, effort and exactly-once recipe effe
     const result = await api.put(`/api/projects/${p.id}`, { data: payload });
     expect(result.status()).toBe(200);
     p = (await result.json()).project;
-    expect(p.tasks.find((t: any) => t.id === "build").workflow).toBe("doing");
+    expect(p.tasks.find((t: Task) => t.id === "build").workflow).toBe("doing");
     expect(p.tasks[0].timeEntries[0].author).toBe("seedy@sites.test");
     expect(
-      p.activity.filter((e: any) => e.text.startsWith("Automation:")),
+      p.activity.filter((e: ProjectEvent) => e.text.startsWith("Automation:")),
     ).toHaveLength(1);
     expect(
       (await api.put(`/api/projects/${p.id}`, { data: payload })).status(),
@@ -273,7 +279,7 @@ test("work management persists dates, views, effort and exactly-once recipe effe
     const retry = await api.put(`/api/projects/${p.id}`, { data: p });
     p = (await retry.json()).project;
     expect(
-      p.activity.filter((e: any) => e.text.startsWith("Automation:")),
+      p.activity.filter((e: ProjectEvent) => e.text.startsWith("Automation:")),
     ).toHaveLength(1);
     expect(p.taskViews[0].name).toBe("High discovery");
     const before = p.revision;
@@ -282,7 +288,7 @@ test("work management persists dates, views, effort and exactly-once recipe effe
         await api.put(`/api/projects/${p.id}`, {
           data: {
             ...p,
-            tasks: p.tasks.map((t: any) =>
+            tasks: p.tasks.map((t: Task) =>
               t.id === "scope" ? { ...t, startDate: "2026-10-01" } : t,
             ),
           },

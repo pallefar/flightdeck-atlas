@@ -1,7 +1,13 @@
-import { test, expect } from "@playwright/test";
-import { projectSchema, examples, type Project } from "../lib/projects";
+import { test, expect, type Page } from "@playwright/test";
+import {
+  projectSchema,
+  examples,
+  type Project,
+  type Task,
+} from "../lib/projects";
 import {
   calculate,
+  type CustomField,
   numericValue,
   emptyWork,
   criticalPath,
@@ -18,7 +24,7 @@ test.afterEach(async ({ page }) => {
     }
   }
 });
-async function create(page: any, extra: any = {}) {
+async function create(page: Page, extra: Record<string, unknown> = {}) {
   await page.goto("/");
   const r = await page.request.post("/api/projects", {
     data: {
@@ -55,7 +61,7 @@ test("safe formulas, nested task constraints and generalized schedule math", () 
   expect(calculate("[x] / ([y] - 1)", (k) => (k === "x" ? 10 : 3))).toBe(5);
   expect(calculate("globalThis.fetch('x')", () => 1)).toBeNull();
   expect(calculate("1/0", () => 1)).toBeNull();
-  const fields: any[] = [
+  const fields: CustomField[] = [
     {
       id: "value",
       name: "Value",
@@ -70,7 +76,7 @@ test("safe formulas, nested task constraints and generalized schedule math", () 
       work: { ...emptyWork(), fields },
     }).success,
   ).toBeTruthy();
-  const many: any[] = [
+  const many: CustomField[] = [
     { id: "f0", name: "Input", type: "number", formula: "", options: [] },
   ];
   for (let i = 1; i < 20; i++)
@@ -107,7 +113,7 @@ test("safe formulas, nested task constraints and generalized schedule math", () 
       ],
     }).success,
   ).toBeFalsy();
-  const tasks: any[] = [
+  const tasks: Task[] = [
     {
       id: "a",
       title: "A",
@@ -142,7 +148,7 @@ test("persistent timers record once and shared blocks reject lost updates", asyn
   page,
 }) => {
   const p = await create(page),
-    call = (data: any) =>
+    call = (data: Record<string, unknown>) =>
       page.request.post("/api/work", { data: { ...data, projectId: p.id } }),
     token = crypto.randomUUID();
   expect(
@@ -159,7 +165,7 @@ test("persistent timers record once and shared blocks reject lost updates", asyn
   ).toBe(409);
   expect((await call({ action: "stop-timer", token })).ok()).toBeTruthy();
   expect((await call({ action: "stop-timer", token })).ok()).toBeTruthy();
-  let current = (await (await page.request.get(`/api/projects/${p.id}`)).json())
+  const current = (await (await page.request.get(`/api/projects/${p.id}`)).json())
     .project;
   expect(current.tasks[0].timeEntries).toHaveLength(1);
   const block = crypto.randomUUID();
@@ -207,7 +213,7 @@ test("persistent timers record once and shared blocks reject lost updates", asyn
   const body = await (
     await page.request.get(`/api/work?project=${p.id}`)
   ).json();
-  expect(body.records.find((r: any) => r.id === block).data.body).toBe(
+  expect(body.records.find((r: { id: string }) => r.id === block).data.body).toBe(
     "Second",
   );
 });
@@ -231,7 +237,7 @@ test("intake approval is idempotent, applies creation rules, and reminders cance
       ],
     },
   });
-  const call = (data: any) =>
+  const call = (data: Record<string, unknown>) =>
       page.request.post("/api/work", { data: { ...data, projectId: p.id } }),
     formId = crypto.randomUUID(),
     requestId = crypto.randomUUID();
@@ -305,7 +311,7 @@ test("intake approval is idempotent, applies creation rules, and reminders cance
   const work = await (
     await page.request.get(`/api/work?project=${p.id}`)
   ).json();
-  expect(work.records.some((r: any) => r.id === reminder)).toBeFalsy();
+  expect(work.records.some((r: { id: string }) => r.id === reminder)).toBeFalsy();
 });
 test("cross-project moves are atomic and cross-project cycles are rejected", async ({
   page,
@@ -449,7 +455,7 @@ test("versioned playbooks preserve target progress and update reviewed task defi
     }),
     target = await create(page, { tasks: [] });
   const id = crypto.randomUUID(),
-    call = (data: any) =>
+    call = (data: Record<string, unknown>) =>
       page.request.post("/api/work", {
         data: { ...data, projectId: source.id },
       });

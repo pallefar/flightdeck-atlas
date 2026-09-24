@@ -46,21 +46,27 @@ export type WorkspaceData = {
   };
   preferenceRevision: number;
 };
+async function fetchWorkspace() {
+  const r = await fetch("/api/workspace"),
+    b = (await r.json()) as WorkspaceData & { error: string };
+  if (!r.ok) throw Error(b.error);
+  return b;
+}
 export function useWorkspace() {
   const [data, setData] = useState<WorkspaceData | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
-  const load = useCallback(async () => {
-    try {
-      const r = await fetch("/api/workspace"),
-        b = (await r.json()) as WorkspaceData & { error: string };
-      if (!r.ok) throw Error(b.error);
-      setData(b);
-      setError("");
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, []);
+  const load = useCallback(
+    () =>
+      fetchWorkspace().then(
+        (b) => {
+          setData(b);
+          setError("");
+        },
+        (e) => setError((e as Error).message),
+      ),
+    [],
+  );
   useEffect(() => {
     void load();
     const refresh = () => {
@@ -545,6 +551,8 @@ export function TeamHub({
 }) {
   const capacityDirty = useRef(false);
   const capacityBase = useRef<WorkspaceData | null>(null);
+  // Mirrors capacityDirty for rendering the Discard button.
+  const [capacityEdited, setCapacityEdited] = useState(false);
   const w = useWorkspace(),
     [tab, setTab] = useState("inbox"),
     [team, setTeam] = useState<Team | null>(null),
@@ -820,6 +828,7 @@ export function TeamHub({
                   }))
                 ) {
                   capacityDirty.current = false;
+                  setCapacityEdited(false);
                   capacityBase.current = null;
                 }
               }}
@@ -836,6 +845,7 @@ export function TeamHub({
                       onChange={(e) => {
                         capacityBase.current ||= w.data;
                         capacityDirty.current = true;
+                        setCapacityEdited(true);
                         setHours(e.target.value);
                       }}
                     />
@@ -847,6 +857,7 @@ export function TeamHub({
                       onChange={(e) => {
                         capacityBase.current ||= w.data;
                         capacityDirty.current = true;
+                        setCapacityEdited(true);
                         setLeave(e.target.value);
                       }}
                     />
@@ -859,13 +870,14 @@ export function TeamHub({
                     onChange={(e) => {
                       capacityBase.current ||= w.data;
                       capacityDirty.current = true;
+                      setCapacityEdited(true);
                       setShareCapacity(e.target.checked);
                     }}
                   />
                   Share working hours and leave dates with my Atlas teams
                 </label>
                 <Button>Save capacity</Button>
-                {capacityDirty.current && (
+                {capacityEdited && (
                   <Button
                     type="button"
                     variant="outline"
@@ -877,6 +889,7 @@ export function TeamHub({
                       }
                       capacityBase.current = null;
                       capacityDirty.current = false;
+                      setCapacityEdited(false);
                     }}
                   >
                     Discard capacity changes

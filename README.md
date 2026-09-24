@@ -40,10 +40,11 @@ Before starting development, create an ignored `.env.local` containing `ATLAS_SU
 
 ```sh
 npx tsc --noEmit
+npm run lint
 npx playwright test
 ```
 
-The browser tests use an already running local server at port 5173 and Chrome. They create and remove temporary projects and access fixtures in the local database. The SDK adapter, context and onboarding tests use fixtures (`tests/fixtures/os-project-onboarding.json` records the OS onboarding contract) and never contact FlightDeck.
+`npm run lint` must report no errors; warnings are listed but do not fail it. `tests/lint.spec.ts` runs the same script, so `npx playwright test` also fails on a lint error. Do not disable a rule or add an `eslint-disable` comment to get it green. The browser tests use an already running local server at port 5173 and Chrome. They create and remove temporary projects and access fixtures in the local database. The SDK adapter, context and onboarding tests use fixtures (`tests/fixtures/os-project-onboarding.json` records the OS onboarding contract) and never contact FlightDeck.
 
 ## FlightDeck integration
 

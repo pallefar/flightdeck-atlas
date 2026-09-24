@@ -48,6 +48,21 @@ type WellbeingContextValue = {
   clear: () => void;
 };
 const WellnessContext = createContext<WellbeingContextValue | null>(null);
+function loadWellbeing(key: string | null): {
+  data: WellbeingState | null;
+  warning: string;
+} {
+  if (!key) return { data: null, warning: "" };
+  try {
+    return { data: readWellbeing(localStorage.getItem(key)), warning: "" };
+  } catch {
+    return {
+      data: freshWellbeing(),
+      warning:
+        "Browser storage is unavailable. Your check-in and timer will last only for this session.",
+    };
+  }
+}
 export function WellbeingProvider({
   userId,
   children,
@@ -55,38 +70,51 @@ export function WellbeingProvider({
   userId?: string;
   children: ReactNode;
 }) {
-  const [data, setData] = useState<WellbeingState | null>(null),
-    [now, setNow] = useState(Date.now),
-    [warning, setWarning] = useState("");
-  const activeKey = useRef<string | null>(null);
   const key = userId ? `atlas-wellbeing-v1:${userId}` : null;
+  // The key exists only after Atlas has loaded the signed-in user in the
+  // browser, so the saved state is read while rendering, when the key is set.
+  const [initial] = useState(() => loadWellbeing(key));
+  const [data, setData] = useState<WellbeingState | null>(initial.data),
+    [now, setNow] = useState(Date.now),
+    [warning, setWarning] = useState(initial.warning);
+  const [keySeen, setKeySeen] = useState(key);
+  if (keySeen !== key) {
+    setKeySeen(key);
+    const loaded = loadWellbeing(key);
+    setData(loaded.data);
+    if (loaded.warning) setWarning(loaded.warning);
+  }
+  const activeKey = useRef<string | null>(null);
   useEffect(() => {
     activeKey.current = key;
-    if (!key) {
-      setData(null);
-      return;
-    }
-    try {
-      setData(readWellbeing(localStorage.getItem(key)));
-    } catch {
-      setData(freshWellbeing());
-      setWarning(
-        "Browser storage is unavailable. Your check-in and timer will last only for this session.",
-      );
-    }
+    if (!key) return;
     const receive = (event: StorageEvent) => {
       if (event.key === key) setData(readWellbeing(event.newValue));
     };
     window.addEventListener("storage", receive);
     return () => window.removeEventListener("storage", receive);
   }, [key]);
+  // Saves a new state from inside a state update, as update() does.
+  function save(next: WellbeingState) {
+    try {
+      if (activeKey.current)
+        localStorage.setItem(activeKey.current, JSON.stringify(next));
+    } catch {
+      setWarning("Changes apply now, but could not be saved to this browser.");
+    }
+  }
   useEffect(() => {
     const tick = () => {
       const time = Date.now();
       setNow(time);
-      setData((previous) =>
-        previous ? advanceWellbeing(previous, time) : null,
-      );
+      // Completion/day rollover must survive reload even when no control is
+      // pressed, so a tick that changes the state saves it.
+      setData((previous) => {
+        if (!previous) return null;
+        const next = advanceWellbeing(previous, time);
+        if (next !== previous) save(next);
+        return next;
+      });
     };
     const interval = setInterval(tick, 1000);
     document.addEventListener("visibilitychange", tick);
@@ -99,34 +127,10 @@ export function WellbeingProvider({
     setData((previous) => {
       if (!previous) return previous;
       const next = fn(advanceWellbeing(previous));
-      try {
-        if (activeKey.current)
-          localStorage.setItem(activeKey.current, JSON.stringify(next));
-      } catch {
-        setWarning(
-          "Changes apply now, but could not be saved to this browser.",
-        );
-      }
+      save(next);
       return next;
     });
   }
-  // Completion/day rollover must survive reload even when no control is pressed.
-  const loadedKey = useRef<string | null>(null);
-  useEffect(() => {
-    if (loadedKey.current !== key) {
-      loadedKey.current = key;
-      return;
-    }
-    if (data && key && activeKey.current === key) {
-      try {
-        localStorage.setItem(key, JSON.stringify(data));
-      } catch {
-        setWarning(
-          "Changes apply now, but could not be saved to this browser.",
-        );
-      }
-    }
-  }, [data, key]);
   function clear() {
     setData(freshWellbeing());
     try {
