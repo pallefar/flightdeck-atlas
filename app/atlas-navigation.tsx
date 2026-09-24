@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   ChevronDown,
   Layers3,
@@ -15,6 +15,7 @@ import { workTools, type View, type WorkTool } from "@/lib/navigation";
 import type { AccessProfile } from "@/lib/access-policy";
 import type { Project } from "@/lib/projects";
 import FlightDeckContextSwitcher from "./flightdeck-context-switcher";
+import { useHydrated } from "@/hooks/use-hydrated";
 export default function AtlasNavigation({
   view,
   tool,
@@ -35,15 +36,6 @@ export default function AtlasNavigation({
     "Team & personal",
     "Connections & admin",
   ]);
-  useEffect(() => {
-    try {
-      const value = JSON.parse(
-        localStorage.getItem("atlas-nav-groups") || "null",
-      );
-      if (Array.isArray(value) && value.every((x) => typeof x === "string"))
-        setCollapsed(value);
-    } catch {}
-  }, []);
   const activeGroup =
     view === "manage"
       ? workTools.find((t) => t.id === tool)?.group
@@ -54,10 +46,28 @@ export default function AtlasNavigation({
         : ["connection", "access", "apps"].includes(view)
           ? "Connections & admin"
           : "";
-  useEffect(() => {
+  // Once in the browser, restore the saved groups; the open screen's group
+  // always starts expanded. Both adjust state while rendering.
+  const hydrated = useHydrated();
+  const [restored, setRestored] = useState(false);
+  if (hydrated && !restored) {
+    setRestored(true);
+    try {
+      const value = JSON.parse(
+        localStorage.getItem("atlas-nav-groups") || "null",
+      );
+      if (Array.isArray(value) && value.every((x) => typeof x === "string"))
+        setCollapsed(
+          activeGroup ? value.filter((x) => x !== activeGroup) : value,
+        );
+    } catch {}
+  }
+  const [groupSeen, setGroupSeen] = useState<string | undefined>("");
+  if (groupSeen !== activeGroup) {
+    setGroupSeen(activeGroup);
     if (activeGroup)
       setCollapsed((old) => old.filter((x) => x !== activeGroup));
-  }, [activeGroup]);
+  }
   function toggle(group: string) {
     setCollapsed((old) => {
       const next = old.includes(group)
