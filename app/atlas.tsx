@@ -1346,9 +1346,15 @@ function ProjectForm({
   onSave: (fields: ProjectFields, existing?: Project) => Promise<unknown>;
 }) {
   const [fields, setFields] = useState<ProjectFields>(blank);
-  useEffect(() => {
+  // Opening the dialog, or switching its project while open, resets the form.
+  const [shown, setShown] = useState<{
+    open: boolean;
+    project: Project | null;
+  }>({ open: false, project: null });
+  if (shown.open !== open || shown.project !== project) {
+    setShown({ open, project });
     if (open) setFields(project ? { ...project } : { ...blank, tasks: [] });
-  }, [open, project]);
+  }
   return (
     <Dialog
       open={open}

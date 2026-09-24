@@ -84,10 +84,14 @@ export default function GlobeWorkspace({
   const scanMode = settings.mode === "scan";
   const visibleProjects =
     scanMode && submitted && !scanning ? matches : projects;
-  useEffect(() => {
+  // Adjust state while rendering when its inputs change, instead of in an
+  // effect a render later (react.dev "You Might Not Need an Effect").
+  const [targetFrom, setTargetFrom] = useState(target);
+  if (targetFrom !== target) {
+    setTargetFrom(target);
     setLocalTarget(target);
     setTour(false);
-  }, [target]);
+  }
   useEffect(() => {
     if (!scan) return;
     const timer = window.setInterval(() => {
@@ -100,13 +104,15 @@ export default function GlobeWorkspace({
     }, 50);
     return () => clearInterval(timer);
   }, [scan]);
-  useEffect(() => {
+  const [scanModeFrom, setScanModeFrom] = useState(scanMode);
+  if (scanModeFrom !== scanMode) {
+    setScanModeFrom(scanMode);
     if (!scanMode) {
       setScan(null);
       setTour(false);
       setSubmitted(null);
     }
-  }, [scanMode]);
+  }
   useEffect(() => {
     if (
       scanning ||
@@ -129,10 +135,16 @@ export default function GlobeWorkspace({
     });
     return () => cancelAnimationFrame(id);
   }, [scanning, submitted, settings.motion]);
-  useEffect(() => {
-    if (!tour || !mapped.length) return;
-    setLocalTarget({ ...mapped[tourIndex % mapped.length] });
-  }, [tour, tourIndex, mapped]);
+  const [tourFrom, setTourFrom] = useState({ tour, tourIndex, mapped });
+  if (
+    tourFrom.tour !== tour ||
+    tourFrom.tourIndex !== tourIndex ||
+    tourFrom.mapped !== mapped
+  ) {
+    setTourFrom({ tour, tourIndex, mapped });
+    if (tour && mapped.length)
+      setLocalTarget({ ...mapped[tourIndex % mapped.length] });
+  }
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {

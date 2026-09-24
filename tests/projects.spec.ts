@@ -176,3 +176,19 @@ test("TE branding and theme preference survive reload without hydration errors",
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   expect(errors).toEqual([]);
 });
+test("the project form starts blank each time it opens", async ({ page }) => {
+  await page.goto("/");
+  const open = () =>
+    page
+      .getByRole("button", { name: "New project", exact: true })
+      .first()
+      .click();
+  const name = page.getByLabel("Project name", { exact: true });
+  await open();
+  await expect(name).toHaveValue("");
+  await name.fill("Draft that is discarded");
+  await page.keyboard.press("Escape");
+  await expect(name).toHaveCount(0);
+  await open();
+  await expect(name).toHaveValue("");
+});

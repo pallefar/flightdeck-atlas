@@ -21,6 +21,18 @@ type ResponseData = {
   sharing: Sharing;
 };
 type Draft = ReturnType<typeof recordSchema.parse>;
+async function fetchCollaboration(
+  projectId: string,
+  kind: string,
+  offset: number,
+) {
+  const r = await fetch(
+      `/api/projects/${projectId}/collaboration?kind=${kind}&offset=${offset}`,
+    ),
+    b = (await r.json()) as ResponseData;
+  if (!r.ok) throw Error(b.error);
+  return b;
+}
 export default function ProjectCollaboration({
   project,
   demo,
@@ -61,26 +73,24 @@ export default function ProjectCollaboration({
             ? "approval"
             : "benefit";
   const load = useCallback(
-    async (offset = 0) => {
-      if (demo) return;
-      try {
-        const r = await fetch(
-            `/api/projects/${project.id}/collaboration?kind=${kind}&offset=${offset}`,
-          ),
-          b = (await r.json()) as ResponseData;
-        if (!r.ok) throw Error(b.error);
-        setRecords((old) => (offset ? [...old, ...b.records] : b.records));
-        setNextOffset(b.nextOffset);
-        setFiles(b.files);
-        setPeople(b.people);
-        setEmail(b.email);
-        setCanComment(b.canComment);
-        setError("");
-      } catch (e) {
-        setRecords([]);
-        setFiles([]);
-        setError((e as Error).message);
-      }
+    (offset = 0) => {
+      if (demo) return Promise.resolve();
+      return fetchCollaboration(project.id, kind, offset).then(
+        (b) => {
+          setRecords((old) => (offset ? [...old, ...b.records] : b.records));
+          setNextOffset(b.nextOffset);
+          setFiles(b.files);
+          setPeople(b.people);
+          setEmail(b.email);
+          setCanComment(b.canComment);
+          setError("");
+        },
+        (e) => {
+          setRecords([]);
+          setFiles([]);
+          setError((e as Error).message);
+        },
+      );
     },
     [project.id, demo, kind],
   );

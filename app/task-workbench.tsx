@@ -65,9 +65,12 @@ export default function TaskWorkbench({
   const [layout, setLayout] = useState<TaskView["layout"]>(initialLayout),
     [filter, setFilter] = useState("all"),
     [query, setQuery] = useState("");
-  useEffect(() => {
+  // A new initial layout from the saved view replaces the local choice.
+  const [layoutFrom, setLayoutFrom] = useState(initialLayout);
+  if (layoutFrom !== initialLayout) {
+    setLayoutFrom(initialLayout);
     setLayout(initialLayout);
-  }, [initialLayout]);
+  }
   const drag = useRef<{ task: Task; base: Project } | null>(null);
   const [dropState, setDropState] = useState("");
   const [moveNotice, setMoveNotice] = useState("");

@@ -102,6 +102,13 @@ const contextStatus: Record<
     text: "FlightDeck refused Atlas's inbound credential. Nothing is shown.",
   },
 };
+async function fetchCatalog(cursor?: string) {
+  const r = await fetch(
+    `/api/flightdeck/catalog${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
+  );
+  if (!r.ok) throw Error("FlightDeck discovery could not be checked. Try again.");
+  return catalogSchema.parse(await r.json());
+}
 export default function FlightDeckConnection({
   projects,
   busy,
@@ -126,7 +133,8 @@ export default function FlightDeckConnection({
 }) {
   const [tab, setTab] = useState<"import" | "onboard">("import");
   const [catalog, setCatalog] = useState<ProjectCatalog | null>(null),
-    [loading, setLoading] = useState(false),
+    // The first catalog check starts on mount, so the view opens "Checking".
+    [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [query, setQuery] = useState("");
   const [editing, setEditing] = useState<string | null>(null),
@@ -142,16 +150,15 @@ export default function FlightDeckConnection({
   const osUrl = (workspace?.apps.find((x) => x.id === "flightdeck")?.url ?? "").replace(/\/+$/, "");
   const contextRow =
     contextStatus[!superAdmin ? "not_permitted" : context.state || "checking"];
+  function failed(e: unknown) {
+    setError((e as Error).message);
+    setCatalog(null);
+  }
   async function refresh(cursor?: string) {
     setLoading(true);
     setError("");
     try {
-      const r = await fetch(
-        `/api/flightdeck/catalog${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
-      );
-      if (!r.ok)
-        throw Error("FlightDeck discovery could not be checked. Try again.");
-      const result = catalogSchema.parse(await r.json());
+      const result = await fetchCatalog(cursor);
       setCatalog((previous) =>
         cursor && previous?.connected && result.connected
           ? {
@@ -168,14 +175,15 @@ export default function FlightDeckConnection({
           : result,
       );
     } catch (e) {
-      setError((e as Error).message);
-      setCatalog(null);
+      failed(e);
     } finally {
       setLoading(false);
     }
   }
   useEffect(() => {
-    void refresh();
+    fetchCatalog()
+      .then(setCatalog, failed)
+      .finally(() => setLoading(false));
   }, []);
   async function importProject(candidate: ImportCandidate) {
     setImporting(projectRefKey(candidate.ref));

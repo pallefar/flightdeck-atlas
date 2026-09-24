@@ -46,21 +46,27 @@ export type WorkspaceData = {
   };
   preferenceRevision: number;
 };
+async function fetchWorkspace() {
+  const r = await fetch("/api/workspace"),
+    b = (await r.json()) as WorkspaceData & { error: string };
+  if (!r.ok) throw Error(b.error);
+  return b;
+}
 export function useWorkspace() {
   const [data, setData] = useState<WorkspaceData | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
-  const load = useCallback(async () => {
-    try {
-      const r = await fetch("/api/workspace"),
-        b = (await r.json()) as WorkspaceData & { error: string };
-      if (!r.ok) throw Error(b.error);
-      setData(b);
-      setError("");
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, []);
+  const load = useCallback(
+    () =>
+      fetchWorkspace().then(
+        (b) => {
+          setData(b);
+          setError("");
+        },
+        (e) => setError((e as Error).message),
+      ),
+    [],
+  );
   useEffect(() => {
     void load();
     const refresh = () => {
