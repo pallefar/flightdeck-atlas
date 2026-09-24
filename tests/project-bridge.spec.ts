@@ -4038,6 +4038,7 @@ test("every stage has a place on the status timeline, and an answered request sh
 test("a locked Remove draft looks and announces locked, says why on the row, and refuses mouse, keyboard and touch", async ({
   page,
   browser,
+  baseURL,
 }) => {
   await page.clock.install();
   await mockContext(page);
@@ -4087,8 +4088,9 @@ test("a locked Remove draft looks and announces locked, says why on the row, and
     await page.keyboard.press("Enter");
     await page.keyboard.press("Space");
     // Touch, at phone width: the same.
+    // The same server as the rest of the suite (ATLAS_BASE_URL, else :5173).
     const touch = await browser.newContext({
-      baseURL: "http://localhost:5173",
+      baseURL,
       hasTouch: true,
       isMobile: true,
       viewport: { width: 390, height: 844 },
