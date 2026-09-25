@@ -58,6 +58,7 @@ import {
   type OnboardingStatus,
   FIELD_POINTERS,
   fieldDigests,
+  resubmitChanged,
 } from "../lib/flightdeck/onboarding";
 import {
   DRAFT_NOT_HELD_SQL,
@@ -3097,9 +3098,10 @@ test("Fix and resubmit waits for a named field to change, then sends a fresh key
     stage: "needs-more-info",
     fields: ["site"],
   });
-  // The Super Admin's form compares against what was sent, field by field.
+  // The Super Admin's form compares against what was sent, field by field:
+  // every pointable field plus the proposed project name and id.
   expect(Object.keys(answered.operation!.sentDigests ?? {}).sort()).toEqual(
-    [...FIELD_POINTERS].sort(),
+    [...FIELD_POINTERS, "targetLabel", "targetProjectId"].sort(),
   );
   const digests = await fieldDigests(h.fake.submits[0].payload);
   expect(answered.operation!.sentDigests).toEqual(digests);
@@ -3229,6 +3231,77 @@ test("with features.supersedes on, the resubmission names the earlier submission
     supersedes_submission_id: null,
   });
   expect(new Set(h.store.ops().map((op) => op.idempotency_key)).size).toBe(3);
+});
+
+test("with no field named, a change to only the proposed project name or id enables Fix and resubmit (both travel under target)", async () => {
+  for (const edit of [
+    {
+      flightdeckDraft: {
+        label: "Payroll approvals",
+        workspaceHint: "Hint Workspace te-ops",
+      },
+    },
+    {
+      onboarding: {
+        ...readyProject().onboarding,
+        proposedProjectId: "payroll-approvals",
+      },
+    },
+  ] as const) {
+    const h = harness({ features: resubmitFeatures(false) });
+    await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+    withNote(h, []);
+    h.tick(61_000);
+    const answered = await h.status();
+    // The form compares the same fields the server does.
+    const before = await fieldDigests(h.fake.submits[0].payload);
+    expect(answered.operation!.sentDigests).toEqual(before);
+    h.fake.onSubmit = filedAs(os.otherSubmissionId);
+    h.setProject(readyProject({ revision: 8, ...edit }));
+    const sent = await h.route.POST(sendTo("hr-de", 8), ATLAS_ID);
+    expect(sent.status).toBe(202);
+    expect(
+      resubmitChanged(
+        answered.operation!.sentDigests!,
+        await fieldDigests(h.fake.submits[1].payload),
+        undefined,
+      ),
+    ).toBe(true);
+  }
+});
+
+test("the reviewer's named fields still gate the next resubmission after FlightDeck refused to link one", async () => {
+  const h = harness({ features: resubmitFeatures(true) });
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  withNote(h, ["site"]);
+  h.tick(61_000);
+  await h.status();
+  h.fake.onSubmit = async () => ({
+    state: "already_superseded",
+    submissionId: os.otherSubmissionId,
+  });
+  h.setProject(readyProject({ revision: 8, location: "Berlin, Germany" }));
+  expect((await h.route.POST(sendTo("hr-de", 8), ATLAS_ID)).status).toBe(409);
+  // The refused attempt cleared the reviewer's note; the site correction is
+  // reverted and only a field the reviewer did not name changed.
+  h.fake.onSubmit = filedAs("aabbccddeeff001122334455");
+  h.setProject(readyProject({ revision: 9, priority: "Normal" }));
+  const unnamed = await h.route.POST(sendTo("hr-de", 9), ATLAS_ID);
+  expect(unnamed.status).toBe(409);
+  expect(await unnamed.json()).toMatchObject({
+    code: "nothing_changed",
+    fields: ["site"],
+  });
+  expect(h.fake.submits).toHaveLength(2);
+  // The named field changed: the next resubmission goes (Atlas link only).
+  h.setProject(readyProject({ revision: 10, location: "Hamburg, Germany" }));
+  expect((await h.route.POST(sendTo("hr-de", 10), ATLAS_ID)).status).toBe(
+    202,
+  );
+  expect(h.store.ops()[2]).toMatchObject({
+    state: "filed",
+    supersedes_send_id: h.store.ops()[0].id,
+  });
 });
 
 test("a resubmission FlightDeck links carries supersedes and reads back as linked in FlightDeck", async () => {

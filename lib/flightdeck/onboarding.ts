@@ -1038,22 +1038,33 @@ const POINTER_PATHS: Record<FieldPointer, string> = {
   accessRequested: "facts.accessRequested",
   coworkRequested: "cowork.requested",
 };
-export type FieldDigests = Partial<Record<FieldPointer, string>>;
-/** One sha256 per reviewer-pointable field of a payload (onb-resubmit-
- * atlas): what 'Fix and resubmit' compares against, so a resubmission is
- * possible once a field the reviewer named changed. Digests, not values:
- * Atlas keeps no second copy of the text it sent. */
+/** What 'Fix and resubmit' compares (onb-resubmit-atlas): every
+ * reviewer-pointable field, plus the proposed OS project name and id, which
+ * travel under `target` but are never pointed at. Those two count only when
+ * the reviewer named no field. */
+const DIGEST_PATHS = {
+  ...POINTER_PATHS,
+  targetLabel: "target.label",
+  targetProjectId: "target.projectId",
+} as const;
+export type DigestField = keyof typeof DIGEST_PATHS;
+export const DIGEST_FIELDS = Object.keys(DIGEST_PATHS) as DigestField[];
+export type FieldDigests = Partial<Record<DigestField, string>>;
+/** One sha256 per compared field of a payload (DIGEST_PATHS): what 'Fix
+ * and resubmit' compares against, so a resubmission is possible once a
+ * field the reviewer named changed. Digests, not values: Atlas keeps no
+ * second copy of the text it sent. */
 export async function fieldDigests(
   payload: ProjectOnboardingPayload,
-): Promise<Record<FieldPointer, string>> {
-  const out = {} as Record<FieldPointer, string>;
-  for (const pointer of FIELD_POINTERS) {
-    const value = at(payload, POINTER_PATHS[pointer]);
+): Promise<Record<DigestField, string>> {
+  const out = {} as Record<DigestField, string>;
+  for (const field of DIGEST_FIELDS) {
+    const value = at(payload, DIGEST_PATHS[field]);
     const bytes = new TextEncoder().encode(
       stableJson(value === undefined ? null : value),
     );
     const digest = await crypto.subtle.digest("SHA-256", bytes);
-    out[pointer] = [...new Uint8Array(digest)]
+    out[field] = [...new Uint8Array(digest)]
       .map((b) => b.toString(16).padStart(2, "0"))
       .join("");
   }
@@ -1073,7 +1084,8 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 /** Whether 'Fix and resubmit' may go: a field the reviewer named changed
- * since the earlier send, or, when the reviewer named none, any field.
+ * since the earlier send, or, when the reviewer named none, any compared
+ * field (the proposed project name and id included).
  * `sent` null (a send from before digests were kept, or one Atlas
  * adopted): Atlas cannot tell, so only the server's revision check applies.
  * Fails closed on a sent digest that is missing for a field it compares. */
@@ -1083,7 +1095,9 @@ export function resubmitChanged(
   named: readonly FieldPointer[] | undefined,
 ): boolean {
   if (!sent) return true;
-  const compared = named?.length ? named : FIELD_POINTERS;
+  const compared: readonly DigestField[] = named?.length
+    ? named
+    : DIGEST_FIELDS;
   return compared.some(
     (p) =>
       sent[p] !== undefined &&
@@ -1092,7 +1106,7 @@ export function resubmitChanged(
   );
 }
 export const fieldDigestsSchema = z.record(
-  z.enum(FIELD_POINTERS),
+  z.enum(DIGEST_FIELDS as [DigestField, ...DigestField[]]),
   z.string().regex(/^[a-f0-9]{64}$/),
 );
 const isFieldPointer = (value: unknown): value is FieldPointer =>

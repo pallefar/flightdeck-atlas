@@ -32,6 +32,8 @@ import {
 import {
   buildOnboardingPayload,
   fieldDigests,
+  FIELD_POINTERS,
+  type FieldPointer,
   fieldDigestsSchema,
   type FieldDigests,
   lockedStates,
@@ -146,6 +148,9 @@ type OperationRow = {
   supersedes_send_id?: string | null;
   /** That send's FlightDeck id, when this send named it in supersedes. */
   supersedes_submission_id?: string | null;
+  /** The reviewer's pointers this resubmission was compared against
+   * (JSON); null when none were named. */
+  compare_fields?: string | null;
 };
 type LinkRow = {
   installation_id: string;
@@ -361,7 +366,33 @@ async function resubmitTarget(db: OnboardDb, atlasProjectId: string) {
     )
     .bind(pred.id, ...LINEAGE_REFUSED)
     .first();
-  return { pred, linkRefused: !!refused };
+  return { pred, linkRefused: !!refused, named: await namedFieldsOf(db, pred) };
+}
+/** The fields the reviewer named for send `pred`. Its note carries them
+ * until a resubmission is reserved (clearProjectNotes then deletes the
+ * note); after that, the latest resubmission of it kept them
+ * (compare_fields), so a refused attempt never relaxes the gate. */
+async function namedFieldsOf(
+  db: OnboardDb,
+  pred: OperationRow,
+): Promise<FieldPointer[] | undefined> {
+  const fromNote = (await decisionNoteOf(db, pred.id)).fields;
+  if (fromNote?.length) return fromNote;
+  const kept = await db
+    .prepare(
+      "SELECT compare_fields FROM atlas_flightdeck_operations WHERE supersedes_send_id=? ORDER BY rowid DESC LIMIT 1",
+    )
+    .bind(pred.id)
+    .first<{ compare_fields: string | null }>();
+  if (!kept?.compare_fields) return undefined;
+  try {
+    const parsed = z
+      .array(z.enum(FIELD_POINTERS))
+      .safeParse(JSON.parse(kept.compare_fields));
+    return parsed.success && parsed.data.length ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
 }
 /** The digests a send stored, or null when it has none it can vouch for. */
 function sentDigestsOf(op: OperationRow): FieldDigests | null {
@@ -1201,8 +1232,11 @@ export function createOnboardRoute<A extends OnboardAccess>(
       const reuse = existing?.state === "reserved" ? existing : null;
       let envelope: OnboardingEnvelope;
       let digests: FieldDigests | null = null;
-      let resubmits: { sendId: string; submissionId: string | null } | null =
-        null;
+      let resubmits: {
+        sendId: string;
+        submissionId: string | null;
+        named: FieldPointer[] | null;
+      } | null = null;
       if (reuse) {
         // A retry resends the reserved request byte for byte: same key,
         // destination, revision, requester and text, whatever the project
@@ -1308,7 +1342,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
           // Enabled once a field the reviewer named changed (any field when
           // it named none). A send without digests (older, or adopted) needs
           // at least a later revision. Refused before anything is reserved.
-          const named = (await decisionNoteOf(db, target.pred.id)).fields;
+          const named = target.named;
           const sent = sentDigestsOf(target.pred);
           const changed = sent
             ? resubmitChanged(sent, digests, named)
@@ -1322,7 +1356,11 @@ export function createOnboardRoute<A extends OnboardAccess>(
                 : "Change the draft before you resubmit: FlightDeck asked for more information. Nothing was sent.",
               named?.length ? { fields: named } : {},
             );
-          resubmits = { sendId: target.pred.id, submissionId: supersedes };
+          resubmits = {
+            sendId: target.pred.id,
+            submissionId: supersedes,
+            named: named?.length ? named : null,
+          };
         }
         envelope = onboardingEnvelope(built.data);
         // The destination comes from this request only, never from saved
@@ -1384,6 +1422,9 @@ export function createOnboardRoute<A extends OnboardAccess>(
           field_digests: digests ? JSON.stringify(digests) : null,
           supersedes_send_id: resubmits?.sendId ?? null,
           supersedes_submission_id: resubmits?.submissionId ?? null,
+          compare_fields: resubmits?.named
+            ? JSON.stringify(resubmits.named)
+            : null,
         };
         // Reserved BEFORE the remote call. The partial unique index allows
         // one open send per project, so a second tab loses here. And only

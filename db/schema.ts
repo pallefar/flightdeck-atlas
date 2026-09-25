@@ -210,6 +210,11 @@ export const flightdeckOperations = sqliteTable(
     /** The earlier request's FlightDeck id this send named in
      * payload.supersedes; null when FlightDeck was not asked to link. */
     supersedesSubmissionId: text("supersedes_submission_id"),
+    /** The reviewer's field pointers (JSON) this resubmission was compared
+     * against; null when none were named. Kept apart from the note, which
+     * the send clears, so a refused attempt leaves the next one gated by
+     * the same fields. */
+    compareFields: text("compare_fields"),
   },
   (t) => [
     index("idx_atlas_fd_operations_project").on(t.atlasProjectId, t.updatedAt),
