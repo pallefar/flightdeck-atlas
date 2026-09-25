@@ -5,6 +5,7 @@
 // response or error, stored, or sent to the browser.
 import {
   emptyContext,
+  osAppsDirectorySchema,
   osAppsResponseSchema,
   osIdSchema,
   osNotFoundSchema,
@@ -16,6 +17,7 @@ import {
   visibleProjects,
   type ContextFailureState,
   type ContextView,
+  type OsAppsDirectory,
   type OsAppsResponse,
   type OsProjectsResponse,
   type OsSelection,
@@ -48,6 +50,13 @@ export interface ContextReader {
   /** The sub-apps enabled in that workspace (Atlas's 9-dot menu). Optional so
    * readers that only serve the context switcher need not implement it. */
   apps?(workspaceId: string): Promise<ContextResult<OsAppsResponse>>;
+  /** The apps directory for the SELECTED project (OS apps-29). Optional for
+   * the same reason. Only read once whoami advertises the contract. */
+  appsDirectory?(
+    workspaceId: string,
+    projectId: string,
+    locale: "en" | "de",
+  ): Promise<ContextResult<OsAppsDirectory>>;
 }
 
 export const WORKSPACES_PATH = "/api/inbound/v1/context/workspaces";
@@ -55,6 +64,12 @@ export const projectsPath = (workspaceId: string) =>
   `${WORKSPACES_PATH}/${encodeURIComponent(workspaceId)}/projects`;
 export const appsPath = (workspaceId: string) =>
   `${WORKSPACES_PATH}/${encodeURIComponent(workspaceId)}/apps`;
+export const appsDirectoryPath = (
+  workspaceId: string,
+  projectId: string,
+  locale: "en" | "de",
+) =>
+  `${appsPath(workspaceId)}/directory?${new URLSearchParams({ projectId, locale })}`;
 const TIMEOUT_MS = 5000;
 const MAX_BODY_CHARS = 1_000_000;
 // Same charset the OS enforces before it verifies a credential.
@@ -220,6 +235,27 @@ export function createContextClient(
         ? { state: "ok", data: parsed.data }
         : { state: "invalid_response" };
     },
+    async appsDirectory(workspaceId, projectId, locale) {
+      if (
+        !osIdSchema.safeParse(workspaceId).success ||
+        !osIdSchema.safeParse(projectId).success
+      )
+        return { state: "workspace_not_found" };
+      const result = await get(
+        appsDirectoryPath(workspaceId, projectId, locale),
+        true,
+      );
+      if (result.state !== "ok") return result;
+      const parsed = osAppsDirectorySchema.safeParse(result.body);
+      // The OS echoes what the answer is for; an answer for another
+      // workspace, project or locale is refused, never shown as this one.
+      return parsed.success &&
+        parsed.data.workspaceId === workspaceId &&
+        parsed.data.projectId === projectId &&
+        parsed.data.locale === locale
+        ? { state: "ok", data: parsed.data }
+        : { state: "invalid_response" };
+    },
   };
 }
 
@@ -310,10 +346,19 @@ async function projectsFor(
 export function createCachedReader(
   reader: ContextReader,
   cache: Map<string, { until: number; value?: ContextResult<unknown> }>,
-  options: { fresh?: boolean; ttlMs?: number; now?: () => number } = {},
+  options: {
+    fresh?: boolean;
+    ttlMs?: number;
+    now?: () => number;
+    /** Namespaces every key (apps-32: OS origin + credential fingerprint).
+     * When set, a refused credential (401/403) deletes EVERY key under it. */
+    keyPrefix?: string;
+  } = {},
 ): ContextReader {
-  const ttlMs = options.ttlMs ?? 10_000,
-    now = options.now || Date.now;
+  // Nothing is ever served older than CACHE_MAX_AGE_MS, whatever is asked.
+  const ttlMs = Math.min(options.ttlMs ?? 10_000, CACHE_MAX_AGE_MS),
+    now = options.now || Date.now,
+    prefix = options.keyPrefix ?? "";
   async function cached<T>(
     key: string,
     load: () => Promise<ContextResult<T>>,
@@ -325,14 +370,17 @@ export function createCachedReader(
         state: "rate_limited",
         retryAfter: Math.max(1, Math.ceil((blocked.until - started) / 1000)),
       };
-    const hit = cache.get(key);
+    const hit = cache.get(prefix + key);
     if (!options.fresh && hit?.value && hit.until > started)
       return hit.value as ContextResult<T>;
     const value = await load();
     if (cache.size > 200) cache.clear();
-    if (value.state === "ok") cache.set(key, { until: now() + ttlMs, value });
+    if (value.state === "ok")
+      cache.set(prefix + key, { until: now() + ttlMs, value });
+    else if (prefix && value.state === "unauthorized")
+      clearCredential(cache, prefix);
     else {
-      cache.delete(key);
+      cache.delete(prefix + key);
       if (value.state === "rate_limited")
         cache.set(RATE_LIMIT_KEY, {
           until: now() + (value.retryAfter ?? 60) * 1000,
@@ -348,9 +396,35 @@ export function createCachedReader(
           apps: (id: string) => cached(appsPath(id), () => reader.apps!(id)),
         }
       : {}),
+    ...(reader.appsDirectory
+      ? {
+          appsDirectory: (id: string, project: string, locale: "en" | "de") =>
+            cached(appsDirectoryPath(id, project, locale), () =>
+              reader.appsDirectory!(id, project, locale),
+            ),
+        }
+      : {}),
   };
 }
 const RATE_LIMIT_KEY = "rate-limit";
+/** The oldest a cached OS answer may be when it is served. */
+export const CACHE_MAX_AGE_MS = 5 * 60_000;
+/** Deletes every cache key under one credential's prefix (apps-32: a
+ * 401/403 or revocation must not leave any of its lists behind). The
+ * credential-wide rate-limit block is not under a prefix and is kept. */
+export function clearCredential(
+  cache: Map<string, unknown>,
+  prefix: string,
+): number {
+  if (!prefix) return 0;
+  let removed = 0;
+  for (const key of [...cache.keys()])
+    if (key.startsWith(prefix)) {
+      cache.delete(key);
+      removed++;
+    }
+  return removed;
+}
 
 // ── submit:proposal — the project-onboarding kind (plan §4.3, §4.6) ───────
 

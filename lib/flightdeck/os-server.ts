@@ -20,6 +20,7 @@ import {
   type FeatureReader,
   type InboundFeatures,
 } from "./features";
+import { createDirectoryOs } from "./apps-directory-route";
 
 // One cache per isolate for the context lists and for the credential-wide
 // rate limit, shared by the context and onboarding routes: they spend the
@@ -40,6 +41,13 @@ export function osReader(fresh: boolean) {
   return c
     ? createCachedReader(createContextClient(c), cache, { fresh })
     : null;
+}
+/** The apps directory reader (apps-32), or null when FlightDeck is not
+ * configured. Its keys carry the OS origin and a one-way fingerprint of the
+ * credential, in the same isolate cache so it honours the same rate limit. */
+export function osDirectory() {
+  const c = config();
+  return c ? createDirectoryOs({ config: c, cache }) : null;
 }
 export function osSubmissions() {
   const c = config();

@@ -1,0 +1,35 @@
+{
+  "contract": 1,
+  "workspaceId": "te-ops",
+  "projectId": "rhineland-rollout",
+  "locale": "de",
+  "apps": [
+    {
+      "id": "maps",
+      "label": "Maps",
+      "icon": "🗺️",
+      "version": "0.2.2",
+      "category": "analytics",
+      "availability": "available",
+      "workspaceStatus": "enabled",
+      "path": "/console/apps/maps",
+      "accessCheckedOnOpen": true,
+      "requestAccessEnabled": false,
+      "tagline": "Tagline (synthetisches maps-Fixture)",
+      "releaseRevision": 1
+    },
+    {
+      "id": "knowledge-guardian",
+      "label": "Knowledge Guardian",
+      "icon": "🛡️",
+      "version": "0.1.0",
+      "category": "knowledge",
+      "availability": "available",
+      "workspaceStatus": "needs-function-enable",
+      "accessCheckedOnOpen": true,
+      "requestAccessEnabled": false,
+      "tagline": "Tagline (synthetisches knowledge-guardian-Fixture)",
+      "releaseRevision": 1
+    }
+  ]
+}
