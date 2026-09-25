@@ -6,6 +6,7 @@ import {
   type ProjectFields,
   type ProjectEvent,
 } from "./projects";
+import { onboardingSchema } from "./flightdeck/onboarding";
 export function database() {
   if (!env.DB)
     throw new Error(
@@ -45,6 +46,33 @@ export async function readFields(request: Request) {
     updateNote:
       typeof body.updateNote === "string" ? body.updateNote.trim() : "",
   };
+}
+/** A field-scoped save: `{ scope: "onboarding", baseRevision, onboarding }`.
+ * Null when the body names no scope, so it is an ordinary whole-project save.
+ * Anything else in a scoped body is ignored and never saved. */
+export async function readScopedSave(request: Request) {
+  if (!request.headers.get("content-type")?.includes("application/json"))
+    return null;
+  const raw = await request.clone().text();
+  if (raw.length > 100_000) return null;
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!body || typeof body !== "object" || !("scope" in body)) return null;
+  const { scope, baseRevision, onboarding } = body as Record<string, unknown>;
+  if (scope !== "onboarding")
+    throw new Error("Only the onboarding details can be saved on their own.");
+  if (!Number.isInteger(baseRevision) || (baseRevision as number) < 1)
+    throw new Error("A base project revision is required.");
+  const parsed = onboardingSchema.safeParse(onboarding);
+  if (!parsed.success)
+    throw new Error(
+      parsed.error.issues[0]?.message || "Check the onboarding details.",
+    );
+  return { onboarding: parsed.data, baseRevision: baseRevision as number };
 }
 export function fromRow(row: Record<string, unknown>): Project {
   return {

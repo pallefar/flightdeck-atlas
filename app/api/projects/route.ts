@@ -90,6 +90,7 @@ export async function POST(request: Request) {
           user,
           JSON.stringify({
             ...fields,
+            onboardingRevision: 1,
             tasks: project.tasks,
             activity: project.activity,
           }),
@@ -116,6 +117,7 @@ export async function POST(request: Request) {
       {
         project: {
           ...project,
+          onboardingRevision: 1,
           canShare: true,
           canComment: true,
           canEdit: canChangeProject(auth.access, user),

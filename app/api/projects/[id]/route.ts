@@ -15,6 +15,7 @@ import {
   sameOrigin,
   readFields,
   recordChanges,
+  readScopedSave,
 } from "@/lib/server-projects";
 import { projectFor, activeProjectPeople } from "@/lib/project-access";
 import {
@@ -22,9 +23,10 @@ import {
   deleteProject,
   draftHeld,
 } from "@/lib/flightdeck/onboard-route";
-import { draftEdited } from "@/lib/flightdeck/onboarding";
+import { draftEdited, type OnboardingDraft } from "@/lib/flightdeck/onboarding";
+import type { AccessProfile } from "@/lib/access-policy";
 import { applyWorkRules, stampTimeEntries } from "@/lib/work-management";
-import { projectSchema } from "@/lib/projects";
+import { projectSchema, type Project } from "@/lib/projects";
 export const dynamic = "force-dynamic";
 export async function DELETE(
   request: Request,
@@ -80,6 +82,13 @@ export async function PUT(
   const auth = await authorize("projects.read");
   if (auth.error) return auth.error;
   const { id } = await params;
+  let scoped;
+  try {
+    scoped = await readScopedSave(request);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+  if (scoped) return saveOnboarding(auth.access, id, scoped);
   let fields, revision, updateNote;
   try {
     ({ fields, revision, updateNote } = await readFields(request));
@@ -163,7 +172,14 @@ export async function PUT(
         400,
       );
     }
-    const recorded = processed.recorded;
+    const recorded = {
+      ...processed.recorded,
+      // Server-kept, whatever the client sent: an onboarding-scoped save
+      // relies on it to know whether its base has seen the latest onboarding.
+      onboardingRevision: onboardingChanged(previous, processed.recorded)
+        ? previous.revision + 1
+        : previous.onboardingRevision,
+    };
     if (recorded.tasks.length > 200)
       return json(
         {
@@ -235,5 +251,100 @@ export async function GET(
       : json({ error: "Project not found or access changed." }, 404);
   } catch {
     return json({ error: "Project could not be loaded." }, 503);
+  }
+}
+
+const onboardingChanged = (
+  previous: Pick<Project, "onboarding">,
+  next: Pick<Project, "onboarding">,
+) =>
+  JSON.stringify(previous.onboarding ?? null) !==
+  JSON.stringify(next.onboarding ?? null);
+
+/** An onboarding-scoped save (the onboarding form's autosave): only the
+ * onboarding field is written, so a save based on an older revision merges
+ * over other people's edits to the rest of the project instead of
+ * overwriting them. It is refused when the onboarding field itself changed
+ * after its base, or when that cannot be told (a project saved before the
+ * server kept `onboardingRevision`): the conflict fails closed. Same rights
+ * as a whole-project save, and a draft FlightDeck may hold stays as sent. */
+async function saveOnboarding(
+  access: AccessProfile,
+  id: string,
+  {
+    onboarding,
+    baseRevision,
+  }: { onboarding: OnboardingDraft; baseRevision: number },
+) {
+  try {
+    const db = database();
+    const authorized = await projectFor(access, id);
+    if (!authorized) return json({ error: "Project not found." }, 404);
+    if (!authorized.rights.edit)
+      return json(
+        { error: "You do not have permission to change this project." },
+        403,
+      );
+    const previous = authorized.project;
+    const seen =
+      previous.revision === baseRevision ||
+      (previous.onboardingRevision !== undefined &&
+        previous.onboardingRevision <= baseRevision);
+    if (baseRevision > previous.revision || !seen)
+      return json(
+        {
+          error:
+            "The onboarding details changed in another session. Reload before editing.",
+          code: "onboarding_changed",
+        },
+        409,
+      );
+    if (await draftHeld(db, id))
+      return json(
+        {
+          error:
+            "FlightDeck may hold this project's onboarding draft, so it stays as it was sent. Nothing was saved.",
+          code: "draft_locked",
+        },
+        409,
+      );
+    const updatedAt = new Date().toISOString();
+    const changed = onboardingChanged(previous, { onboarding });
+    const stored = JSON.parse(authorized.row.data as string);
+    const data = {
+      ...stored,
+      onboarding,
+      onboardingRevision: changed
+        ? previous.revision + 1
+        : previous.onboardingRevision,
+      activity: recordChanges(
+        { ...previous, onboarding },
+        previous,
+        "",
+        updatedAt,
+      ).activity.slice(-200),
+    };
+    const result = await db
+      .prepare(
+        "UPDATE atlas_projects SET data = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND revision = ?" +
+          DRAFT_NOT_HELD_SQL,
+      )
+      .bind(JSON.stringify(data), updatedAt, id, previous.revision)
+      .run();
+    if (!result.meta.changes)
+      return json(
+        {
+          error:
+            "This project changed in another session. Reload before editing.",
+        },
+        409,
+      );
+    return json({ project: (await projectFor(access, id))!.project });
+  } catch {
+    console.error("Atlas onboarding update unavailable");
+    return json(
+      { error: "Your changes could not be saved. Please try again." },
+      503,
+    );
   }
 }
