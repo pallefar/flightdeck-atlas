@@ -98,6 +98,9 @@ export function createDirectoryOs(deps: {
   fetch?: Fetcher;
   now?: () => number;
   ttlMs?: number;
+  /** Called when the OS refuses the credential, so every other reader of
+   * the isolate drops what it holds for it (lib/flightdeck/os-wiring.ts). */
+  onRefused?: () => void;
 }): DirectoryOs {
   const now = deps.now || Date.now;
   const client = { ...(deps.fetch ? { fetch: deps.fetch } : {}) };
@@ -120,6 +123,7 @@ export function createDirectoryOs(deps: {
       })();
       if (read.state === "unauthorized" || read.state === "invalid_response") {
         clearCredential(deps.cache, p);
+        deps.onRefused?.();
         return { state: read.state };
       }
       if (read.state !== "ok") return { state: read.state };
@@ -146,6 +150,7 @@ export function createDirectoryOs(deps: {
           keyPrefix: await keyPrefix(),
           ttlMs: deps.ttlMs ?? DIRECTORY_TTL_MS,
           now,
+          onRefused: deps.onRefused,
         },
       );
       return reader.appsDirectory!(workspaceId, projectId, locale);

@@ -6,7 +6,9 @@
 // FAILS CLOSED: any failed fetch clears the list (a stale list would present
 // old state as current). Switching selection clears it at once, a late
 // answer to an earlier request is dropped, and an answer whose echoed
-// workspace/project is not the selection asked for is never shown.
+// workspace/project is not the selection asked for is never shown. The hook
+// also masks, during render, any snapshot stamped for another selection, so
+// not even the first render after a switch shows the old list.
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import type { OsSelection } from "./context";
 import type { DirectoryView } from "./apps-directory-route";
@@ -18,8 +20,15 @@ export type DirectorySnapshot = {
   data: DirectoryView | null;
   /** The route's state, "error" when it gave none, null before a load. */
   state: string | null;
+  /** The selection this snapshot belongs to (null: none). */
+  selectionKey: string | null;
 };
-const EMPTY: DirectorySnapshot = { loading: false, data: null, state: null };
+const EMPTY: DirectorySnapshot = {
+  loading: false,
+  data: null,
+  state: null,
+  selectionKey: null,
+};
 const keyOf = (s: { osWorkspaceId: string; osProjectId: string | null }) =>
   `${s.osWorkspaceId}\u0000${s.osProjectId ?? ""}`;
 
@@ -52,7 +61,7 @@ export function createDirectoryLoader(
       // Another selection: never keep the old list on screen meanwhile.
       if (key !== shownKey) {
         shownKey = key;
-        set({ loading: true, data: null, state: null });
+        set({ loading: true, data: null, state: null, selectionKey: key });
       } else set({ ...snap, loading: true });
       let view: DirectoryView | null = null;
       let state = "error";
@@ -73,15 +82,21 @@ export function createDirectoryLoader(
         view = null;
       }
       if (mine !== seq) return; // a newer request owns the screen
-      set({ loading: false, data: view, state });
+      set({ loading: false, data: view, state, selectionKey: key });
     },
   };
 }
 
+export type DirectoryLoader = ReturnType<typeof createDirectoryLoader>;
+
 /** The directory for the selected OS workspace + project; refetches when
- * the selection changes. `data` is null whenever the last fetch failed. */
-export function useAppsDirectory(selection: OsSelection | null) {
-  const loader = useMemo(() => createDirectoryLoader(), []);
+ * the selection changes. `data` is null whenever the last fetch failed.
+ * `injected` is for the spec only; the app passes nothing. */
+export function useAppsDirectory(
+  selection: OsSelection | null,
+  injected?: DirectoryLoader,
+) {
+  const loader = useMemo(() => injected ?? createDirectoryLoader(), [injected]);
   const snap = useSyncExternalStore(
     loader.subscribe,
     loader.snapshot,
@@ -93,8 +108,17 @@ export function useAppsDirectory(selection: OsSelection | null) {
     if (ws) void loader.load({ osWorkspaceId: ws, osProjectId: project });
     else loader.reset();
   }, [loader, ws, project]);
+  // The effect above clears the store only AFTER this render has committed,
+  // so the render itself must not show a list for any other selection
+  // (switching project or workspace, or clearing the selection).
+  const key = ws ? keyOf({ osWorkspaceId: ws, osProjectId: project }) : null;
+  const shown: DirectorySnapshot = !key
+    ? EMPTY
+    : snap.selectionKey === key
+      ? snap
+      : { loading: true, data: null, state: null, selectionKey: key };
   return {
-    ...snap,
+    ...shown,
     reload: () =>
       ws ? loader.load({ osWorkspaceId: ws, osProjectId: project }) : undefined,
   };

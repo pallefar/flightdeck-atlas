@@ -353,6 +353,10 @@ export function createCachedReader(
     /** Namespaces every key (apps-32: OS origin + credential fingerprint).
      * When set, a refused credential (401/403) deletes EVERY key under it. */
     keyPrefix?: string;
+    /** Called once the OS has refused the credential (401/403), so every
+     * OTHER reader of the same credential drops what it holds too (apps-32,
+     * lib/flightdeck/os-wiring.ts). */
+    onRefused?: () => void;
   } = {},
 ): ContextReader {
   // Nothing is ever served older than CACHE_MAX_AGE_MS, whatever is asked.
@@ -377,9 +381,11 @@ export function createCachedReader(
     if (cache.size > 200) cache.clear();
     if (value.state === "ok")
       cache.set(prefix + key, { until: now() + ttlMs, value });
-    else if (prefix && value.state === "unauthorized")
-      clearCredential(cache, prefix);
-    else {
+    else if (value.state === "unauthorized") {
+      if (prefix) clearCredential(cache, prefix);
+      else cache.delete(key);
+      options.onRefused?.();
+    } else {
       cache.delete(prefix + key);
       if (value.state === "rate_limited")
         cache.set(RATE_LIMIT_KEY, {
@@ -420,6 +426,21 @@ export function clearCredential(
   let removed = 0;
   for (const key of [...cache.keys()])
     if (key.startsWith(prefix)) {
+      cache.delete(key);
+      removed++;
+    }
+  return removed;
+}
+/** Deletes every answer in an isolate's cache except the credential-wide
+ * rate-limit block (apps-32). The isolate cache holds answers for ONE
+ * configured credential only (lib/flightdeck/os-server.ts reads it from the
+ * Worker environment, which is fixed per isolate), so once the OS refuses
+ * it, nothing in the cache may be served any more. Fails closed: the worst
+ * case is one extra read per list. */
+export function forgetCredential(cache: Map<string, unknown>): number {
+  let removed = 0;
+  for (const key of [...cache.keys()])
+    if (key !== RATE_LIMIT_KEY) {
       cache.delete(key);
       removed++;
     }
@@ -617,7 +638,11 @@ export type WhoamiRead =
 export function createWhoamiReader(
   config: ContextConfig,
   cache: Map<string, { until: number; value?: ContextResult<unknown> }>,
-  options: ClientOptions & { now?: () => number } = {},
+  options: ClientOptions & {
+    now?: () => number;
+    /** Called on a 401 or 403: the OS refused the credential (apps-32). */
+    onRefused?: () => void;
+  } = {},
 ): () => Promise<WhoamiRead> {
   const exchange = exchanger(config, options);
   const now = options.now || Date.now;
@@ -633,6 +658,8 @@ export function createWhoamiReader(
       });
       return { state: "rate_limited" };
     }
+    if (response.status === 401 || response.status === 403)
+      options.onRefused?.();
     if (response.status === 401) return { state: "unauthorized" };
     return response.status === 200 && isJson(response)
       ? { state: "ok", body }
@@ -644,7 +671,7 @@ export function createWhoamiReader(
 export function createWhoamiLoader(
   config: ContextConfig,
   cache: Map<string, { until: number; value?: ContextResult<unknown> }>,
-  options: ClientOptions & { now?: () => number } = {},
+  options: Parameters<typeof createWhoamiReader>[2] = {},
 ): () => Promise<unknown> {
   const read = createWhoamiReader(config, cache, options);
   return async () => {
@@ -658,7 +685,12 @@ export function createWhoamiLoader(
 export function createGuardedSubmissions(
   client: SubmissionClient,
   cache: Map<string, { until: number; value?: ContextResult<unknown> }>,
-  options: { now?: () => number } = {},
+  options: {
+    now?: () => number;
+    /** Called when the OS refuses the credential (401) or its scope (403),
+     * so the other readers drop what they cached for it (apps-32). */
+    onRefused?: () => void;
+  } = {},
 ): SubmissionClient {
   const now = options.now || Date.now;
   async function guard<T extends { state: string }>(
@@ -672,6 +704,8 @@ export function createGuardedSubmissions(
         retryAfter: Math.max(1, Math.ceil((blocked.until - started) / 1000)),
       };
     const value = await load();
+    if (value.state === "unauthorized" || value.state === "refused")
+      options.onRefused?.();
     if (value.state === "rate_limited")
       cache.set(RATE_LIMIT_KEY, {
         until:

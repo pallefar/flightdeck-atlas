@@ -14,7 +14,13 @@ import {
   credentialFingerprint,
   DIRECTORY_MAX_AGE_MS,
 } from "../lib/flightdeck/apps-directory-route";
-import { createDirectoryLoader } from "../lib/flightdeck/apps-directory-client";
+import {
+  createDirectoryLoader,
+  useAppsDirectory,
+} from "../lib/flightdeck/apps-directory-client";
+import { createOsWiring } from "../lib/flightdeck/os-wiring";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 // apps-32: Atlas's consumer of the OS apps DIRECTORY (OS apps-29,
 // GET /api/inbound/v1/context/workspaces/:ws/apps/directory?projectId&locale).
@@ -493,4 +499,192 @@ test.describe("the client loader", () => {
     await loader.load({ osWorkspaceId: "te-ops", osProjectId: "p1" });
     expect(loader.snapshot().data).toBeNull();
   });
+});
+
+// Review round 2: ONE refusal of the credential, seen by ANY reader of the
+// isolate (context lists, whoami, directory, submissions), must stop every
+// other reader from serving what it cached for that credential.
+test.describe("credential-wide revocation across every reader of the isolate", () => {
+  const config = { baseUrl: OS, token: TOKEN_A };
+  const WORKSPACES = {
+    integrationId: "atlas",
+    workspaces: [{ id: WS, label: "TE Ops", enabled: true, isDefault: true }],
+    generatedAt: "2026-09-26T08:00:00.000Z",
+  };
+  /** A fake OS that answers everything until `revoke(status)`, then refuses
+   * every call with that status. */
+  function revocableOs() {
+    let refusal = 0;
+    const seen: string[] = [];
+    const inner = fakeOs();
+    const fetch = async (url: string, init?: RequestInit) => {
+      seen.push(url);
+      if (refusal) return jsonResponse({ error: "revoked" }, refusal);
+      const u = new URL(url);
+      if (u.pathname === "/api/inbound/v1/context/workspaces")
+        return jsonResponse(WORKSPACES);
+      if (u.pathname === "/api/inbound/v1/submissions")
+        return jsonResponse({ error: "bad" }, 400);
+      void init;
+      return inner.fetch(url);
+    };
+    return { fetch, seen, revoke: (status: number) => (refusal = status) };
+  }
+  const directoryRoute = (wiring: ReturnType<typeof createOsWiring>) =>
+    createAppsDirectoryRoute({
+      authorize: allowed,
+      os: () => wiring.directory(config),
+      origin: () => OS,
+      selection: saved,
+    });
+  const warm = async (wiring: ReturnType<typeof createOsWiring>) => {
+    const first = await body(await directoryRoute(wiring).GET(request("de")));
+    expect(first.state).toBe("ok");
+    expect(first.apps.length).toBeGreaterThan(0);
+  };
+
+  for (const status of [401, 403])
+    test(`a ${status} on the CONTEXT reader stops the cached directory being served`, async () => {
+      const os = revocableOs();
+      const wiring = createOsWiring({ cache: new Map(), fetch: os.fetch });
+      await warm(wiring);
+      os.revoke(status);
+      expect((await wiring.reader(config, true).workspaces()).state).toBe(
+        "unauthorized",
+      );
+      const after = await body(await directoryRoute(wiring).GET(request("de")));
+      expect(after.state).not.toBe("ok");
+      expect(after.apps).toEqual([]);
+    });
+
+  for (const status of [401, 403])
+    test(`a ${status} at the Connections whoami stops the cached directory being served`, async () => {
+      const os = revocableOs();
+      const wiring = createOsWiring({ cache: new Map(), fetch: os.fetch });
+      await warm(wiring);
+      os.revoke(status);
+      expect((await wiring.whoami(config, true)()).state).not.toBe("ok");
+      const after = await body(await directoryRoute(wiring).GET(request("de")));
+      expect(after.state).not.toBe("ok");
+      expect(after.apps).toEqual([]);
+    });
+
+  test("a 401 on the features read (before a send) stops the cached directory being served", async () => {
+    const os = revocableOs();
+    const wiring = createOsWiring({ cache: new Map(), fetch: os.fetch });
+    await warm(wiring);
+    os.revoke(401);
+    await wiring.features(config);
+    const after = await body(await directoryRoute(wiring).GET(request("de")));
+    expect(after.state).not.toBe("ok");
+  });
+
+  test("a refused submission stops the cached directory being served", async () => {
+    const os = revocableOs();
+    const wiring = createOsWiring({ cache: new Map(), fetch: os.fetch });
+    await warm(wiring);
+    os.revoke(401);
+    const sent = await wiring
+      .submissions(config)
+      .readSubmission("0123456789abcdef01234567");
+    expect(sent.state).toBe("unauthorized");
+    const after = await body(await directoryRoute(wiring).GET(request("de")));
+    expect(after.state).not.toBe("ok");
+  });
+
+  test("a refusal at the directory clears the context lists and the kept Connections whoami", async () => {
+    const os = revocableOs();
+    const wiring = createOsWiring({ cache: new Map(), fetch: os.fetch });
+    expect((await wiring.reader(config, false).workspaces()).state).toBe("ok");
+    expect((await wiring.whoami(config, true)()).state).toBe("ok");
+    await warm(wiring);
+    os.revoke(401);
+    // The directory is cached, so read another project to reach the OS.
+    const other = await body(
+      await createAppsDirectoryRoute({
+        authorize: allowed,
+        os: () => wiring.directory(config),
+        origin: () => OS,
+        selection: async () => ({ osWorkspaceId: WS, osProjectId: "other" }),
+      }).GET(request("de")),
+    );
+    expect(other.state).toBe("unauthorized");
+    expect((await wiring.reader(config, false).workspaces()).state).toBe(
+      "unauthorized",
+    );
+    expect((await wiring.whoami(config, false)()).state).toBe("unauthorized");
+  });
+
+  test("the credential-wide rate-limit block survives a revocation", async () => {
+    const cache: Cache = new Map();
+    const os = revocableOs();
+    const wiring = createOsWiring({ cache, fetch: os.fetch });
+    await warm(wiring);
+    cache.set("rate-limit", { until: Date.now() + 60_000 });
+    os.revoke(401);
+    await wiring.reader(config, true).projects(WS).catch(() => undefined);
+    await wiring.whoami(config, true)();
+    expect(cache.has("rate-limit")).toBe(true);
+  });
+});
+
+// Review round 2: the hook must mask, DURING RENDER, a snapshot that belongs
+// to another selection; the passive effect that clears it runs only after
+// that render has committed.
+test.describe("useAppsDirectory masks another selection's list during render", () => {
+  const ok = (ws: string, project: string) =>
+    jsonResponse({
+      state: "ok",
+      workspaceId: ws,
+      projectId: project,
+      locale: "en",
+      apps: [{ id: "maps", label: "Maps" }],
+      retryAfter: null,
+    });
+  function Probe(props: {
+    selection: { osWorkspaceId: string; osProjectId: string | null } | null;
+    loader: ReturnType<typeof createDirectoryLoader>;
+  }) {
+    const d = useAppsDirectory(props.selection, props.loader);
+    return createElement(
+      "pre",
+      null,
+      JSON.stringify({ data: d.data, loading: d.loading, state: d.state }),
+    );
+  }
+  const render = (
+    selection: { osWorkspaceId: string; osProjectId: string | null } | null,
+    loader: ReturnType<typeof createDirectoryLoader>,
+  ) =>
+    JSON.parse(
+      renderToStaticMarkup(createElement(Probe, { selection, loader }))
+        .replace(/^<pre>/, "")
+        .replace(/<\/pre>$/, "")
+        .replace(/&quot;/g, '"'),
+    ) as { data: { workspaceId: string } | null; loading: boolean; state: string | null };
+
+  test("the selection's own list is shown", async () => {
+    const loader = createDirectoryLoader({ fetch: async () => ok("te-ops", "p1") });
+    await loader.load({ osWorkspaceId: "te-ops", osProjectId: "p1" });
+    expect(
+      render({ osWorkspaceId: "te-ops", osProjectId: "p1" }, loader).data
+        ?.workspaceId,
+    ).toBe("te-ops");
+  });
+
+  for (const [label, next] of [
+    ["another project", { osWorkspaceId: "te-ops", osProjectId: "p2" }],
+    ["another workspace", { osWorkspaceId: "hr-de", osProjectId: "p1" }],
+    ["no project", { osWorkspaceId: "te-ops", osProjectId: null }],
+    ["a cleared selection", null],
+  ] as const)
+    test(`switching to ${label} never renders the old list, not even once`, async () => {
+      const loader = createDirectoryLoader({
+        fetch: async () => ok("te-ops", "p1"),
+      });
+      await loader.load({ osWorkspaceId: "te-ops", osProjectId: "p1" });
+      const v = render(next, loader);
+      expect(v.data).toBeNull();
+      expect(v.state).toBeNull();
+    });
 });
