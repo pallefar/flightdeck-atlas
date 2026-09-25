@@ -960,7 +960,16 @@ function onboardDb() {
       string,
       unknown
     >[];
-  return { db, sqlite, ops, links };
+  /** The transition log, as [stage, source, observed_at] per row. */
+  const transitions = () =>
+    (
+      sqlite
+        .prepare(
+          "SELECT stage,source,observed_at FROM atlas_flightdeck_transitions ORDER BY send_id,seq",
+        )
+        .all() as { stage: string; source: string; observed_at: string }[]
+    ).map((t) => [t.stage, t.source, t.observed_at]);
+  return { db, sqlite, ops, links, transitions };
 }
 
 function harness(
@@ -2313,6 +2322,67 @@ test("Linked appears only after read:context confirms the promoted project, then
   await h.status();
   expect(h.fake.calls).toEqual([]);
   expect(h.store.links()).toHaveLength(1);
+});
+
+test("the send and poll paths log each stage once, at the time Atlas saw it, and a project delete takes the log", async () => {
+  const h = harness();
+  const t0 = new Date(Date.parse("2026-09-22T09:00:00.000Z")).toISOString();
+  const after = (ms: number) =>
+    new Date(Date.parse("2026-09-22T09:00:00.000Z") + ms).toISOString();
+  expect((await h.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  expect(h.store.transitions()).toEqual([["submitted", "atlas", t0]]);
+  // Still filed: a read-back that sees no change logs nothing.
+  h.tick(61_000);
+  await h.status();
+  // Promoted but not yet visible to read:context: still "submitted".
+  h.fake.onRead = h.readAs("promoted");
+  h.tick(61_000);
+  await h.status();
+  expect(h.store.transitions()).toEqual([["submitted", "atlas", t0]]);
+  h.fake.projects["hr-de"] = structuredClone(os.context.projectsAfterPromotion);
+  h.tick(61_000);
+  await h.status();
+  h.fake.onRead = h.readAs("setupInProgress");
+  h.tick(61_000);
+  await h.status();
+  // The list's own sweep logs through the same path.
+  h.tick(5 * 60_000);
+  h.fake.onRead = h.readAs("setupComplete");
+  await h.list();
+  expect(h.store.transitions()).toEqual([
+    ["submitted", "atlas", t0],
+    ["linked", "poll", after(183_000)],
+    ["setup-in-progress", "poll", after(244_000)],
+    ["setup-complete", "poll", after(544_000)],
+  ]);
+  expect(await forgetProject(h.store.db, ATLAS_ID)).toMatchObject({
+    operations: 1,
+  });
+  expect(h.store.transitions()).toEqual([]);
+
+  // A send FlightDeck never confirmed, then closed by the Super Admin.
+  const lost = harness();
+  lost.fake.onSubmit = async () => ({ state: "os_unreachable" });
+  await lost.route.POST(sendTo("hr-de"), ATLAS_ID);
+  expect(lost.store.transitions()).toEqual([["not-confirmed", "atlas", t0]]);
+  lost.tick(1_000);
+  const seen = await lost.status(false);
+  expect((await lost.close(seen)).status).toBe(200);
+  expect(lost.store.transitions()).toEqual([
+    ["not-confirmed", "atlas", t0],
+    ["closed", "atlas", after(1_000)],
+  ]);
+
+  // Declined, then a late read-back that still says filed: no step back.
+  const declined = harness();
+  await declined.route.POST(sendTo("hr-de"), ATLAS_ID);
+  declined.fake.onRead = declined.readAs("needsMoreInfo");
+  declined.tick(61_000);
+  await declined.status();
+  expect(declined.store.transitions()).toEqual([
+    ["submitted", "atlas", t0],
+    ["needs-more-info", "poll", after(61_000)],
+  ]);
 });
 
 test("no link without the OS instanceId, and never onto an OS project another Atlas project holds", async () => {

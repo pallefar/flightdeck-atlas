@@ -5,6 +5,7 @@ import {
   integer,
   index,
   uniqueIndex,
+  check,
 } from "drizzle-orm/sqlite-core";
 export const projects = sqliteTable(
   "atlas_projects",
@@ -189,6 +190,32 @@ export const flightdeckOperations = sqliteTable(
     uniqueIndex("uniq_atlas_fd_operations_open")
       .on(t.atlasProjectId)
       .where(sql`state IN ('reserved','filed','promoted','linked')`),
+  ],
+);
+/** The transition log of a send (plan 2026-09-25 §7): one row per stage
+ * Atlas SAW the send move to, numbered per send. `observed_at` means "seen
+ * by Atlas" (its own send's answer, a read-back poll or a webhook), and is
+ * null only on the one 'backfill' row migration 0006 writes for a send that
+ * predates the log. Written only through applyObservedStage
+ * (lib/flightdeck/transitions.ts), which keeps the log monotonic. Goes with
+ * its send (ON DELETE CASCADE), so a project delete takes it too. */
+export const flightdeckTransitions = sqliteTable(
+  "atlas_flightdeck_transitions",
+  {
+    sendId: text("send_id")
+      .notNull()
+      .references(() => flightdeckOperations.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    stage: text("stage").notNull(),
+    observedAt: text("observed_at"),
+    source: text("source").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uniq_atlas_fd_transitions_send_seq").on(t.sendId, t.seq),
+    check(
+      "atlas_fd_transitions_source",
+      sql`${t.source} IN ('atlas','poll','webhook','backfill')`,
+    ),
   ],
 );
 /** Confirmed Atlas <-> OS project links (PROJECT-BRIDGE-CONTRACT.md:27-32).
