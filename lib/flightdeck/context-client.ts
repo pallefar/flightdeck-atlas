@@ -5,6 +5,7 @@
 // response or error, stored, or sent to the browser.
 import {
   emptyContext,
+  osAppsResponseSchema,
   osIdSchema,
   osNotFoundSchema,
   osProjectsResponseSchema,
@@ -15,6 +16,7 @@ import {
   visibleProjects,
   type ContextFailureState,
   type ContextView,
+  type OsAppsResponse,
   type OsProjectsResponse,
   type OsSelection,
   type OsWorkspacesResponse,
@@ -42,11 +44,16 @@ export type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 export interface ContextReader {
   workspaces(): Promise<ContextResult<OsWorkspacesResponse>>;
   projects(workspaceId: string): Promise<ContextResult<OsProjectsResponse>>;
+  /** The sub-apps enabled in that workspace (Atlas's 9-dot menu). Optional so
+   * readers that only serve the context switcher need not implement it. */
+  apps?(workspaceId: string): Promise<ContextResult<OsAppsResponse>>;
 }
 
 export const WORKSPACES_PATH = "/api/inbound/v1/context/workspaces";
 export const projectsPath = (workspaceId: string) =>
   `${WORKSPACES_PATH}/${encodeURIComponent(workspaceId)}/projects`;
+export const appsPath = (workspaceId: string) =>
+  `${WORKSPACES_PATH}/${encodeURIComponent(workspaceId)}/apps`;
 const TIMEOUT_MS = 5000;
 const MAX_BODY_CHARS = 1_000_000;
 // Same charset the OS enforces before it verifies a credential.
@@ -202,6 +209,16 @@ export function createContextClient(
         ? { state: "ok", data: parsed.data }
         : { state: "invalid_response" };
     },
+    async apps(workspaceId) {
+      if (!osIdSchema.safeParse(workspaceId).success)
+        return { state: "workspace_not_found" };
+      const result = await get(appsPath(workspaceId), true);
+      if (result.state !== "ok") return result;
+      const parsed = osAppsResponseSchema.safeParse(result.body);
+      return parsed.success && parsed.data.workspaceId === workspaceId
+        ? { state: "ok", data: parsed.data }
+        : { state: "invalid_response" };
+    },
   };
 }
 
@@ -325,6 +342,11 @@ export function createCachedReader(
   return {
     workspaces: () => cached(WORKSPACES_PATH, () => reader.workspaces()),
     projects: (id) => cached(projectsPath(id), () => reader.projects(id)),
+    ...(reader.apps
+      ? {
+          apps: (id: string) => cached(appsPath(id), () => reader.apps!(id)),
+        }
+      : {}),
   };
 }
 const RATE_LIMIT_KEY = "rate-limit";

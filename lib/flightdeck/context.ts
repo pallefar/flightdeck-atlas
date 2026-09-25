@@ -67,6 +67,37 @@ export type OsContextEntry = z.infer<typeof entrySchema>;
 export type OsWorkspacesResponse = z.infer<typeof osWorkspacesResponseSchema>;
 export type OsProjectsResponse = z.infer<typeof osProjectsResponseSchema>;
 
+/** One FlightDeck OS sub-app, as the OS's read-only apps route states it
+ * (GET /api/inbound/v1/context/workspaces/:id/apps). `path` must be a console
+ * sub-app path: Atlas builds the link from the configured OS origin plus this
+ * path, so an OS answer can never point the menu at another site. */
+const osAppSchema = z
+  .object({
+    id: osIdSchema,
+    label: z.string().min(1).max(120),
+    icon: z.string().max(32),
+    path: z.string().regex(/^\/console\/apps\/[a-z0-9][a-z0-9-]{0,63}$/),
+    visibleToRoles: z.array(z.string().max(64)).max(32),
+  })
+  .strict();
+export const osAppsResponseSchema = z
+  .object({
+    workspaceId: osIdSchema,
+    projectId: osIdSchema,
+    apps: z.array(osAppSchema).max(200).refine(uniqueIds, "Duplicate app id"),
+    generatedAt: isoSchema,
+  })
+  .strict();
+export type OsAppsResponse = z.infer<typeof osAppsResponseSchema>;
+/** What /api/flightdeck/apps hands the browser: a link per app, no roles,
+ * no credential. */
+export type FlightdeckAppLink = {
+  id: string;
+  label: string;
+  icon: string;
+  url: string;
+};
+
 /** Atlas already uses "workspace" for an Atlas project (?workspace=). These
  * names are deliberately OS-prefixed so the two can never be confused. */
 export const osSelectionSchema = z

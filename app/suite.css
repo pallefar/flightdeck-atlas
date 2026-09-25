@@ -227,6 +227,17 @@ button.suite-card:hover {
   font-weight: 750;
   box-shadow: 0 7px 18px #e9830025;
 }
+.flightdeck-apps {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.flightdeck-apps h3 {
+  margin: 0;
+}
+.flightdeck-apps .app-monogram {
+  font-size: 24px;
+  font-weight: 400;
+}
 .app-pin {
   position: absolute;
   right: 9px;

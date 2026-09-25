@@ -26,6 +26,7 @@ import {
 } from "@/lib/collaboration";
 import type { AccessProfile } from "@/lib/access-policy";
 import type { Project, ProjectFields } from "@/lib/projects";
+import type { FlightdeckAppLink } from "@/lib/flightdeck/context";
 export type WorkspaceData = {
   email: string;
   capacity: { email: string; weeklyHours: number; leaveDays: string[] }[];
@@ -104,6 +105,58 @@ export function useWorkspace() {
   }
   return { data, error, busy, load, mutate };
 }
+type FlightdeckApps = {
+  state: string;
+  apps: FlightdeckAppLink[];
+} | null;
+/** Honest words for every state /api/flightdeck/apps can report. */
+const FLIGHTDECK_APPS_STATE: Record<string, string> = {
+  not_configured: "FlightDeck OS is not connected to Atlas yet.",
+  not_permitted: "Your Atlas access does not include FlightDeck apps.",
+  os_unreachable: "FlightDeck OS is unreachable right now. Try again shortly.",
+  unauthorized: "FlightDeck OS refused Atlas's connection. Ask your admin.",
+  rate_limited: "FlightDeck OS is busy. Try again shortly.",
+  workspace_not_found: "No FlightDeck workspace is shared with Atlas.",
+  workspace_disabled: "The FlightDeck workspace is disabled.",
+  invalid_response: "FlightDeck OS sent an unexpected answer.",
+};
+function FlightdeckAppsSection({ data }: { data: FlightdeckApps }) {
+  return (
+    <section
+      className="flightdeck-apps"
+      aria-label="FlightDeck OS apps"
+      data-state={data?.state ?? "loading"}
+    >
+      <h3 className="eyebrow">FLIGHTDECK OS APPS</h3>
+      {!data ? (
+        <p className="hub-muted">Loading FlightDeck apps…</p>
+      ) : data.state !== "ok" ? (
+        <p className="hub-muted" role="status">
+          {FLIGHTDECK_APPS_STATE[data.state] ??
+            "FlightDeck apps are unavailable."}
+        </p>
+      ) : data.apps.length === 0 ? (
+        <p className="hub-muted" role="status">
+          No FlightDeck sub-apps are enabled in this workspace.
+        </p>
+      ) : (
+        <div className="launcher-grid">
+          {data.apps.map((a) => (
+            <article key={a.id} className="launcher-tile">
+              <a href={a.url} target="_blank" rel="noopener noreferrer">
+                <span className="app-icon app-monogram" aria-hidden="true">
+                  {a.icon || a.label.slice(0, 2).toUpperCase()}
+                </span>
+                <strong>{a.label}</strong>
+                <small>Opens in FlightDeck OS</small>
+              </a>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
 export function AppLauncher({
   access,
   onAdmin,
@@ -114,8 +167,28 @@ export function AppLauncher({
   onInbox: () => void;
 }) {
   const [open, setOpen] = useState(false),
-    [query, setQuery] = useState("");
+    [query, setQuery] = useState(""),
+    [fdApps, setFdApps] = useState<FlightdeckApps>(null);
   const w = useWorkspace();
+  const loadFlightdeckApps = useCallback(() => {
+    setFdApps(null);
+    fetch("/api/flightdeck/apps")
+      .then(async (r) => {
+        const b = (await r.json()) as FlightdeckApps & { error?: string };
+        setFdApps(
+          r.ok && b && Array.isArray(b.apps)
+            ? b
+            : {
+                state:
+                  r.status === 401 || r.status === 403
+                    ? "not_permitted"
+                    : "invalid_response",
+                apps: [],
+              },
+        );
+      })
+      .catch(() => setFdApps({ state: "os_unreachable", apps: [] }));
+  }, []);
   async function preference(key: "favourites" | "recent", id: string) {
     if (!w.data) return;
     const prev = w.data.preferences[key];
@@ -151,6 +224,7 @@ export function AppLauncher({
         title="Apps"
         onClick={() => {
           void w.load();
+          loadFlightdeckApps();
           setOpen(true);
         }}
       >
@@ -229,6 +303,7 @@ export function AppLauncher({
                 </article>
               ))}
           </div>
+          <FlightdeckAppsSection data={fdApps} />
           {access?.superAdmin && (
             <Button
               variant="outline"
