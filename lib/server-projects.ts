@@ -7,6 +7,7 @@ import {
   type ProjectEvent,
 } from "./projects";
 import { onboardingSchema } from "./flightdeck/onboarding";
+import { metricsFlagOn } from "./flightdeck/metrics";
 export function database() {
   if (!env.DB)
     throw new Error(
@@ -14,6 +15,10 @@ export function database() {
     );
   return env.DB;
 }
+/** ONB_METRICS_ENABLED: onboarding measures, off unless exactly "true"
+ * (lib/flightdeck/metrics.ts). Read on every call. */
+export const onboardingMetricsEnabled = () =>
+  metricsFlagOn(env.ONB_METRICS_ENABLED);
 export async function owner() {
   const user = await getChatGPTUser();
   return user?.userId || null;

@@ -16,7 +16,9 @@ import {
   readFields,
   recordChanges,
   readScopedSave,
+  onboardingMetricsEnabled,
 } from "@/lib/server-projects";
+import { recordDraftSave } from "@/lib/flightdeck/metrics";
 import { projectFor, activeProjectPeople } from "@/lib/project-access";
 import {
   DRAFT_NOT_HELD_SQL,
@@ -228,6 +230,15 @@ export async function PUT(
         },
         409,
       );
+    // Measure (default off): the draft's first save, as a hash and a time.
+    await recordDraftSave(
+      db,
+      onboardingMetricsEnabled(),
+      id,
+      previous,
+      recorded,
+      updatedAt,
+    );
     return json({ project: (await projectFor(auth.access, id))!.project });
   } catch {
     console.error("Atlas project update unavailable");
@@ -339,6 +350,14 @@ async function saveOnboarding(
         },
         409,
       );
+    await recordDraftSave(
+      db,
+      onboardingMetricsEnabled(),
+      id,
+      previous,
+      { onboarding },
+      updatedAt,
+    );
     return json({ project: (await projectFor(access, id))!.project });
   } catch {
     console.error("Atlas onboarding update unavailable");

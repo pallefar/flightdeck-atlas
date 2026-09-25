@@ -47,6 +47,7 @@ import {
   type SetupState,
 } from "./onboarding";
 import { applyObservedStage, type TransitionSource } from "./transitions";
+import { recordOnboardingMetric } from "./metrics";
 
 export type OnboardAccess = { userId: string; superAdmin: boolean };
 export type OnboardAuth<A extends OnboardAccess> =
@@ -76,6 +77,8 @@ export type OnboardDeps<A extends OnboardAccess> = {
   installationId(): string | null;
   now?(): Date;
   newId?(): string;
+  /** ONB_METRICS_ENABLED (lib/flightdeck/metrics.ts). Unset is off. */
+  metricsEnabled?(): boolean;
 };
 
 /** A send and its link as stored; what projectStatus projects. */
@@ -550,6 +553,20 @@ export function createOnboardRoute<A extends OnboardAccess>(
 ) {
   const now = () => deps.now?.() ?? new Date();
   const newId = () => deps.newId?.() ?? crypto.randomUUID();
+  /** Records one onboarding measure (default off; hash, moment, time). */
+  const measure = (
+    db: OnboardDb,
+    atlasProjectId: string,
+    kind: Parameters<typeof recordOnboardingMetric>[3],
+    at: string,
+  ) =>
+    recordOnboardingMetric(
+      db,
+      deps.metricsEnabled?.() === true,
+      atlasProjectId,
+      kind,
+      at,
+    );
 
   /** Logs the stage send `id` is at now, as Atlas just saw it (the
    * transition log, lib/flightdeck/transitions.ts). Called after every
@@ -566,22 +583,29 @@ export function createOnboardRoute<A extends OnboardAccess>(
     try {
       const row = await db
         .prepare(
-          "SELECT state,reason_code,setup_state FROM atlas_flightdeck_operations WHERE id=?",
+          "SELECT atlas_project_id,state,reason_code,setup_state FROM atlas_flightdeck_operations WHERE id=?",
         )
         .bind(id)
-        .first<Pick<OperationRow, "state" | "reason_code" | "setup_state">>();
+        .first<
+          Pick<
+            OperationRow,
+            "atlas_project_id" | "state" | "reason_code" | "setup_state"
+          >
+        >();
       if (!row) return;
-      await applyObservedStage(
-        db,
-        id,
-        stageFor({
-          state: row.state,
-          reasonCode: row.reason_code,
-          setupState: row.setup_state,
-        }),
-        now().toISOString(),
-        source,
-      );
+      const stage = stageFor({
+        state: row.state,
+        reasonCode: row.reason_code,
+        setupState: row.setup_state,
+      });
+      const at = now().toISOString();
+      if (await applyObservedStage(db, id, stage, at, source)) {
+        // Measures read off what Atlas saw, once per draft (default off).
+        if (stage === "submitted")
+          await measure(db, row.atlas_project_id, "sent", at);
+        else if (stage === "needs-more-info")
+          await measure(db, row.atlas_project_id, "correction", at);
+      }
     } catch {
       // Caught up by the next observation of this send.
     }
@@ -1297,10 +1321,15 @@ export function createOnboardRoute<A extends OnboardAccess>(
     if (auth.error) return auth.error;
     const { access } = auth;
     try {
-      if (!(await deps.loadProject(access, atlasProjectId)))
-        return refuse(404, "not_found", "Project not found.");
+      const found = await deps.loadProject(access, atlasProjectId);
+      if (!found) return refuse(404, "not_found", "Project not found.");
       const db = deps.db();
       const op = await latestOperation(db, atlasProjectId);
+      // The start of "time to first saved draft": its onboarding opened by
+      // someone who may edit it, while it holds no details and was never
+      // sent (default off; the first opening wins).
+      if (found.canEdit && !op && found.project.onboarding === undefined)
+        await measure(db, atlasProjectId, "draft-opened", now().toISOString());
       let notice: string | null = null,
         retryAfter: number | null = null;
       // Only the Super Admin's view reads the OS: the machine credential

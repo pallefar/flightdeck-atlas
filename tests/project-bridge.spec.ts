@@ -973,7 +973,12 @@ function onboardDb() {
 }
 
 function harness(
-  options: { superAdmin?: boolean; project?: Project | null } = {},
+  options: {
+    superAdmin?: boolean;
+    project?: Project | null;
+    /** ONB_METRICS_ENABLED; unset is the default (off). */
+    metrics?: boolean;
+  } = {},
 ) {
   const store = onboardDb();
   let clock = Date.parse("2026-09-22T09:00:00.000Z");
@@ -1089,6 +1094,9 @@ function harness(
     db: () => store.db,
     installationId: () => "atlas-test",
     now: () => new Date(clock),
+    ...(options.metrics === undefined
+      ? {}
+      : { metricsEnabled: () => options.metrics! }),
   });
   const readAs = (name: string) => async (): Promise<ReadSubmissionResult> => {
     const body = readBack(name);
@@ -2383,6 +2391,50 @@ test("the send and poll paths log each stage once, at the time Atlas saw it, and
     ["submitted", "atlas", t0],
     ["needs-more-info", "poll", after(61_000)],
   ]);
+});
+
+test("onboarding measures (default off) record opened, sent and correction once per draft, as its hash and never a value", async () => {
+  const measures = (h: ReturnType<typeof harness>) =>
+    h.store.sqlite
+      .prepare("SELECT * FROM atlas_onboarding_metrics ORDER BY at, kind")
+      .all() as Record<string, unknown>[];
+  const flow = async (h: ReturnType<typeof harness>) => {
+    await h.status(false);
+    h.setProject(readyProject());
+    expect((await h.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+    h.fake.onRead = h.readAs("needsMoreInfo");
+    h.tick(61_000);
+    await h.status();
+    h.tick(61_000);
+    await h.status();
+  };
+  const empty = { ...readyProject(), onboarding: undefined };
+  // Default: the flag is unset, and nothing is measured.
+  const off = harness({ project: empty });
+  await flow(off);
+  expect(off.store.transitions().length).toBe(2);
+  expect(measures(off)).toEqual([]);
+  // On: the moments, each once, keyed by the draft's hash only.
+  const on = harness({ project: empty, metrics: true });
+  await flow(on);
+  const draftHash = createHash("sha256").update(ATLAS_ID).digest("hex");
+  const t0 = "2026-09-22T09:00:00.000Z";
+  expect(measures(on)).toEqual([
+    { draft_hash: draftHash, kind: "draft-opened", at: t0 },
+    { draft_hash: draftHash, kind: "sent", at: t0 },
+    {
+      draft_hash: draftHash,
+      kind: "correction",
+      at: "2026-09-22T09:01:01.000Z",
+    },
+  ]);
+  const stored = JSON.stringify(measures(on));
+  for (const value of [ATLAS_ID, "Payroll", "hr-de", os.submissionId])
+    expect(stored).not.toContain(value);
+  // A draft that already holds details was not opened empty: no start.
+  const started = harness({ metrics: true });
+  await started.status(false);
+  expect(measures(started)).toEqual([]);
 });
 
 test("no link without the OS instanceId, and never onto an OS project another Atlas project holds", async () => {

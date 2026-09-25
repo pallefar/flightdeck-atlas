@@ -218,6 +218,31 @@ export const flightdeckTransitions = sqliteTable(
     ),
   ],
 );
+/** Onboarding measures (plan 2026-09-25 lane A "GATE metrics"; written only
+ * while ONB_METRICS_ENABLED is "true", default off): one row per moment of a
+ * draft, keyed by the sha256 of its Atlas project id, so time to first saved
+ * draft, ask-to-send and the correction rate can be read off them. No field
+ * value, id, label, user or workspace is stored, only {draft_hash, kind,
+ * at}. Written only through recordOnboardingMetric (lib/flightdeck/
+ * metrics.ts); the first of each moment wins. */
+export const onboardingMetrics = sqliteTable(
+  "atlas_onboarding_metrics",
+  {
+    draftHash: text("draft_hash").notNull(),
+    kind: text("kind").notNull(),
+    at: text("at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uniq_atlas_onboarding_metrics_draft_kind").on(
+      t.draftHash,
+      t.kind,
+    ),
+    check(
+      "atlas_onboarding_metrics_kind",
+      sql`${t.kind} IN ('draft-opened','draft-saved','asked','sent','correction')`,
+    ),
+  ],
+);
 /** Confirmed Atlas <-> OS project links (PROJECT-BRIDGE-CONTRACT.md:27-32).
  * Written only after the OS read-back says promoted AND read:context lists
  * the project. Installation-scoped, outside the editable project JSON.
