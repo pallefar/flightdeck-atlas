@@ -90,6 +90,19 @@ export function requesterAsk(
   };
 }
 
+/** Whether the signed-in viewer made this ask: the server lets only its
+ * asker (or the Super Admin) withdraw it, comparing trimmed, lower-cased
+ * emails (sendRequestAction, 403 send_request_not_yours). An unknown viewer
+ * or asker owns nothing, so Withdraw stays hidden. Fails closed. */
+export function askIsMine(
+  by: string | undefined,
+  viewer: string | undefined,
+): boolean {
+  const asker = (by ?? "").trim().toLowerCase();
+  const me = (viewer ?? "").trim().toLowerCase();
+  return !!asker && asker === me;
+}
+
 /** An ask or a withdraw adopts the server's copy of the whole draft, so it
  * never runs over local work nobody saved (unsaved or held: off), nor while
  * another save or ask is on its way. While one runs, the form is frozen so

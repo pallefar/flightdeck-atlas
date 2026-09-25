@@ -212,6 +212,11 @@ export const en = {
   "onb.ask.changed.text":
     "The draft changed after you asked for revision {revision}. Ask again so the Super Admin sends what you see now.",
   "onb.ask.withdraw": "Withdraw the request",
+  "onb.ask.theirs.text":
+    "{by} asked the Atlas Super Admin to send revision {revision}. Only {by} or the Super Admin can withdraw the request; nothing is sent until the Super Admin sends it.",
+  "onb.ask.theirs.changed": "Changed since {by} asked: ask again",
+  "onb.ask.theirs.changed.text":
+    "The draft changed after {by} asked for revision {revision}. Ask again so the Super Admin sends what you see now.",
   "onb.ask.asked":
     "Asked the Super Admin to send revision {revision}. Nothing has been sent to FlightDeck.",
   "onb.ask.withdrawn":

@@ -211,6 +211,11 @@ export const de: Record<MessageKey, string> = {
   "onb.ask.changed.text":
     "Der Entwurf wurde geändert, nachdem Sie Revision {revision} angefragt haben. Fragen Sie erneut an, damit der Super-Admin sendet, was Sie jetzt sehen.",
   "onb.ask.withdraw": "Anfrage zurückziehen",
+  "onb.ask.theirs.text":
+    "{by} hat den Atlas-Super-Admin gebeten, Revision {revision} zu senden. Nur {by} oder der Super-Admin kann die Anfrage zurückziehen; bis der Super-Admin sendet, wird nichts gesendet.",
+  "onb.ask.theirs.changed": "Seit der Anfrage von {by} geändert: erneut anfragen",
+  "onb.ask.theirs.changed.text":
+    "Der Entwurf wurde geändert, nachdem {by} Revision {revision} angefragt hat. Fragen Sie erneut an, damit der Super-Admin sendet, was Sie jetzt sehen.",
   "onb.ask.asked":
     "Der Super-Admin wurde gebeten, Revision {revision} zu senden. An FlightDeck wurde nichts gesendet.",
   "onb.ask.withdrawn":

@@ -327,3 +327,56 @@ test("ask and withdraw wait for saved work; the form is frozen while one runs", 
   expect(editor).toContain("disabled={busy || saving || askLock.freeze}");
   expect(editor).toContain("disabled={saving || askLock.freeze}");
 });
+
+// Fix round 3 (review P2): the open ask may be another editor's. Only its
+// asker (or the Super Admin, whose form has no ask section) may withdraw it:
+// sendRequestAction answers anyone else 403 send_request_not_yours. So the
+// form compares the signed-in email with sendRequest.by, offers Withdraw
+// only on a match, and names the other asker instead of saying "you asked".
+// Fails closed: an unknown viewer owns no ask.
+test("only the asker is offered Withdraw; another editor's ask is shown as theirs", () => {
+  const mine = api.askIsMine;
+  expect(typeof mine).toBe("function");
+  expect(mine!(EDITOR, EDITOR)).toBe(true);
+  // The server compares trimmed, lower-cased emails; so does the form.
+  expect(mine!(" Editor@Example.com ", EDITOR)).toBe(true);
+  expect(mine!(EDITOR, "other@example.com")).toBe(false);
+  expect(mine!(EDITOR, "")).toBe(false);
+  expect(mine!(EDITOR, undefined)).toBe(false);
+  expect(mine!("", "")).toBe(false);
+  expect(mine!(undefined, EDITOR)).toBe(false);
+
+  for (const key of [
+    "onb.ask.theirs.text",
+    "onb.ask.theirs.changed",
+    "onb.ask.theirs.changed.text",
+  ]) {
+    expect(en[key as keyof typeof en], key).toBeTruthy();
+    expect(de[key as keyof typeof de], key).toBeTruthy();
+    expect(en[key as keyof typeof en], key).toContain("{by}");
+    expect(de[key as keyof typeof de], key).toContain("{by}");
+  }
+
+  const editor = readFileSync("app/flightdeck-onboarding.tsx", "utf8");
+  expect(editor).toContain("askIsMine(myAsk.by, viewerEmail)");
+  // Withdraw is rendered only for the asker's own open ask.
+  expect(editor).toMatch(/\{ownAsk && \(\s*<Button[\s\S]*?askAction\("withdraw"\)/);
+  expect(editor).toContain('"onb.ask.theirs.text"');
+  // The signed-in email reaches both forms (connection page, project card).
+  const atlas = readFileSync("app/atlas.tsx", "utf8");
+  expect(atlas).toMatch(/<FlightDeckConnection[\s\S]*?viewerEmail=\{access\?\.email \?\? ""\}/);
+  expect(atlas).toMatch(/<ProjectManagement[\s\S]*?viewerEmail=\{access\?\.email \?\? ""\}/);
+  expect(readFileSync("app/flightdeck-connection.tsx", "utf8")).toContain(
+    "viewerEmail={viewerEmail}",
+  );
+  expect(readFileSync("app/project-management.tsx", "utf8")).toContain(
+    "viewerEmail={viewerEmail}",
+  );
+  expect(readFileSync("app/project-workspace.tsx", "utf8")).toContain(
+    "viewerEmail={viewerEmail}",
+  );
+  const cardUi = readFileSync("app/flightdeck-project-card.tsx", "utf8");
+  expect(cardUi).toMatch(/<OnboardingEditor[\s\S]*?viewerEmail=\{viewerEmail\}/);
+  // The card, too, says "you asked" only to the asker.
+  expect(cardUi).toContain("askIsMine(");
+});

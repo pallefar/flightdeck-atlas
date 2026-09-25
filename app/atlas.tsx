@@ -824,6 +824,7 @@ export default function Atlas() {
                 onReload={load}
                 superAdmin={!!access?.superAdmin}
                 requesterRequests={requesterRequests}
+                viewerEmail={access?.email ?? ""}
               />
             ) : view === "help" ? (
               <HelpCenter navigate={navigate} />
@@ -908,6 +909,7 @@ export default function Atlas() {
                 onOpen={openProject}
                 onSave={save}
                 viewerId={access?.userId ?? ""}
+                viewerEmail={access?.email ?? ""}
                 requesterRequests={requesterRequests}
                 onProjectSaved={(saved) =>
                   setProjects((prev) =>

@@ -84,6 +84,7 @@ export default function FlightDeckConnection({
   onOpen,
   onSave,
   viewerId = "",
+  viewerEmail = "",
   requesterRequests = false,
   onProjectSaved,
   onImported,
@@ -100,6 +101,8 @@ export default function FlightDeckConnection({
   ) => Promise<Project | null>;
   /** Who is viewing (the onboarding form holds unsaved work per viewer). */
   viewerId?: string;
+  /** The signed-in email: only the asker is offered Withdraw on an ask. */
+  viewerEmail?: string;
   /** ATLAS_REQUESTER_REQUESTS: editors may ask the Super Admin to send, so
    * the Super Admin sees "Waiting for you (n)". Off: as before. */
   requesterRequests?: boolean;
@@ -548,6 +551,7 @@ export default function FlightDeckConnection({
                     contextState={superAdmin ? context.state : null}
                     onSave={onSave}
                     viewerId={viewerId}
+                    viewerEmail={viewerEmail}
                     requesterRequests={requesterRequests}
                     onAutosaved={onProjectSaved}
                     onClose={() => setEditing(null)}

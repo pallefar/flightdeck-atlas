@@ -85,6 +85,7 @@ import {
   askDiff,
   askSnapshot,
   requesterAsk,
+  askIsMine,
 } from "@/lib/flightdeck/ask";
 import {
   applyStarter,
@@ -866,6 +867,7 @@ export function OnboardingEditor({
   workspaces,
   contextState,
   viewerId = "",
+  viewerEmail = "",
   requesterRequests = false,
   onSave,
   onAutosaved,
@@ -883,6 +885,9 @@ export function OnboardingEditor({
   requesterRequests?: boolean;
   /** Who is viewing: the held copy of unsaved work is kept per viewer. */
   viewerId?: string;
+  /** The signed-in email: the open ask is the viewer's own only when it
+   * matches sendRequest.by, and only then is Withdraw offered. */
+  viewerEmail?: string;
   onSave: (
     fields: ProjectFields,
     existing?: Project,
@@ -1445,6 +1450,11 @@ export function OnboardingEditor({
   const myAsk = askUi
     ? requesterAsk(server.onboarding, op?.stage)
     : ({ kind: "none" } as const);
+  // Another editor's ask is theirs: the server lets only its asker (or the
+  // Super Admin) withdraw it (403 send_request_not_yours), so Withdraw is
+  // offered only on the viewer's own ask. Unknown viewer: none. Fails closed.
+  const ownAsk =
+    myAsk.kind !== "none" && askIsMine(myAsk.by, viewerEmail);
   const mine = readinessFor(preview, null, "requester");
   const askBlocked = !askUi
     ? ""
@@ -2609,14 +2619,22 @@ export function OnboardingEditor({
                       ? t("onb.ask.waiting", locale, {
                           revision: myAsk.revision,
                         })
-                      : t("onb.ask.changed", locale)}
+                      : ownAsk
+                        ? t("onb.ask.changed", locale)
+                        : t("onb.ask.theirs.changed", locale, {
+                            by: myAsk.by,
+                          })}
                   </strong>{" "}
                   {t(
-                    myAsk.kind === "waiting"
-                      ? "onb.ask.waiting.text"
-                      : "onb.ask.changed.text",
+                    ownAsk
+                      ? myAsk.kind === "waiting"
+                        ? "onb.ask.waiting.text"
+                        : "onb.ask.changed.text"
+                      : myAsk.kind === "waiting"
+                        ? "onb.ask.theirs.text"
+                        : "onb.ask.theirs.changed.text",
                     locale,
-                    { revision: myAsk.revision },
+                    { revision: myAsk.revision, by: myAsk.by },
                   )}
                 </p>
               )}
@@ -2636,7 +2654,7 @@ export function OnboardingEditor({
                     })}
                   </Button>
                 )}
-                {myAsk.kind !== "none" && (
+                {ownAsk && (
                   <Button
                     type="button"
                     variant="outline"

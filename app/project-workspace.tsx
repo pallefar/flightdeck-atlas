@@ -38,11 +38,14 @@ export default function ProjectWorkspace({
   section,
   superAdmin = false,
   requesterRequests = false,
+  viewerEmail = "",
 }: {
   embedded?: boolean;
   /** Who sees the FlightDeck card (lib/flightdeck/project-card.ts). */
   superAdmin?: boolean;
   requesterRequests?: boolean;
+  /** The signed-in email: only the asker is offered Withdraw on an ask. */
+  viewerEmail?: string;
   section?: "overview" | "updates" | "collaboration";
   project: Project;
   demo: boolean;
@@ -279,6 +282,7 @@ export default function ProjectWorkspace({
           project={project}
           superAdmin={superAdmin}
           requesterRequests={requesterRequests}
+          viewerEmail={viewerEmail}
           demo={demo}
           busy={busy}
           onSave={onSave}

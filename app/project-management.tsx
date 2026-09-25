@@ -33,10 +33,13 @@ export default function ProjectManagement({
   onReload,
   superAdmin = false,
   requesterRequests = false,
+  viewerEmail = "",
 }: {
   /** Who sees the project page's FlightDeck card. */
   superAdmin?: boolean;
   requesterRequests?: boolean;
+  /** The signed-in email: only the asker is offered Withdraw on an ask. */
+  viewerEmail?: string;
   projects: Project[];
   projectId: string;
   tool: WorkTool;
@@ -312,6 +315,7 @@ export default function ProjectManagement({
                     onPresent={() => onTool("slides")}
                     superAdmin={superAdmin}
                     requesterRequests={requesterRequests}
+                    viewerEmail={viewerEmail}
                   />
                 ) : tool === "slides" ? (
                   <PresentationStudio
