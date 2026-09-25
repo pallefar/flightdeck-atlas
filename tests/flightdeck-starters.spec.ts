@@ -1,5 +1,9 @@
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { join } from "node:path";
+import { createElement, type ComponentProps } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import {
   STARTER_FIELDS,
   applyStarter,
@@ -16,6 +20,7 @@ import {
   type StarterTarget,
 } from "../lib/flightdeck/starters";
 import { onboardingSchema, settlePrefill } from "../lib/flightdeck/onboarding";
+import type { StarterChoice as StarterChoiceType } from "../app/flightdeck-starter-choice";
 
 // Starter choice machinery (onb-starter-choice-machinery). Starter content is
 // human-owned (plan 2026-09-25 §6, GATE legal/protected content): the list
@@ -229,4 +234,63 @@ test("undo restores the previous values and keeps a field edited since", () => {
   expect(undone.benefit).toBe("Our own measure");
   expect(undone.category).toBe("");
   expect(undone.functionArea).toBe("");
+});
+
+test("'blank' is reserved for the blank choice and can never be a starter id", () => {
+  const blank = { ...starter, id: "blank" };
+  expect(starterSchema.safeParse(blank).success).toBe(false);
+  // A list that contains it fails its own check, so it offers nothing.
+  expect(loadStarters([starter, blank])).toEqual([]);
+});
+
+test("the starter controls are disabled while the draft is saving", async () => {
+  // Playwright rewrites JSX for component testing, so the component is
+  // bundled with esbuild (tsconfig paths, react external) and rendered on
+  // the server as plain React.
+  const { buildSync } = await import("esbuild");
+  const out = buildSync({
+    entryPoints: ["app/flightdeck-starter-choice.tsx"],
+    bundle: true,
+    write: false,
+    platform: "node",
+    format: "cjs",
+    jsx: "automatic",
+    external: ["react", "react-dom"],
+    logLevel: "silent",
+  });
+  const mod = { exports: {} as { StarterChoice?: typeof StarterChoiceType } };
+  new Function("module", "exports", "require", out.outputFiles[0].text)(
+    mod,
+    mod.exports,
+    createRequire(join(process.cwd(), "package.json")),
+  );
+  const StarterChoice = mod.exports.StarterChoice!;
+  const render = (props: Record<string, unknown>) =>
+    renderToStaticMarkup(
+      createElement(StarterChoice, {
+        starters: [starter],
+        target,
+        locale: "en",
+        onApply: () => {},
+        onUndo: () => {},
+        applied: null,
+        initialChoice: starter.id,
+        ...props,
+      } as ComponentProps<typeof StarterChoiceType>),
+    );
+  const controls = (html: string) =>
+    html.match(/<(input|button)\b[^>]*>/g) ?? [];
+  const allDisabled = (html: string) =>
+    controls(html).every((c) => /\sdisabled=""/.test(c));
+  // Not saving: the radios and Apply are live.
+  expect(allDisabled(render({}))).toBe(false);
+  // Saving: every radio and Apply is disabled.
+  const choosing = render({ disabled: true });
+  expect(controls(choosing).length).toBeGreaterThanOrEqual(3);
+  expect(allDisabled(choosing)).toBe(true);
+  // Saving after applying: Undo is disabled too.
+  const { applied } = applyStarter(target, starter, AT);
+  const undoing = render({ applied, disabled: true });
+  expect(controls(undoing).length).toBe(1);
+  expect(allDisabled(undoing)).toBe(true);
 });

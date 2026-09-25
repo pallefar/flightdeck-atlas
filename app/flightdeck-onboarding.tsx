@@ -1770,6 +1770,7 @@ export function OnboardingEditor({
           onApply={chooseStarter}
           onUndo={undoChosenStarter}
           applied={applied}
+          disabled={busy || saving}
         />
       )}
       {!!suggestions.length && (

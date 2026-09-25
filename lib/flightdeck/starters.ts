@@ -16,6 +16,9 @@ import { t, type Locale, type MessageKey } from "../i18n";
 // works council, legal entity, headcount, access, owner roles and any other
 // fact for a human can never be prefilled from one: the schema is strict.
 
+/** The id of the 'Start blank' choice; reserved, never a starter's id. */
+export const BLANK = "blank";
+
 /** The only fields a starter may fill. */
 export const STARTER_FIELDS = [
   "summary",
@@ -28,7 +31,11 @@ export type StarterField = (typeof STARTER_FIELDS)[number];
 const text = (n: number) => z.string().trim().min(1).max(n);
 export const starterSchema = z
   .object({
-    id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/),
+    // "blank" names the 'Start blank' choice, so no starter may take it.
+    id: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9-]{0,62}$/)
+      .refine((id) => id !== BLANK, '"blank" is reserved.'),
     version: z.number().int().min(1).max(999999),
     /** Who owns the content (a role or team), and when they approved it. */
     owner: text(120),
@@ -60,7 +67,7 @@ export const approvedStarters: Starter[] = loadStarters(raw);
 /** 'Start blank' first, then the approved starters; none approved means
  * there is no choice to make, so the step is skipped. */
 export const starterChoices = (starters: Starter[]) =>
-  starters.length ? ["blank", ...starters.map((s) => s.id)] : [];
+  starters.length ? [BLANK, ...starters.map((s) => s.id)] : [];
 
 export const starterSource = (s: Pick<Starter, "id" | "version">) =>
   `starter:${s.id}@${s.version}`;

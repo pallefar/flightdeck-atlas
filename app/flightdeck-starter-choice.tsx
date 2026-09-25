@@ -3,6 +3,7 @@ import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { fieldLabel } from "@/lib/flightdeck/onboarding";
 import {
+  BLANK,
   starterView,
   type AppliedStarter,
   type Starter,
@@ -20,7 +21,8 @@ export function StarterChoice({
   onApply,
   onUndo,
   applied,
-  initialChoice = "blank",
+  initialChoice = BLANK,
+  disabled = false,
 }: {
   starters: Starter[];
   target: StarterTarget;
@@ -29,6 +31,9 @@ export function StarterChoice({
   onUndo: () => void;
   applied: AppliedStarter | null;
   initialChoice?: string;
+  /** True while the draft saves: a starter change made then could be
+   * overwritten by the save, so the choice waits like the form does. */
+  disabled?: boolean;
 }) {
   const [choice, setChoice] = useState(initialChoice);
   const name = useId();
@@ -43,21 +48,27 @@ export function StarterChoice({
             version: view.applied.version,
           })}
         </p>
-        <Button type="button" variant="outline" onClick={onUndo}>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={disabled}
+          onClick={onUndo}
+        >
           {t("onb.starter.undo", locale)}
         </Button>
       </div>
     );
   const { chosen, plan } = view;
   return (
-    <fieldset className="fd-suggest">
+    <fieldset className="fd-suggest" disabled={disabled}>
       <legend>{t("onb.starter.title", locale)}</legend>
       <label>
         <input
           type="radio"
           name={name}
           checked={!chosen}
-          onChange={() => setChoice("blank")}
+          disabled={disabled}
+          onChange={() => setChoice(BLANK)}
         />{" "}
         {t("onb.starter.blank", locale)}
       </label>
@@ -67,6 +78,7 @@ export function StarterChoice({
             type="radio"
             name={name}
             checked={choice === s.id}
+            disabled={disabled}
             onChange={() => setChoice(s.id)}
           />{" "}
           <strong>{s.name}</strong>{" "}
@@ -98,7 +110,7 @@ export function StarterChoice({
           <Button
             type="button"
             variant="outline"
-            disabled={!plan.length}
+            disabled={disabled || !plan.length}
             onClick={() => onApply(chosen)}
           >
             {t("onb.starter.apply", locale)}
