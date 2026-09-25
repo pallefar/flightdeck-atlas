@@ -743,7 +743,14 @@ export function createOnboardRoute<A extends OnboardAccess>(
     retry: boolean,
   ) {
     const stamp = now().toISOString();
-    const status = () => currentStatus(db, op.atlas_project_id, true);
+    // Every branch answers with the status, and the editor shows that answer
+    // as is, so the stage this answer stored is logged first: otherwise the
+    // answer leaves out its own transition, and a send that is not polled
+    // afterwards (refused, not confirmed) would keep lacking it.
+    const status = async () => {
+      await observe(db, op.id, "atlas");
+      return currentStatus(db, op.atlas_project_id, true);
+    };
     switch (result.state) {
       case "ok":
         await patch(
@@ -1151,15 +1158,8 @@ export function createOnboardRoute<A extends OnboardAccess>(
           );
       }
       const result = await submissions.submit(envelope);
-      const response = await settle(
-        db,
-        op,
-        result,
-        submissions,
-        reuse !== null,
-      );
-      await observe(db, op.id, "atlas");
-      return response;
+      // settle() logs the send's stage before it builds its answer.
+      return await settle(db, op, result, submissions, reuse !== null);
     } catch {
       return refuse(
         503,

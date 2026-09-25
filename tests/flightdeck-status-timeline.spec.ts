@@ -8,8 +8,11 @@
 import { test, expect } from "@playwright/test";
 import { readFileSync, readdirSync } from "node:fs";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
-import type { Project } from "../lib/projects";
+import { examples, type Project } from "../lib/projects";
 import {
+  buildOnboardingPayload,
+  onboardingEnvelope,
+  onboardingEnvelopeSchema,
   onboardingStages,
   onboardingStatusSchema,
   type OnboardingStatus,
@@ -21,6 +24,7 @@ import {
 import type {
   ContextReader,
   SubmissionClient,
+  SubmitResult,
 } from "../lib/flightdeck/context-client";
 import * as waiting from "../lib/flightdeck/waiting";
 import { en } from "../lib/i18n/en";
@@ -298,6 +302,98 @@ test.describe("waiting view: what the status carries", () => {
     const back = await get(true);
     expect(back.unreachableSince).toBeNull();
     expect(back.operation!.stage).toBe("submitted");
+  });
+
+  test("a send's own answer already carries the transition it just recorded: filed, and not confirmed", async () => {
+    // The Super Admin's editor shows the POST answer as is. Only a filed
+    // send is polled afterwards, so an answer without its own transition
+    // would leave a not-confirmed send without it until someone reloads.
+    for (const [answer, code, stage] of [
+      [
+        {
+          state: "ok",
+          data: {
+            submissionId: "sub-1",
+            receivedAt: T0,
+            payloadSha256: "a".repeat(64),
+          },
+        },
+        202,
+        "submitted",
+      ],
+      [{ state: "os_unreachable" }, 503, "not-confirmed"],
+    ] as const) {
+      const s = store();
+      // A reserved send whose first attempt stopped before an answer: the
+      // retry resends these exact bytes.
+      const key = crypto.randomUUID();
+      const envelope = onboardingEnvelopeSchema.parse(
+        onboardingEnvelope(
+          buildOnboardingPayload({
+            project: {
+              ...examples[0],
+              id: ATLAS_ID,
+              revision: 7,
+              functionArea: "HR",
+              flightdeckDraft: { label: "Payroll rollout", workspaceHint: "" },
+              onboarding: { countryCode: "DE", worksCouncilRelevant: "unknown" },
+            },
+            destinationWorkspaceId: "hr-de",
+            idempotencyKey: key,
+            installationId: "atlas-test",
+            requestedBy: "b".repeat(64),
+          }),
+        ),
+      );
+      s.sqlite
+        .prepare(
+          "INSERT INTO atlas_flightdeck_operations (id,atlas_project_id,atlas_revision,idempotency_key,destination_workspace_id,proposed_label,proposed_project_id,state,created_by,updated_at,request_body,adopted) VALUES (?,?,?,?,?,?,?,?,?,?,?,0)",
+        )
+        .run("op-1", ATLAS_ID, 7, key, "hr-de", "Payroll rollout", null, "reserved", "user-2", T0, JSON.stringify(envelope));
+      const r = createOnboardRoute({
+        async authorize() {
+          return { access: { userId: "user-2", superAdmin: true } };
+        },
+        async loadProject(_access, id) {
+          return id === ATLAS_ID
+            ? {
+                project: { ...examples[0], id, source: "atlas", revision: 7 },
+                canEdit: true,
+              }
+            : null;
+        },
+        async visibleProjectIds() {
+          return [ATLAS_ID];
+        },
+        reader: () => ({}) as ContextReader,
+        submissions: () =>
+          ({
+            submit: async () => answer as SubmitResult,
+            readSubmission: async () => ({ state: "os_unreachable" }),
+          }) as SubmissionClient,
+        db: () => s.db,
+        installationId: () => "atlas-test",
+        now: () => new Date(T0),
+      } as Parameters<typeof createOnboardRoute>[0]);
+      const response = await r.POST(
+        new Request(`${ORIGIN}/api/flightdeck/onboard/${ATLAS_ID}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Origin: ORIGIN,
+            "Sec-Fetch-Site": "same-origin",
+          },
+          body: JSON.stringify({ destinationWorkspaceId: "hr-de", revision: 7 }),
+        }),
+        ATLAS_ID,
+      );
+      expect(response.status, stage).toBe(code);
+      const body = (await response.json()) as Record<string, unknown>;
+      const shown = onboardingStatusSchema.parse(
+        code === 202 ? body : body.status,
+      );
+      expect(shown.transitions, stage).toEqual([{ stage, observedAt: T0 }]);
+    }
   });
 
   test("the response policy is null unless configured, then its number of working days", async () => {
