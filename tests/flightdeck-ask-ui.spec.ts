@@ -297,3 +297,33 @@ test("the UI is wired: the editor asks, the card and the connection page read th
     "askSnapshot(",
   );
 });
+
+// Fix round 2 (review P1): an ask or a withdraw adopts the server's copy of
+// the whole draft, so it must never run over local work nobody saved, and
+// nothing may be edited while it is on its way. Fails closed: with unsaved
+// or held work both buttons are off; while one runs the form is frozen.
+test("ask and withdraw wait for saved work; the form is frozen while one runs", () => {
+  const controls = api.askControls;
+  expect(typeof controls).toBe("function");
+  const idle = { unsaved: false, held: false, asking: false, busy: false, saving: false };
+  expect(controls!(idle)).toEqual({ withdrawDisabled: false, freeze: false });
+  for (const over of [
+    { unsaved: true },
+    { held: true },
+    { asking: true },
+    { busy: true },
+    { saving: true },
+  ])
+    expect(controls!({ ...idle, ...over }).withdrawDisabled).toBe(true);
+  expect(controls!({ ...idle, asking: true }).freeze).toBe(true);
+  expect(controls!({ ...idle, unsaved: true }).freeze).toBe(false);
+
+  const editor = readFileSync("app/flightdeck-onboarding.tsx", "utf8");
+  // The withdraw button and the handler both honour the rule.
+  expect(editor).toContain("disabled={askLock.withdrawDisabled}");
+  expect(editor).toMatch(/async function askAction[\s\S]*?if \(unsavedRef\.current \|\| held\) \{/);
+  // The step form, the starter choice and the checklist suggestions freeze.
+  expect(editor).toContain("disabled={frozen || busy || saving || askLock.freeze}");
+  expect(editor).toContain("disabled={busy || saving || askLock.freeze}");
+  expect(editor).toContain("disabled={saving || askLock.freeze}");
+});

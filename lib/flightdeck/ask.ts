@@ -90,6 +90,23 @@ export function requesterAsk(
   };
 }
 
+/** An ask or a withdraw adopts the server's copy of the whole draft, so it
+ * never runs over local work nobody saved (unsaved or held: off), nor while
+ * another save or ask is on its way. While one runs, the form is frozen so
+ * nothing typed meanwhile is replaced. Fails closed. */
+export function askControls(s: {
+  unsaved: boolean;
+  held: boolean;
+  asking: boolean;
+  busy: boolean;
+  saving: boolean;
+}): { withdrawDisabled: boolean; freeze: boolean } {
+  return {
+    withdrawDisabled: s.unsaved || s.held || s.asking || s.busy || s.saving,
+    freeze: s.asking,
+  };
+}
+
 type WaitingProject = {
   id: string;
   archived?: boolean;

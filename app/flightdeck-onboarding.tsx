@@ -80,7 +80,12 @@ import {
   AI_AGENT_PREREQUISITES,
 } from "@/lib/flightdeck/onboarding";
 import { waitingView } from "@/lib/flightdeck/waiting";
-import { askDiff, askSnapshot, requesterAsk } from "@/lib/flightdeck/ask";
+import {
+  askControls,
+  askDiff,
+  askSnapshot,
+  requesterAsk,
+} from "@/lib/flightdeck/ask";
 import {
   applyStarter,
   approvedStarters,
@@ -1450,6 +1455,13 @@ export function OnboardingEditor({
         : mine.done < mine.total
           ? t("onb.ask.notReady", locale, { done: mine.done, total: mine.total })
           : "";
+  const askLock = askControls({
+    unsaved,
+    held: !!held,
+    asking,
+    busy,
+    saving,
+  });
   /** Ask the Super Admin to send the revision this form shows, or withdraw
    * the open ask. The server decides (sendRequestAction): it binds the ask
    * to that revision and refuses one nobody saw. Nothing is sent. */
@@ -1459,6 +1471,11 @@ export function OnboardingEditor({
         ? server.revision
         : server.onboarding?.sendRequest?.revision;
     if (!revision) return;
+    // The response replaces the whole draft: never over unsaved work.
+    if (unsavedRef.current || held) {
+      setError(t("onb.ask.saveFirst", locale));
+      return;
+    }
     setAsking(true);
     setError("");
     try {
@@ -1869,7 +1886,7 @@ export function OnboardingEditor({
           onApply={chooseStarter}
           onUndo={undoChosenStarter}
           applied={applied}
-          disabled={busy || saving}
+          disabled={busy || saving || askLock.freeze}
         />
       )}
       {!!suggestions.length && (
@@ -1890,7 +1907,7 @@ export function OnboardingEditor({
           <Button
             type="button"
             variant="outline"
-            disabled={saving}
+            disabled={saving || askLock.freeze}
             onClick={applySuggestions}
           >
             Apply checklist suggestions
@@ -1916,7 +1933,7 @@ export function OnboardingEditor({
           : ""}
       </p>
       <fieldset
-        disabled={frozen || busy || saving}
+        disabled={frozen || busy || saving || askLock.freeze}
         id={`fd-panel-${tab}`}
         aria-labelledby={`fd-step-title-${project.id}`}
       >
@@ -2623,7 +2640,7 @@ export function OnboardingEditor({
                   <Button
                     type="button"
                     variant="outline"
-                    disabled={asking || busy}
+                    disabled={askLock.withdrawDisabled}
                     onClick={() => void askAction("withdraw")}
                   >
                     {t("onb.ask.withdraw", locale)}
