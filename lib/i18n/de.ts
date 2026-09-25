@@ -28,6 +28,7 @@ export const de: Record<MessageKey, string> = {
     "KI-Agenten sind gesperrt und können noch nicht angefragt werden. Nichts in diesem Schritt wird gesendet oder gezählt.",
   "onb.step.back": "Zurück",
   "onb.step.next": "Weiter",
+  "onb.step.position": "Schritt {n} von {total}: {name}",
   "onb.meter.forYou": "{done} von {total} für Sie",
   "onb.meter.required": "{done} von {total} erforderlich",
   "onb.errors.title":

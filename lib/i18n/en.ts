@@ -26,6 +26,7 @@ export const en = {
     "AI agents are locked: they cannot be requested yet. Nothing on this step is sent or counted.",
   "onb.step.back": "Back",
   "onb.step.next": "Next",
+  "onb.step.position": "Step {n} of {total}: {name}",
   "onb.meter.forYou": "{done} of {total} for you",
   "onb.meter.required": "{done} of {total} required",
   "onb.errors.title": "Complete these details before going on:",
