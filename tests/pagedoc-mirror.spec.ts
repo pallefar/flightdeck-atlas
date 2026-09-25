@@ -264,6 +264,39 @@ test.describe("the token adapter (app/pagedoc-host.css)", () => {
     }
   });
 
+  test("rich-text lists keep their markers under Tailwind's preflight; card lists stay unmarked", async ({ page }) => {
+    // Atlas loads Tailwind's preflight (app/globals.css), which strips list
+    // markers and padding from every ul/ol. Rendered in a real browser with the
+    // same cascade order as app/layout.tsx: preflight, pagedoc.css, the adapter.
+    const read = (p: string) => readFileSync(p, "utf8");
+    const require = createRequire(import.meta.url);
+    const preflight = read(require.resolve("tailwindcss/preflight.css"));
+    const golden = (name: string) => read(path.join(MIRROR, "fixtures", `${name}.en.html`));
+    await page.setContent(
+      `<!doctype html><html><head><style>${preflight}</style><style>${read(path.join(MIRROR, "pagedoc.css"))}</style>` +
+        `<style>${hostCss()}</style></head><body>` +
+        // richtext-for-faq has a bullet list, de-partial a numbered one; an FAQ
+        // answer is itself .pd-rich-text; the feature grid is a card list.
+        `${golden("richtext-for-faq")}${golden("de-partial")}` +
+        `<div class="pd-faq-a pd-rich-text"><ul><li>Answer</li></ul></div>${golden("block-featureGrid")}</body></html>`,
+    );
+    const style = (sel: string) =>
+      page.locator(sel).first().evaluate((el) => {
+        const s = getComputedStyle(el);
+        return { type: s.listStyleType, pad: parseFloat(s.paddingInlineStart) };
+      });
+    const ul = await style(".pd-rich-text ul");
+    expect(ul.type).toBe("disc");
+    expect(ul.pad).toBeGreaterThan(0);
+    const ol = await style(".pd-rich-text ol");
+    expect(ol.type).toBe("decimal");
+    expect(ol.pad).toBeGreaterThan(0);
+    const faq = await style(".pd-faq-a ul");
+    expect(faq.type).toBe("disc");
+    expect(faq.pad).toBeGreaterThan(0);
+    expect((await style(".pd-feature-list")).type).toBe("none");
+  });
+
   test("the layout loads the mirror's stylesheet and the adapter", () => {
     const layout = readFileSync(path.join(root, "app", "layout.tsx"), "utf8");
     expect(layout).toContain('import "../lib/pagedoc/pagedoc.css";');

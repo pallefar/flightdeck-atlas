@@ -1,4 +1,5 @@
-/* The PageDoc token adapter (pages-atlas-mirror-contract). lib/pagedoc/pagedoc.css,
+/* The PageDoc token adapter (pages-atlas-mirror-contract), plus one host reset
+   at the end. lib/pagedoc/pagedoc.css,
    mirrored from the OS, reads only --pd-* colour properties and owns no colour;
    each host maps them to its own tokens. This file maps them to Atlas's EXISTING
    tokens (app/globals.css, re-set per theme in app/te-theme.css) and adds none,
@@ -33,4 +34,17 @@
   --pd-link: var(--orange);
   --pd-surface-strong: var(--primary);
   --pd-fg-strong: var(--primary-foreground);
+}
+
+/* Host reset, not a token: Atlas loads Tailwind's preflight (app/globals.css),
+   which strips list markers and padding from every ul/ol. Rich-text lists
+   (FAQ answers included, .pd-faq-a is .pd-rich-text) need them back; the
+   card lists (.pd-feature-list and friends) keep pagedoc.css's list-style: none. */
+.pd-rich-text ul {
+  list-style: disc outside;
+  padding-inline-start: 1.5rem;
+}
+.pd-rich-text ol {
+  list-style: decimal outside;
+  padding-inline-start: 1.5rem;
 }
