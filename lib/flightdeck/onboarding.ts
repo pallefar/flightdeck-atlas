@@ -69,6 +69,23 @@ export const sendRequestSchema = z
   .strict();
 export type SendRequest = z.infer<typeof sendRequestSchema>;
 
+/** The fields Atlas may prefill, and where a prefill came from. Only these:
+ * works council relevance, legal entity, headcount band and access requests
+ * are facts for a human and are never prefilled. */
+export const prefillFields = [
+  "functionArea",
+  "summary",
+  "successMeasure",
+  "ownerRoles.process",
+  "ownerRoles.data",
+  "ownerRoles.support",
+] as const;
+export const prefillSources = ["atlas-project", "checklist"] as const;
+export const provenanceSchema = z
+  .object({ source: z.enum(prefillSources), at: isoSchema })
+  .strict();
+export type Provenance = z.infer<typeof provenanceSchema>;
+
 /** The FlightDeck details saved on an Atlas project. Strict, so the details
  * sent can never hold a sponsor, assignee or email: the owner fields are role
  * titles, and people are appointed in the OS from its own roster. The one
@@ -103,6 +120,9 @@ export const onboardingSchema = z
       .optional(),
     coworkRequested: z.boolean().optional(),
     sendRequest: sendRequestSchema.optional(),
+    /** Which fields hold a value Atlas prefilled, from where and when. A
+     * user edit removes the field's entry. Atlas-only: never sent. */
+    prefill: z.record(z.enum(prefillFields), provenanceSchema).optional(),
   })
   .strict();
 export type OnboardingDraft = z.infer<typeof onboardingSchema>;
@@ -897,13 +917,7 @@ export function personalDataIn(payload: ProjectOnboardingPayload) {
 export const fieldLabel = (path: string) =>
   REVIEW_FIELDS.find((f) => f.path === path)?.label ?? path;
 
-export type SuggestionField =
-  | "functionArea"
-  | "summary"
-  | "successMeasure"
-  | "ownerRoles.process"
-  | "ownerRoles.data"
-  | "ownerRoles.support";
+export type SuggestionField = (typeof prefillFields)[number];
 /** One-click prefill from the pilot checklist (lib/opportunities.ts). Only
  * empty fields are offered; the value is a role title or the pilot's own
  * text, never the checklist title (shown as the reason, not sent). */
@@ -941,6 +955,63 @@ export function checklistSuggestions(
     if (titles.has(title) && !clean(roles?.[role]))
       out.push({ field: `ownerRoles.${role}`, value, source: title });
   return out;
+}
+
+type PrefillTarget = Partial<
+  Pick<Project, "functionArea" | "description" | "benefit" | "onboarding">
+>;
+const ROLE_PREFIX = "ownerRoles.";
+const prefilledValue = (t: PrefillTarget, field: SuggestionField) =>
+  field === "functionArea"
+    ? t.functionArea
+    : field === "summary"
+      ? t.description
+      : field === "successMeasure"
+        ? t.benefit
+        : t.onboarding?.ownerRoles?.[
+            field.slice(ROLE_PREFIX.length) as "process" | "data" | "support"
+          ];
+/** Applies checklist suggestions and records each one's provenance. A field
+ * that already holds a value (say, one the user typed) is never overwritten,
+ * even by a suggestion list computed before that edit. */
+export function applyChecklistSuggestions<T extends PrefillTarget>(
+  target: T,
+  suggestions: { field: SuggestionField; value: string }[],
+  at: string,
+): T {
+  const next: T = { ...target };
+  const onboarding: OnboardingDraft = {
+    ...target.onboarding,
+    ownerRoles: { ...target.onboarding?.ownerRoles },
+    prefill: { ...target.onboarding?.prefill },
+  };
+  for (const s of suggestions) {
+    if (clean(prefilledValue({ ...next, onboarding }, s.field))) continue;
+    if (s.field === "functionArea") next.functionArea = s.value;
+    else if (s.field === "summary") next.description = s.value;
+    else if (s.field === "successMeasure") next.benefit = s.value;
+    else
+      onboarding.ownerRoles![
+        s.field.slice(ROLE_PREFIX.length) as "process" | "data" | "support"
+      ] = s.value;
+    onboarding.prefill![s.field] = { source: "checklist", at };
+  }
+  if (!Object.keys(onboarding.ownerRoles!).length) delete onboarding.ownerRoles;
+  if (!Object.keys(onboarding.prefill!).length) delete onboarding.prefill;
+  next.onboarding = onboarding;
+  return next;
+}
+/** A user edit: the field is theirs now, so its provenance goes. */
+export function withoutPrefill(
+  onboarding: OnboardingDraft,
+  field: SuggestionField,
+): OnboardingDraft {
+  if (!onboarding.prefill?.[field]) return onboarding;
+  const { [field]: _gone, ...rest } = onboarding.prefill;
+  void _gone;
+  const { prefill: _old, ...others } = onboarding;
+  void _old;
+  return Object.keys(rest).length ? { ...others, prefill: rest } : others;
 }
 
 // ── OS wire DTOs for the kind (plan §4.3, §4.6) ────────────────────────────

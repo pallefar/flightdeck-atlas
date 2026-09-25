@@ -24,6 +24,7 @@ import {
   ONBOARDING_SUMMARY,
   REVIEW_FIELDS,
   buildOnboardingPayload,
+  applyChecklistSuggestions,
   checklistSuggestions,
   draftEdited,
   isDraftLocked,
@@ -51,6 +52,7 @@ import {
   timelineSteps,
   type OnboardingEnvelope,
   type OnboardingStage,
+  withoutPrefill,
   type OnboardingStatus,
 } from "../lib/flightdeck/onboarding";
 import {
@@ -496,6 +498,114 @@ test("checklist items prefill role titles and pilot facts, never their own title
   for (const s of suggestions) expect(s.source.length).toBeGreaterThan(0);
   // Filled fields are left alone.
   expect(checklistSuggestions(readyProject())).toEqual([]);
+});
+
+test("applied suggestions record their provenance, and human facts are never inferred", () => {
+  const AT = "2026-09-25T10:00:00.000Z";
+  for (const idea of opportunities) {
+    const pilot = readyProject({
+      functionArea: undefined,
+      benefit: "",
+      description: "",
+      onboarding: {},
+      tasks: onboardingTasks(idea),
+    });
+    const suggestions = checklistSuggestions(pilot);
+    const applied = applyChecklistSuggestions(pilot, suggestions, AT);
+    // Every prefilled field says where it came from, and nothing else does.
+    expect(Object.keys(applied.onboarding?.prefill ?? {}).sort()).toEqual(
+      suggestions.map((s) => s.field).sort(),
+    );
+    for (const s of suggestions)
+      expect(applied.onboarding?.prefill?.[s.field]).toEqual({
+        source: "checklist",
+        at: AT,
+      });
+    expect(applied.functionArea).toBe(idea.area);
+    expect(applied.description).toBe(idea.pilot);
+    expect(onboardingSchema.safeParse(applied.onboarding).success).toBe(true);
+    // Facts only a human knows stay unset, whatever the pilot.
+    expect(applied.onboarding?.worksCouncilRelevant).toBeUndefined();
+    expect(applied.onboarding?.legalEntity).toBeUndefined();
+    expect(applied.onboarding?.headcountBand).toBeUndefined();
+    expect(applied.onboarding?.accessRequested).toBeUndefined();
+  }
+});
+
+test("a user edit clears a field's provenance, and re-applying never overwrites it", () => {
+  const AT = "2026-09-25T10:00:00.000Z";
+  const idea = opportunities.find((o) => o.id === "hr-onboarding")!;
+  const pilot = readyProject({
+    functionArea: undefined,
+    benefit: "",
+    description: "",
+    onboarding: {},
+    tasks: onboardingTasks(idea),
+  });
+  const suggestions = checklistSuggestions(pilot);
+  const applied = applyChecklistSuggestions(pilot, suggestions, AT);
+  // The user rewrites the function area and the process owner role.
+  const edited = {
+    ...applied,
+    functionArea: "Finance",
+    onboarding: withoutPrefill(
+      withoutPrefill(
+        {
+          ...applied.onboarding,
+          ownerRoles: {
+            ...applied.onboarding?.ownerRoles,
+            process: "Payroll lead",
+          },
+        },
+        "functionArea",
+      ),
+      "ownerRoles.process",
+    ),
+  };
+  expect(edited.onboarding.prefill?.functionArea).toBeUndefined();
+  expect(edited.onboarding.prefill?.["ownerRoles.process"]).toBeUndefined();
+  expect(edited.onboarding.prefill?.["ownerRoles.data"]).toEqual({
+    source: "checklist",
+    at: AT,
+  });
+  // Re-applying, even with the list offered before the edit, keeps the edits.
+  const again = applyChecklistSuggestions(edited, suggestions, AT);
+  expect(again.functionArea).toBe("Finance");
+  expect(again.onboarding?.ownerRoles?.process).toBe("Payroll lead");
+  expect(again.onboarding?.prefill?.functionArea).toBeUndefined();
+  expect(again.onboarding?.prefill?.["ownerRoles.process"]).toBeUndefined();
+  expect(checklistSuggestions(edited)).toEqual([]);
+  // The last provenance entry removed leaves no empty record behind.
+  let bare = applyChecklistSuggestions(
+    { ...pilot, onboarding: {} },
+    suggestions.filter((s) => s.field === "summary"),
+    AT,
+  ).onboarding!;
+  bare = withoutPrefill(bare, "summary");
+  expect(bare).toEqual({});
+  // Provenance is Atlas bookkeeping: validated strictly and never sent.
+  expect(
+    onboardingSchema.safeParse({
+      prefill: { legalEntity: { source: "checklist", at: AT } },
+    }).success,
+  ).toBe(false);
+  expect(
+    onboardingSchema.safeParse({
+      prefill: { summary: { source: "guess", at: AT } },
+    }).success,
+  ).toBe(false);
+  const sent = JSON.stringify(
+    payloadFor(
+      readyProject({
+        onboarding: {
+          ...readyProject().onboarding,
+          prefill: { summary: { source: "checklist", at: AT } },
+        },
+      }),
+    ),
+  );
+  expect(sent).not.toContain("prefill");
+  expect(sent).not.toContain(AT);
 });
 
 test("submit() POSTs the envelope with only the bearer credential and never X-Workspace-Id", async () => {
@@ -3240,6 +3350,12 @@ test("the guided stepper prefills Basics, meters readiness, lists every field se
     await expect(row.getByLabel("Support owner role")).toHaveValue(
       "Support owner",
     );
+    // Each prefilled role says where it came from.
+    await expect(
+      row.locator('[data-prefill="checklist"]', {
+        hasText: "Suggested from the onboarding checklist",
+      }),
+    ).toHaveCount(3);
     await row.getByLabel("Country").selectOption("DE");
     await row.getByLabel("Works council relevant").selectOption("unknown");
     await row.getByLabel("Mark this project Ready for FlightDeck").check();
