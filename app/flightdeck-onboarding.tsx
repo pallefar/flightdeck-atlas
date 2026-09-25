@@ -531,6 +531,10 @@ function StatusBanner({
  * even when the action bar covers it (WCAG 2.4.11 Focus Not Obscured). */
 function keepClearOfStickyBars(el: HTMLElement, bar: HTMLElement | null) {
   if (!bar || bar.contains(el)) return;
+  // Only keyboard (focus-visible) focus: scrolling on a pointer's focus moves
+  // the control out from under the pointer between mousedown and mouseup, so
+  // a click on a partly covered button (a stepper step) would be lost.
+  if (!el.matches(":focus-visible")) return;
   const gap = 12;
   const top =
     (document.querySelector(".topbar")?.getBoundingClientRect().bottom ?? 0) +

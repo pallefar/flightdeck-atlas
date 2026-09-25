@@ -85,37 +85,20 @@ export const en = {
   "onb.promo.checking": "Checking onboarding status…",
   "onb.promo.open": "FlightDeck connection",
   "onb.promo.import": "Import from FlightDeck: not enabled",
-  // The Connections view: the FlightDeck context line.
-  "onb.context.ok.chip": "Connected (read-only)",
-  "onb.context.ok.text":
-    "connected (read-only). The sidebar mirrors your FlightDeck OS workspace and project lists through the OS inbound API.",
-  "onb.context.workspace_not_found.text":
-    "connected (read-only). Your saved workspace is no longer shared with Atlas; choose another in the sidebar.",
-  "onb.context.workspace_disabled.text":
-    "connected (read-only). The selected workspace is disabled in FlightDeck.",
-  "onb.context.checking.chip": "Checking",
-  "onb.context.checking.text": "checking the FlightDeck inbound API.",
-  "onb.context.not_configured.chip": "Not configured",
-  "onb.context.not_configured.text":
-    "not configured. Set the FlightDeck URL and inbound credential in Atlas server configuration.",
-  "onb.context.not_permitted.chip": "Super Admin only",
-  "onb.context.not_permitted.text":
-    "read-only lists are shown to the Atlas Super Admin because they use one shared OS machine credential.",
-  "onb.context.os_unreachable.chip": "Unreachable",
-  "onb.context.os_unreachable.text":
-    "FlightDeck OS could not be reached. The last confirmed lists stay visible.",
-  "onb.context.rate_limited.chip": "Busy",
-  "onb.context.rate_limited.text":
-    "FlightDeck asked Atlas to wait before reading again.",
-  "onb.context.invalid_response.chip": "Unexpected response",
-  "onb.context.invalid_response.text":
-    "FlightDeck answered, but not with the agreed context contract.",
-  "onb.context.check_failed.chip": "Unavailable",
-  "onb.context.check_failed.text":
-    "Atlas could not check the context right now.",
-  "onb.context.unauthorized.chip": "Refused",
-  "onb.context.unauthorized.text":
-    "FlightDeck refused Atlas's inbound credential. Nothing is shown.",
+  // The Connections view: its one connection line, from the credential's
+  // whoami (onb-atlas-connection-clarity).
+  "onb.conn.checking": "Checking the FlightDeck connection…",
+  "onb.conn.readSubmit": "Connected: can read context and send onboarding requests",
+  "onb.conn.readOnly": "Connected: read only",
+  "onb.conn.submitOnly": "Connected: can send onboarding requests, cannot read context",
+  "onb.conn.notConnected": "Not connected ({reason})",
+  "onb.conn.reason.not_configured": "FlightDeck is not configured in Atlas",
+  "onb.conn.reason.unauthorized": "FlightDeck refused Atlas's credential",
+  "onb.conn.reason.os_unreachable": "FlightDeck could not be reached",
+  "onb.conn.reason.rate_limited": "FlightDeck asked Atlas to wait; try again shortly",
+  "onb.conn.reason.invalid_response": "FlightDeck sent an unexpected answer",
+  "onb.conn.reason.no_scope": "the credential carries no Atlas scope",
+  "onb.conn.reason.check_failed": "Atlas could not check the connection",
   // The Connections list row, before a project has a stage.
   "onb.row.draftPrepared": "Draft prepared",
   "onb.row.notPrepared": "Not prepared",

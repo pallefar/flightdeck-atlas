@@ -866,14 +866,19 @@ test("the live context route stays same-origin, signed-in and free of the creden
     ).status(),
   ).toBe(401);
   await page.goto("/?view=connection");
+  // ONE connection line, from the credential's whoami, and no other chip
+  // (onb-atlas-connection-clarity): import staying disconnected is said in
+  // the From FlightDeck tab, not as a "Not enabled" chip beside "Connected".
+  await expect(page.getByTestId("fd-connection-line")).toHaveText(
+    /^(Connected: |Not connected \()/,
+  );
+  await expect(page.getByText("Not enabled", { exact: true })).toHaveCount(0);
   await expect(
     page.getByText("Workspace & project context:", { exact: true }),
-  ).toBeVisible();
-  // Import stays disconnected; onboarding and the context have their own rows.
-  await expect(
-    page.getByText("Import from FlightDeck:", { exact: true }),
-  ).toBeVisible();
-  await expect(page.getByText("Not enabled", { exact: true })).toBeVisible();
+  ).toHaveCount(0);
+  const anonymousLine = await request.get("/api/flightdeck/connection");
+  expect(anonymousLine.status()).toBe(401);
+  expect(await anonymousLine.text()).not.toMatch(leaks);
   const results = await page.evaluate(async () => {
     const get = await fetch("/api/flightdeck/context");
     const put = await fetch("/api/flightdeck/context", {
@@ -1020,7 +1025,7 @@ test("Connections shows no FlightDeck developer reference to a signed-in user wh
   });
   await page.goto("/?view=connection");
   await expect(page.getByText("Project member (test)")).toBeVisible();
-  await expect(page.getByText("Super Admin sends")).toBeVisible();
+  await expect(page.getByTestId("fd-connection-line")).toBeVisible();
   // Let every load (workspace apps included) settle before asserting absence.
   await page.waitForLoadState("networkidle");
   await expect(
