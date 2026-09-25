@@ -46,6 +46,8 @@ export const en = {
   "onb.reason.link_conflict":
     "That FlightDeck project is already linked elsewhere, so Atlas did not link it.",
   "onb.reason.submission_not_found": "FlightDeck does not know this request.",
+  // An editor's view of a send FlightDeck holds but has not yet linked.
+  "onb.reason.waiting_to_be_filed": "Sent, waiting for FlightDeck to file it.",
   "onb.reason.abandoned":
     "The Atlas Super Admin closed it before FlightDeck confirmed it.",
   "onb.reason.duplicate": "It duplicates another request.",

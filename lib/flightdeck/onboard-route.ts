@@ -77,6 +77,9 @@ export type OnboardDeps<A extends OnboardAccess> = {
   newId?(): string;
 };
 
+/** A send and its link as stored; what projectStatus projects. */
+export type OnboardSendRow = OperationRow;
+export type OnboardLinkRow = LinkRow;
 type OperationRow = {
   id: string;
   atlas_project_id: string;
@@ -407,12 +410,89 @@ async function patch(
   return result.meta.changes > 0;
 }
 
+/** The reason codes an editor may see: FlightDeck's decision reasons,
+ * whether FlightDeck could be reached, and Atlas's own closing and waiting
+ * words. Anything else (Atlas's credential and scopes, workspace sharing,
+ * operator-only lock, key and link faults) is the Super Admin's and is
+ * projected as no reason at all: an unknown code fails closed. */
+const EDITOR_REASONS: ReadonlySet<string> = new Set([
+  "needs-more-info",
+  "duplicate",
+  "out-of-scope",
+  "other",
+  "abandoned",
+  "os_unreachable",
+  "rate_limited",
+  "project_not_visible",
+]);
+/** The editor's reason for a send FlightDeck holds but has not yet turned
+ * into a linked project (plan J4 "Sent, waiting for FlightDeck to file it"). */
+export const WAITING_TO_BE_FILED = "waiting_to_be_filed";
+
+/** The approved status projection per viewer (plan 2026-09-25 J4). `null`
+ * viewer: no view rights, so there is nothing to project (the route answers
+ * 404). The Atlas Super Admin gets the full status body. Anyone else with
+ * view rights gets an allowlisted projection built key by key: the stage,
+ * the revision sent and the times, never the destination workspace, the
+ * link, the reserved request, a notice or a reason that describes Atlas's
+ * credential or FlightDeck's workspaces. It never reads FlightDeck: the
+ * editor's freshness is the Super Admin's poll (plan §7). */
+export function projectStatus(
+  viewer: { superAdmin: boolean } | null,
+  send: { operation?: OperationRow | null; link?: LinkRow | null },
+  notice: string | null = null,
+  retryAfter: number | null = null,
+): OnboardingStatus | null {
+  if (!viewer) return null;
+  const op = send.operation ?? null;
+  if (viewer.superAdmin)
+    return statusBody(op, send.link ?? null, notice, retryAfter);
+  const stage = op
+    ? stageFor({
+        state: op.state,
+        reasonCode: op.reason_code,
+        setupState: op.setup_state,
+      })
+    : null;
+  const reasonCode =
+    op?.reason_code && EDITOR_REASONS.has(op.reason_code)
+      ? op.reason_code
+      : op && stage === "submitted"
+        ? WAITING_TO_BE_FILED
+        : null;
+  return {
+    operation:
+      op && stage
+        ? {
+            state: op.state,
+            stage,
+            destinationWorkspaceId: null,
+            submittedAt: op.received_at,
+            reasonCode,
+            setupState: op.setup_state,
+            atlasRevision: op.adopted ? null : op.atlas_revision,
+            adopted: !!op.adopted,
+            updatedAt: op.updated_at,
+            checkedAt: op.checked_at,
+          }
+        : null,
+    link: null,
+    pendingPayload: null,
+    canSend: !op || ["reserved", "rejected", "refused"].includes(op.state),
+    canClose: false,
+    retryPending: op?.state === "reserved",
+    pollable: !!op && isPollable(op),
+    notice: null,
+    retryAfter: null,
+  };
+}
+
+/** The Atlas Super Admin's status body (projectStatus). */
 function statusBody(
   op: OperationRow | null,
   link: LinkRow | null,
-  superAdmin: boolean,
-  notice: string | null = null,
-  retryAfter: number | null = null,
+  notice: string | null,
+  retryAfter: number | null,
 ): OnboardingStatus {
   return {
     operation: op
@@ -425,8 +505,9 @@ function statusBody(
           }),
           // An adopted request's destination and revision are FlightDeck's;
           // the row only holds what the adopting request asked for.
-          destinationWorkspaceId:
-            superAdmin && !op.adopted ? op.destination_workspace_id : null,
+          destinationWorkspaceId: op.adopted
+            ? null
+            : op.destination_workspace_id,
           submittedAt: op.received_at,
           reasonCode: op.reason_code,
           setupState: op.setup_state,
@@ -436,21 +517,18 @@ function statusBody(
           checkedAt: op.checked_at,
         }
       : null,
-    link:
-      superAdmin && link
-        ? {
-            workspaceId: link.workspace_id,
-            osProjectId: link.os_project_id,
-            linkedAt: link.linked_at,
-            accessState: link.access_state,
-          }
-        : null,
+    link: link
+      ? {
+          workspaceId: link.workspace_id,
+          osProjectId: link.os_project_id,
+          linkedAt: link.linked_at,
+          accessState: link.access_state,
+        }
+      : null,
     pendingPayload:
-      superAdmin && op?.state === "reserved"
-        ? (reservedEnvelope(op)?.payload ?? null)
-        : null,
+      op?.state === "reserved" ? (reservedEnvelope(op)?.payload ?? null) : null,
     canSend: !op || ["reserved", "rejected", "refused"].includes(op.state),
-    canClose: superAdmin && !!op && isClosable(op),
+    canClose: !!op && isClosable(op),
     retryPending: op?.state === "reserved",
     pollable: !!op && isPollable(op),
     notice,
@@ -480,13 +558,19 @@ export function createOnboardRoute<A extends OnboardAccess>(
     retryAfter: number | null = null,
   ) {
     const installationId = deps.installationId();
-    return statusBody(
-      await latestOperation(db, atlasProjectId),
-      installationId ? await linkFor(db, installationId, atlasProjectId) : null,
-      superAdmin,
+    // An editor's projection never shows the link, so it is not read.
+    return projectStatus(
+      { superAdmin },
+      {
+        operation: await latestOperation(db, atlasProjectId),
+        link:
+          superAdmin && installationId
+            ? await linkFor(db, installationId, atlasProjectId)
+            : null,
+      },
       notice,
       retryAfter,
-    );
+    )!;
   }
 
   /** Stores the OS answer to the one remote write. `retry`: the call

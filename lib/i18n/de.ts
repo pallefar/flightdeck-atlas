@@ -51,6 +51,8 @@ export const de: Record<MessageKey, string> = {
   "onb.reason.link_conflict":
     "Dieses FlightDeck-Projekt ist bereits anderweitig verknüpft, daher hat Atlas es nicht verknüpft.",
   "onb.reason.submission_not_found": "FlightDeck kennt diese Anfrage nicht.",
+  "onb.reason.waiting_to_be_filed":
+    "Gesendet, wartet darauf, dass FlightDeck sie ablegt.",
   "onb.reason.abandoned":
     "Der Atlas-Super-Admin hat sie geschlossen, bevor FlightDeck sie bestätigt hat.",
   "onb.reason.duplicate": "Sie doppelt eine andere Anfrage.",
