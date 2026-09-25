@@ -442,20 +442,44 @@ test.describe("waiting view: what it says", () => {
     ).toBeNull();
   });
 
-  test("an editor sees 'Last update seen <t>'; the Super Admin keeps 'Last checked'", () => {
+  test("an editor sees 'Last update seen <t>' from observed updates only; the Super Admin keeps 'Last checked'", () => {
     const editor = api.waitingView!(status({}), {
       superAdmin: false,
       locale: "en",
       when,
     });
-    expect(editor.freshness).toBe("Last update seen @12:04");
-    const none = api.waitingView!(
+    // No observed transition: a check attempt alone is not an update seen.
+    expect(editor.freshness).toBe("No update seen yet");
+    // The editor's time is the latest update Atlas observed, never the last
+    // check attempt: a failing read-back advances checkedAt but is no update.
+    const observed = api.waitingView!(
       status({
-        operation: { ...status({}).operation!, checkedAt: null },
+        unreachableSince: "2026-09-22T11:00:00.000Z",
+        transitions: [
+          { stage: "submitted", observedAt: "2026-09-22T09:15:00.000Z" },
+          { stage: "linked", observedAt: "2026-09-22T10:30:00.000Z" },
+        ],
       }),
       { superAdmin: false, locale: "en", when },
     );
-    expect(none.freshness).toBe("No update seen yet");
+    expect(observed.freshness).toBe("Last update seen @10:30");
+    // A send with no read-back yet still shows its recorded submission.
+    const sentOnly = api.waitingView!(
+      status({
+        operation: { ...status({}).operation!, checkedAt: null },
+        transitions: [
+          { stage: "submitted", observedAt: "2026-09-22T09:15:00.000Z" },
+        ],
+      }),
+      { superAdmin: false, locale: "en", when },
+    );
+    expect(sentOnly.freshness).toBe("Last update seen @09:15");
+    // Only backfilled rows ("before tracking"): no time was seen.
+    const backfilled = api.waitingView!(
+      status({ transitions: [{ stage: "submitted", observedAt: null }] }),
+      { superAdmin: false, locale: "en", when },
+    );
+    expect(backfilled.freshness).toBe("No update seen yet");
     const admin = api.waitingView!(status({}), {
       superAdmin: true,
       locale: "en",

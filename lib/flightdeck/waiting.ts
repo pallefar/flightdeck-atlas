@@ -32,8 +32,9 @@ export type WaitingView = {
   next: string | null;
   /** Only with an owner-set response policy, while FlightDeck reviews. */
   eta: string | null;
-  /** Super Admin: when Atlas last checked. Editor: when the last update was
-   * seen (their view never checks). Only while FlightDeck may move it. */
+  /** Super Admin: when Atlas last checked. Editor: when Atlas last observed
+   * an update (a transition), not a check attempt (their view never checks).
+   * Only while FlightDeck may move it. */
   freshness: string | null;
 };
 
@@ -88,14 +89,25 @@ export function waitingView(
     ].join(" ");
   });
   const days = status.responsePolicyDays ?? null;
+  // The editor's "last update seen" is the newest transition Atlas actually
+  // observed (the recorded submission counts), never op.checkedAt: a failed
+  // read-back still advances checked_at, so it would claim an update that
+  // never arrived, and keep moving during an outage.
+  const lastSeen = (status.transitions ?? []).reduce<string | null>(
+    (latest, row) =>
+      row.observedAt && (latest === null || row.observedAt > latest)
+        ? row.observedAt
+        : latest,
+    null,
+  );
   const freshness =
     op && status.pollable
       ? options.superAdmin
         ? op.checkedAt
           ? t("onb.check.last", locale, { when: when(op.checkedAt) })
           : t("onb.check.never", locale)
-        : op.checkedAt
-          ? t("onb.check.seen", locale, { when: when(op.checkedAt) })
+        : lastSeen
+          ? t("onb.check.seen", locale, { when: when(lastSeen) })
           : t("onb.check.seenNever", locale)
       : null;
   return {
