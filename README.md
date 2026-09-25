@@ -95,6 +95,16 @@ The future SDK/master-app/TEOA contract is in [docs/MASTER-APP-CONTRACT.md](docs
 
 Connections has **From FlightDeck** and **To FlightDeck** flows. Atlas onboarding drafts persist with proposed OS names, workspace planning notes and FlightDeck details; users can edit, remove and export them. The Super Admin can send a saved, complete draft to FlightDeck as a proposal (above); nothing is sent automatically. Import from FlightDeck stays disconnected until delegated identity and project-level access exist with the SDK. See [the bridge contract](docs/PROJECT-BRIDGE-CONTRACT.md).
 
+## i18n
+
+Atlas has one i18n module, `lib/i18n`, with English and German and no dependency. The onboarding, apps, pages and CRM lanes all use it.
+
+- **Keys.** `lib/i18n/en.ts` is the source, and its keys form the typed `MessageKey` union. `lib/i18n/de.ts` is typed `Record<MessageKey, string>`, so a missing German key fails `npx tsc --noEmit`. `tests/i18n.spec.ts` also checks that both files have the same keys and placeholders. Each lane adds keys only under its own namespace: `onb.*`, `apps.*`, `pages.*` or `crm.*`.
+- **Lookup.** `t(key, locale, params)` fills `{name}` placeholders. Outside production a missing key throws. In production it falls back to English.
+- **Locale.** `resolveLocale` picks the first of these that Atlas supports: a saved profile preference (none is stored yet), then `<html lang>`, then Accept-Language, then `en`. On the server, `resolveRequestLocale(request)` in `lib/i18n/server.ts` does the same. The root layout sets `<html lang>` and the client `I18nProvider` from it. Client components use `useLocale()` or `useT()` from `lib/i18n/react.tsx`.
+- **Adoption rule.** Each lane moves its own strings to the module when it next changes them. No lane has to migrate the whole app. English output must stay exactly the same when a string moves, so existing tests and accessible names keep matching.
+- **Review.** Every German string still needs a native reviewer (`DE_REVIEW_STATUS = "needs native review"`) until one signs it off.
+
 ## Wellbeing and personal overview
 
 - Account-specific browser storage for daily mood, rest/energy/clarity check-ins, a transparent self-reported readiness score, habits and original daily reflections. No check-in enters shared project APIs or AI feeds.

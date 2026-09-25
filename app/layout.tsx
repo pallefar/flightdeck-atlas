@@ -11,7 +11,10 @@ import "./suite.css";
 import "./work-management.css";
 import "./work-studio.css";
 import "./navigation.css";
+import { headers } from "next/headers";
 import ThemeProvider from "./theme-provider";
+import { resolveRequestLocale } from "@/lib/i18n/server";
+import { I18nProvider } from "@/lib/i18n/react";
 
 export const metadata: Metadata = {
   title: "TE Connectivity | Atlas",
@@ -26,15 +29,20 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // No profile language is stored yet, so the browser's Accept-Language
+  // decides; <html lang> then carries it to the client (x-atlas-i18n).
+  const locale = resolveRequestLocale(await headers());
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang={locale} suppressHydrationWarning>
       <body className="antialiased">
-        <ThemeProvider>{children}</ThemeProvider>
+        <I18nProvider locale={locale}>
+          <ThemeProvider>{children}</ThemeProvider>
+        </I18nProvider>
       </body>
     </html>
   );
