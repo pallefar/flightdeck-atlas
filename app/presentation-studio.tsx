@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { createDeck, templates, type Deck } from "@/lib/presentations";
+import { serializeDeckExport } from "@/lib/deck-export";
 import { useT } from "@/lib/i18n/react";
 import type { Project } from "@/lib/projects";
 async function fetchDecks(offset: number, scopedProjectId?: string) {
@@ -225,7 +226,7 @@ export default function PresentationStudio({
         withheld: unknown[];
       };
       const url = URL.createObjectURL(
-        new Blob([JSON.stringify(b, null, 2)], { type: "application/json" }),
+        new Blob([serializeDeckExport(b)], { type: "application/json" }),
       );
       const a = document.createElement("a");
       a.href = url;

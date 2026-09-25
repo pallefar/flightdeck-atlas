@@ -23,8 +23,15 @@ import type { DeckAccess, DeckAuth } from "./deck-policy";
 
 export const DECK_EXPORT_FORMAT = "atlas-decks-v0";
 /** The OS import refuses a file over DECK_IMPORT_FILE_MAX_BYTES (5 MiB); a
- * deck that would push the file past it is withheld, so the file imports. */
+ * deck that would push the DOWNLOADED FILE (envelope, checksums, withheld
+ * report and indentation included) past it is withheld, so the file imports. */
 export const DECK_EXPORT_MAX_BYTES = 5 * 1024 * 1024;
+/** The exact text the Studio saves as the export file. The size budget is
+ * taken over these bytes, so both sides must use this one function. */
+export function serializeDeckExport(body: unknown): string {
+  return JSON.stringify(body, null, 2);
+}
+const utf8Length = (text: string) => new TextEncoder().encode(text).length;
 export type WithheldReason = "source_unavailable" | "invalid" | "too_large";
 export type DeckExportDb = {
   prepare(query: string): {
@@ -79,9 +86,12 @@ export function createDeckExportRoute<A extends DeckAccess>(deps: {
           )
           .bind(a.access.userId)
           .all<Row>();
-        const decks: (Record<string, unknown> & { checksum: string })[] = [],
+        type Exported = Record<string, unknown> & {
+          id: string;
+          checksum: string;
+        };
+        const eligible: Exported[] = [],
           withheld: { id: string; reason: WithheldReason }[] = [];
-        let bytes = 0;
         for (const row of rows.results) {
           let data;
           try {
@@ -107,19 +117,42 @@ export function createDeckExportRoute<A extends DeckAccess>(deps: {
             ...data,
           };
           const utf8 = new TextEncoder().encode(canonicalJson(deck));
-          if (bytes + utf8.length > maxBytes) {
-            withheld.push({ id: row.id, reason: "too_large" });
-            continue;
-          }
-          bytes += utf8.length;
-          decks.push({ ...deck, checksum: await sha256(utf8) });
+          eligible.push({ ...deck, checksum: await sha256(utf8) });
         }
-        return json({
+        const body = {
           format: DECK_EXPORT_FORMAT,
           exportedAt: new Date().toISOString(),
-          decks,
+          decks: [] as Exported[],
           withheld,
-        });
+        };
+        // Budget the downloaded file itself. A deck sits in the file at
+        // indentation depth 2: its own pretty text with every line indented
+        // 4 more, then ",\n" between elements; a non-empty array is "[\n"
+        // ... "\n  ]" (6 bytes) where the empty one measured here is "[]".
+        const fileSize = (deckBytes: number, count: number) =>
+          utf8Length(serializeDeckExport({ ...body, decks: [] })) +
+          (count ? deckBytes + 2 * count + 2 : 0);
+        let deckBytes = 0;
+        for (const deck of eligible) {
+          const text = serializeDeckExport(deck);
+          const size = utf8Length(text) + 4 * (text.split("\n").length - 1) + 4;
+          if (fileSize(deckBytes + size, body.decks.length + 1) > maxBytes) {
+            withheld.push({ id: deck.id, reason: "too_large" });
+            continue;
+          }
+          deckBytes += size;
+          body.decks.push(deck);
+        }
+        // The withheld entries added after a deck was accepted can still
+        // push the file over: measure the real bytes and give back decks,
+        // newest-accepted last, until it fits (fails closed on the limit).
+        while (utf8Length(serializeDeckExport(body)) > maxBytes) {
+          const last = body.decks.pop();
+          if (!last)
+            return json({ error: "Presentations could not be exported." }, 503);
+          withheld.push({ id: last.id, reason: "too_large" });
+        }
+        return json(body);
       } catch {
         return json({ error: "Presentations could not be exported." }, 503);
       }

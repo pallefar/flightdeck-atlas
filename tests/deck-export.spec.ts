@@ -9,6 +9,7 @@ import {
   canonicalJson,
   createDeckExportRoute,
   DECK_EXPORT_FORMAT,
+  serializeDeckExport,
   type DeckExportDb,
 } from "../lib/deck-export";
 
@@ -189,7 +190,13 @@ test("a deck someone else owns is absent, even a shared one on a readable source
 test("a deck with a lost source project is withheld, not exported", async () => {
   const h = harness(["a"]);
   h.insert("ok", "owner", deckFor("a"), 1, "2026-09-20T10:00:00.000Z");
-  h.insert("lost", "owner", deckFor("a", "gone"), 1, "2026-09-21T10:00:00.000Z");
+  h.insert(
+    "lost",
+    "owner",
+    deckFor("a", "gone"),
+    1,
+    "2026-09-21T10:00:00.000Z",
+  );
   h.insert("broken", "owner", "{not json", 1, "2026-09-19T10:00:00.000Z");
   const b = await read(await h.route.GET(get()));
   expect(b.decks.map((d) => d.id)).toEqual(["ok"]);
@@ -256,7 +263,13 @@ test("the export validates against the OS Atlas v0 reader and its fixture", asyn
   expect(atlasV0Schema.safeParse(fixture).success).toBe(true);
   const h = harness(["atlas-proj-falcon", "atlas-proj-heron"]);
   const { id, revision, updatedAt, ...data } = fixture;
-  h.insert(id as string, "owner", data, revision as number, updatedAt as string);
+  h.insert(
+    id as string,
+    "owner",
+    data,
+    revision as number,
+    updatedAt as string,
+  );
   h.insert("d2", "owner", deckFor("atlas-proj-falcon"));
   const b = await read(await h.route.GET(get()));
   expect(b.decks).toHaveLength(2);
@@ -274,21 +287,89 @@ test("the export validates against the OS Atlas v0 reader and its fixture", asyn
   expect(withoutChecksum(round)).toEqual(fixture);
 });
 
-test("a deck that would push the file past the import limit is withheld as too_large", async () => {
+// The bytes the downloader saves: presentation-studio.tsx writes the
+// response body through serializeDeckExport (asserted below), so this is
+// the size of the file the OS import receives.
+const fileBytes = (b: Exported) =>
+  new TextEncoder().encode(serializeDeckExport(b)).length;
+
+test("the Studio downloader writes the file through serializeDeckExport", () => {
+  const studio = readFileSync(
+    new URL("../app/presentation-studio.tsx", import.meta.url),
+    "utf8",
+  );
+  expect(studio).toContain("new Blob([serializeDeckExport(b)]");
+  expect(serializeDeckExport({ a: [1] })).toBe(
+    JSON.stringify({ a: [1] }, null, 2),
+  );
+});
+
+function bulkyHarness(count: number) {
   const h = harness(["a"]);
-  h.insert("small", "owner", deckFor("a"), 1, "2026-09-21T10:00:00.000Z");
-  h.insert("big", "owner", deckFor("a"), 1, "2026-09-20T10:00:00.000Z");
+  for (let i = 0; i < count; i++) {
+    const deck = deckFor("a");
+    deck.slides = deck.slides.map((s) => ({ ...s, body: "x".repeat(4000) }));
+    const at = `2026-09-${String(10 + i).padStart(2, "0")}T10:00:00.000Z`;
+    h.insert(`d${String(i).padStart(2, "0")}`, "owner", deck, 1, at);
+  }
+  const capped = (maxBytes: number) =>
+    createDeckExportRoute({
+      authorize: async () => ({ access: { userId: "owner" } }),
+      database: () => h.db,
+      canReadSource: async () => true,
+      maxBytes,
+    });
+  return { h, capped };
+}
+
+test("the downloaded file, envelope and checksums included, stays within the import limit", async () => {
+  const { h, capped } = bulkyHarness(12);
   const all = await read(await h.route.GET(get()));
-  const first = new TextEncoder().encode(
-    canonicalJson(withoutChecksum(all.decks[0])),
-  ).length;
-  const capped = createDeckExportRoute({
-    authorize: async () => ({ access: { userId: "owner" } }),
-    database: () => h.db,
-    canReadSource: async () => true,
-    maxBytes: first + 10,
-  });
-  const b = await read(await capped.GET(get()));
-  expect(b.decks.map((d) => d.id)).toEqual(["small"]);
-  expect(b.withheld).toEqual([{ id: "big", reason: "too_large" }]);
+  expect(all.decks).toHaveLength(12);
+  // What a deck-only budget counts: the canonical JSON of each deck.
+  const deckOnly = all.decks
+    .map(
+      (d) => new TextEncoder().encode(canonicalJson(withoutChecksum(d))).length,
+    )
+    .reduce((x, y) => x + y, 0);
+  const limit = deckOnly + 1000;
+  expect(fileBytes(all)).toBeGreaterThan(limit);
+  const b = await read(await capped(limit).GET(get()));
+  expect(fileBytes(b)).toBeLessThanOrEqual(limit);
+  expect(b.withheld.length).toBeGreaterThan(0);
+  expect(b.withheld.every((w) => w.reason === "too_large")).toBe(true);
+  expect(b.decks.length + b.withheld.length).toBe(12);
+});
+
+test("a file that fits exactly exports every deck; one byte less withholds the oldest as too_large", async () => {
+  const { h, capped } = bulkyHarness(12);
+  const all = await read(await h.route.GET(get()));
+  const exact = fileBytes(all);
+  const fit = await read(await capped(exact).GET(get()));
+  expect(fit.decks).toHaveLength(12);
+  expect(fit.withheld).toEqual([]);
+  expect(fileBytes(fit)).toBe(exact);
+  const over = await read(await capped(exact - 1).GET(get()));
+  expect(fileBytes(over)).toBeLessThanOrEqual(exact - 1);
+  expect(over.decks.map((d) => d.id)).toEqual(
+    all.decks.slice(0, 11).map((d) => d.id),
+  );
+  expect(over.withheld).toEqual([{ id: "d00", reason: "too_large" }]);
+});
+
+test("a too_large entry added after the budget filled still leaves the file within the limit", async () => {
+  const { h, capped } = bulkyHarness(12);
+  const all = await read(await h.route.GET(get()));
+  // Exactly the file of the 11 newest decks with nothing withheld: the
+  // oldest then no longer fits, and its withheld entry itself adds bytes.
+  const limit = fileBytes({ ...all, decks: all.decks.slice(0, 11) });
+  const b = await read(await capped(limit).GET(get()));
+  expect(fileBytes(b)).toBeLessThanOrEqual(limit);
+  expect(b.decks.map((d) => d.id)).toEqual(
+    all.decks.slice(0, 10).map((d) => d.id),
+  );
+  expect(b.withheld).toEqual([
+    { id: "d00", reason: "too_large" },
+    { id: "d01", reason: "too_large" },
+  ]);
 });
