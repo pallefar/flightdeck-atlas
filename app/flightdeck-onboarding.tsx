@@ -14,6 +14,7 @@ import {
   Check,
   Clock,
   Layers3,
+  MessageSquare,
   Plus,
   Send,
   Sparkles,
@@ -51,6 +52,7 @@ import {
   checklistSuggestions,
   countryName,
   fieldLabel,
+  flaggedFields,
   headcountBands,
   isDraftLocked,
   onboardingSummaryLine,
@@ -946,6 +948,12 @@ export function OnboardingEditor({
     onStage,
   );
   const op = status?.operation ?? null;
+  // The reviewer's pointers (needs more info only): each outlines its
+  // fields and badges its step. Unknown pointers are ignored.
+  const flagged = flaggedFields(
+    op?.stage === "needs-more-info" ? op.fields : undefined,
+  );
+  const bad = (id: string) => flagged.ids.has(id) || undefined;
   useEffect(() => {
     if (!pendingFocus.current) return;
     document.getElementById(pendingFocus.current)?.focus();
@@ -1401,7 +1409,9 @@ export function OnboardingEditor({
     extra?: React.ReactNode,
     wide = false,
   ) => (
-    <div className={`fd-field${wide ? " fd-wide" : ""}`}>
+    <div
+      className={`fd-field${wide ? " fd-wide" : ""}${flagged.ids.has(id) ? " fd-flagged" : ""}`}
+    >
       <label htmlFor={id}>{label}</label>
       {control}
       {extra}
@@ -1435,6 +1445,35 @@ export function OnboardingEditor({
           superAdmin={superAdmin}
         />
       )}
+      {op?.stage === "needs-more-info" &&
+        (op.note || !!flagged.pointers.length) && (
+          <div
+            className="fd-reviewer-note"
+            role="note"
+            aria-labelledby={`fd-note-${project.id}`}
+          >
+            <p id={`fd-note-${project.id}`}>
+              <MessageSquare size={15} /> {t("onb.note.title", locale)}
+            </p>
+            {/* A text node: FlightDeck sends plain text, never markup. */}
+            {op.note && <p className="fd-note-text">{op.note}</p>}
+            {!!flagged.pointers.length && (
+              <ul aria-label={t("onb.note.fields", locale)}>
+                {flagged.pointers.map((p) => (
+                  <li key={p.pointer}>
+                    <button
+                      type="button"
+                      className="text-link"
+                      onClick={() => goTo(p.step, p.field)}
+                    >
+                      {p.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       {unknown ? (
         <div className={`fd-banner${failed ? " warn" : ""}`} role="status">
           {failed ? <AlertTriangle size={16} /> : <Clock size={16} />}
@@ -1482,6 +1521,13 @@ export function OnboardingEditor({
                   {i + 1}
                 </span>
                 {t(STEP_LABEL[item.id], locale)}
+                {flagged.steps.has(item.id) && (
+                  <span className="fd-step-flag">
+                    <span className="sr-only">
+                      {t("onb.step.flagged", locale)}
+                    </span>
+                  </span>
+                )}
               </button>
             </li>
           ))}
@@ -1623,6 +1669,7 @@ export function OnboardingEditor({
               <>
                 <Input
                   id="fd-function"
+                aria-invalid={bad("fd-function")}
                   list="fd-functions"
                   maxLength={80}
                   value={draft.functionArea}
@@ -1641,6 +1688,7 @@ export function OnboardingEditor({
               "Category",
               <Input
                 id="fd-category"
+                aria-invalid={bad("fd-category")}
                 required
                 maxLength={60}
                 value={draft.category}
@@ -1653,6 +1701,7 @@ export function OnboardingEditor({
               "Summary",
               <Textarea
                 id="fd-summary"
+                aria-invalid={bad("fd-summary")}
                 maxLength={1500}
                 rows={4}
                 value={draft.description}
@@ -1671,6 +1720,7 @@ export function OnboardingEditor({
               "Success measure",
               <Textarea
                 id="fd-success"
+                aria-invalid={bad("fd-success")}
                 maxLength={500}
                 rows={2}
                 value={draft.benefit}
@@ -1684,6 +1734,7 @@ export function OnboardingEditor({
               "Status",
               <select
                 id="fd-status"
+                aria-invalid={bad("fd-status")}
                 className="fd-select"
                 value={draft.status}
                 onChange={(e) =>
@@ -1702,6 +1753,7 @@ export function OnboardingEditor({
               "Priority",
               <select
                 id="fd-priority"
+                aria-invalid={bad("fd-priority")}
                 className="fd-select"
                 value={draft.priority}
                 onChange={(e) =>
@@ -1719,6 +1771,7 @@ export function OnboardingEditor({
               "Target date",
               <Input
                 id="fd-target"
+                aria-invalid={bad("fd-target")}
                 type="date"
                 value={draft.dueDate}
                 onChange={(e) => set("dueDate", e.target.value)}
@@ -1729,6 +1782,7 @@ export function OnboardingEditor({
               "Site",
               <Input
                 id="fd-site"
+                aria-invalid={bad("fd-site")}
                 maxLength={100}
                 value={draft.location}
                 onChange={(e) => set("location", e.target.value)}
@@ -1766,6 +1820,7 @@ export function OnboardingEditor({
               "Country",
               <select
                 id="fd-country"
+                aria-invalid={bad("fd-country")}
                 className="fd-select"
                 value={draft.onboarding.countryCode ?? ""}
                 onChange={(e) =>
@@ -1788,6 +1843,7 @@ export function OnboardingEditor({
               "Works council relevant",
               <select
                 id="fd-works-council"
+                aria-invalid={bad("fd-works-council")}
                 className="fd-select"
                 value={draft.onboarding.worksCouncilRelevant ?? ""}
                 onChange={(e) =>
@@ -1812,6 +1868,7 @@ export function OnboardingEditor({
               "Legal entity (optional)",
               <Input
                 id="fd-legal"
+                aria-invalid={bad("fd-legal")}
                 maxLength={120}
                 value={draft.onboarding.legalEntity ?? ""}
                 onChange={(e) =>
@@ -1825,6 +1882,7 @@ export function OnboardingEditor({
               "Headcount band (optional)",
               <select
                 id="fd-headcount"
+                aria-invalid={bad("fd-headcount")}
                 className="fd-select"
                 value={draft.onboarding.headcountBand ?? ""}
                 onChange={(e) =>
@@ -1860,6 +1918,7 @@ export function OnboardingEditor({
                 label,
                 <Input
                   id={`fd-role-${role}`}
+                  aria-invalid={bad(`fd-role-${role}`)}
                   maxLength={80}
                   value={draft.onboarding.ownerRoles?.[role] ?? ""}
                   onChange={(e) => setRole(role, e.target.value)}
@@ -1870,7 +1929,9 @@ export function OnboardingEditor({
                 />,
               ),
             )}
-            <div className="fd-field fd-wide">
+            <div
+              className={`fd-field fd-wide${bad("fd-sources") ? " fd-flagged" : ""}`}
+            >
               <span id="fd-sources-label">Data sources</span>
               <ul className="fd-chips" aria-labelledby="fd-sources-label">
                 {(draft.onboarding.dataSources ?? []).map((source, i) => (
@@ -1895,6 +1956,8 @@ export function OnboardingEditor({
               </ul>
               <div className="fd-add">
                 <Input
+                  id="fd-sources"
+                  aria-invalid={bad("fd-sources")}
                   aria-label="New data source"
                   maxLength={80}
                   placeholder="e.g. SAP HCM"
@@ -1927,7 +1990,9 @@ export function OnboardingEditor({
                 strict
               />
             </div>
-            <div className="fd-field fd-wide">
+            <div
+              className={`fd-field fd-wide${bad("fd-access") ? " fd-flagged" : ""}`}
+            >
               <span id="fd-access-label">Access requested</span>
               <span className="fd-hint">
                 Shown to the OS reviewer as to-dos. Nothing is granted by
@@ -1956,6 +2021,8 @@ export function OnboardingEditor({
               </ul>
               <div className="fd-add">
                 <Input
+                  id="fd-access"
+                  aria-invalid={bad("fd-access")}
                   aria-label="System"
                   maxLength={80}
                   placeholder="e.g. SAP HCM"
@@ -2011,9 +2078,13 @@ export function OnboardingEditor({
                 strict
               />
             </div>
-            <label className="fd-check fd-wide" htmlFor="fd-cowork">
+            <label
+              className={`fd-check fd-wide${bad("fd-cowork") ? " fd-flagged" : ""}`}
+              htmlFor="fd-cowork"
+            >
               <input
                 id="fd-cowork"
+                aria-invalid={bad("fd-cowork")}
                 type="checkbox"
                 checked={!!draft.onboarding.coworkRequested}
                 onChange={(e) => setDetail("coworkRequested", e.target.checked)}

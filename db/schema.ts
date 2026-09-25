@@ -209,6 +209,13 @@ export const flightdeckTransitions = sqliteTable(
     stage: text("stage").notNull(),
     observedAt: text("observed_at"),
     source: text("source").notNull(),
+    /** The reviewer's plain-text note (D-037 item 5), on a needs-more-info
+     * row only, and the allowlisted field pointers with it (a JSON array).
+     * This row is the note's only home in Atlas. Cleared once the send
+     * moves on or a new send of the project is made, and deleted with the
+     * send (the project delete). Written only through applyObservedStage. */
+    note: text("note"),
+    fields: text("fields"),
   },
   (t) => [
     uniqueIndex("uniq_atlas_fd_transitions_send_seq").on(t.sendId, t.seq),

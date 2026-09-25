@@ -10,7 +10,14 @@
 // so the rules below hold whoever reports a stage and in whatever order the
 // reports arrive.
 import type { OnboardDb } from "./onboard-route";
-import { onboardingStages, type OnboardingStage } from "./onboarding";
+import {
+  FIELD_POINTERS,
+  onboardingStages,
+  reviewerNoteSchema,
+  type FieldPointer,
+  type OnboardingStage,
+} from "./onboarding";
+import { z } from "zod";
 
 /** How Atlas saw a stage. 'atlas': the answer to Atlas's own action (the
  * send's reply, or the Super Admin closing a send), 'poll': a read-back,
@@ -79,34 +86,101 @@ export function mayFollow(
 const uniqueViolation = (error: unknown) =>
   /UNIQUE constraint failed/i.test(String((error as Error)?.message));
 
+/** The reviewer's note and field pointers FlightDeck returned with a
+ * needs-more-info answer (D-037 item 5). */
+export type DecisionNote = { note?: string; fields?: FieldPointer[] };
+const storedFieldsSchema = z.array(z.enum(FIELD_POINTERS));
+
 /** Records that Atlas saw send `sendId` at `stage`, at `at`. One
  * conditional INSERT…SELECT: seq is the send's max + 1, and the row is
  * written only while the send exists and its latest stage is one `stage`
  * may follow (mayFollow; so never a repeat of the latest). Two writers
  * racing to the same seq meet UNIQUE(send_id, seq): the loser records
- * nothing. Returns whether a row was written. */
+ * nothing. Returns whether a row was written.
+ *
+ * `decision`: the reviewer's note and pointers, kept on this row only when
+ * `stage` is needs-more-info. A row written after it deletes the note (the
+ * trigger in migration 0008): the send moved on (sent again, closed), so
+ * the note has done its job. */
 export async function applyObservedStage(
   db: OnboardDb,
   sendId: string,
   stage: OnboardingStage,
   at: string,
   source: Exclude<TransitionSource, "backfill">,
+  decision: DecisionNote = {},
 ): Promise<boolean> {
   const after = onboardingStages.filter((prev) => mayFollow(prev, stage));
   const latest =
     "(SELECT stage FROM atlas_flightdeck_transitions WHERE send_id=?1 ORDER BY seq DESC LIMIT 1)";
   const sql =
-    "INSERT INTO atlas_flightdeck_transitions (send_id,seq,stage,observed_at,source) " +
-    "SELECT ?1,COALESCE((SELECT MAX(seq) FROM atlas_flightdeck_transitions WHERE send_id=?1),0)+1,?2,?3,?4 " +
+    "INSERT INTO atlas_flightdeck_transitions (send_id,seq,stage,observed_at,source,note,fields) " +
+    "SELECT ?1,COALESCE((SELECT MAX(seq) FROM atlas_flightdeck_transitions WHERE send_id=?1),0)+1,?2,?3,?4,?5,?6 " +
     "WHERE EXISTS(SELECT 1 FROM atlas_flightdeck_operations WHERE id=?1) " +
     `AND (${latest} IS NULL${after.length ? ` OR ${latest} IN (${after.map((s) => `'${s}'`).join(",")})` : ""})`;
+  // Only a well-formed note travels into the row; anything else is dropped.
+  const keep = stage === "needs-more-info";
+  const note = keep ? reviewerNoteSchema.safeParse(decision.note) : null;
+  const fields = keep ? storedFieldsSchema.safeParse(decision.fields) : null;
   try {
-    const result = await db.prepare(sql).bind(sendId, stage, at, source).run();
+    const result = await db
+      .prepare(sql)
+      .bind(
+        sendId,
+        stage,
+        at,
+        source,
+        note?.success ? note.data : null,
+        fields?.success && fields.data.length
+          ? JSON.stringify(fields.data)
+          : null,
+      )
+      .run();
     return result.meta.changes > 0;
   } catch (error) {
     if (uniqueViolation(error)) return false;
     throw error;
   }
+}
+
+/** The note of send `sendId`, from its latest row, while that row is its
+ * needs-more-info answer; empty otherwise. */
+export async function decisionNoteOf(
+  db: OnboardDb,
+  sendId: string,
+): Promise<DecisionNote> {
+  const row = await db
+    .prepare(
+      "SELECT stage,note,fields FROM atlas_flightdeck_transitions WHERE send_id=? ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(sendId)
+    .first<{ stage: string; note: string | null; fields: string | null }>();
+  if (!row || row.stage !== "needs-more-info") return {};
+  const note = reviewerNoteSchema.safeParse(row.note);
+  let fields: FieldPointer[] = [];
+  try {
+    const parsed = storedFieldsSchema.safeParse(
+      row.fields ? JSON.parse(row.fields) : [],
+    );
+    if (parsed.success) fields = parsed.data;
+  } catch {
+    // An unreadable value is no pointer.
+  }
+  return {
+    ...(note.success ? { note: note.data } : {}),
+    ...(fields.length ? { fields } : {}),
+  };
+}
+
+/** Deletes the notes of every earlier send of a project: a new send of it
+ * is the corrected request, so the note is not kept beyond its send. */
+export async function clearProjectNotes(db: OnboardDb, atlasProjectId: string) {
+  await db
+    .prepare(
+      "UPDATE atlas_flightdeck_transitions SET note=NULL,fields=NULL WHERE (note IS NOT NULL OR fields IS NOT NULL) AND send_id IN (SELECT id FROM atlas_flightdeck_operations WHERE atlas_project_id=?)",
+    )
+    .bind(atlasProjectId)
+    .run();
 }
 
 /** A send's log, oldest first. */

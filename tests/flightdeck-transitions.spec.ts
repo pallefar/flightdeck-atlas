@@ -128,6 +128,9 @@ test("(a) a fresh D1 gets the transition table, keyed (send_id, seq), from the j
     { name: "stage", notnull: 1, type: "text" },
     { name: "observed_at", notnull: 0, type: "text" },
     { name: "source", notnull: 1, type: "text" },
+    // Migration 0008: the reviewer note, on a needs-more-info row only.
+    { name: "note", notnull: 0, type: "text" },
+    { name: "fields", notnull: 0, type: "text" },
   ]);
   const send = addSend(sqlite, "filed");
   const insert = sqlite.prepare(

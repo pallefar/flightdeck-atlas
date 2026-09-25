@@ -46,7 +46,13 @@ import {
   type OsSubmissionStatus,
   type SetupState,
 } from "./onboarding";
-import { applyObservedStage, type TransitionSource } from "./transitions";
+import {
+  applyObservedStage,
+  clearProjectNotes,
+  decisionNoteOf,
+  type DecisionNote,
+  type TransitionSource,
+} from "./transitions";
 import { NO_FEATURES, type InboundFeatures } from "./features";
 import { recordOnboardingMetric } from "./metrics";
 
@@ -448,14 +454,19 @@ export const WAITING_TO_BE_FILED = "waiting_to_be_filed";
  * editor's freshness is the Super Admin's poll (plan §7). */
 export function projectStatus(
   viewer: { superAdmin: boolean } | null,
-  send: { operation?: OperationRow | null; link?: LinkRow | null },
+  send: {
+    operation?: OperationRow | null;
+    link?: LinkRow | null;
+    /** The send's needs-more-info note (transitions.decisionNoteOf). */
+    decision?: DecisionNote;
+  },
   notice: string | null = null,
   retryAfter: number | null = null,
 ): OnboardingStatus | null {
   if (!viewer) return null;
   const op = send.operation ?? null;
   if (viewer.superAdmin)
-    return statusBody(op, send.link ?? null, notice, retryAfter);
+    return statusBody(op, send.link ?? null, notice, retryAfter, send.decision);
   const stage = op
     ? stageFor({
         state: op.state,
@@ -483,6 +494,7 @@ export function projectStatus(
             adopted: !!op.adopted,
             updatedAt: op.updated_at,
             checkedAt: op.checked_at,
+            ...noteFor(stage, send.decision),
           }
         : null,
     link: null,
@@ -496,22 +508,39 @@ export function projectStatus(
   };
 }
 
+/** The reviewer's note and pointers, for a needs-more-info send only. The
+ * requester is who fixes the draft, so both projections carry it. */
+function noteFor(
+  stage: OnboardingStage,
+  decision: DecisionNote | undefined,
+): Pick<NonNullable<OnboardingStatus["operation"]>, "note" | "fields"> {
+  if (stage !== "needs-more-info" || !decision) return {};
+  return {
+    ...(decision.note !== undefined ? { note: decision.note } : {}),
+    ...(decision.fields?.length ? { fields: [...decision.fields] } : {}),
+  };
+}
+
 /** The Atlas Super Admin's status body (projectStatus). */
 function statusBody(
   op: OperationRow | null,
   link: LinkRow | null,
   notice: string | null,
   retryAfter: number | null,
+  decision?: DecisionNote,
 ): OnboardingStatus {
+  const stage = op
+    ? stageFor({
+        state: op.state,
+        reasonCode: op.reason_code,
+        setupState: op.setup_state,
+      })
+    : null;
   return {
     operation: op
       ? {
           state: op.state,
-          stage: stageFor({
-            state: op.state,
-            reasonCode: op.reason_code,
-            setupState: op.setup_state,
-          }),
+          stage: stage!,
           // An adopted request's destination and revision are FlightDeck's;
           // the row only holds what the adopting request asked for.
           destinationWorkspaceId: op.adopted
@@ -524,6 +553,7 @@ function statusBody(
           adopted: !!op.adopted,
           updatedAt: op.updated_at,
           checkedAt: op.checked_at,
+          ...noteFor(stage!, decision),
         }
       : null,
     link: link
@@ -551,6 +581,9 @@ type Check = {
   notice: string | null;
   retryAfter: number | null;
   stop: boolean;
+  /** Needs more info only: the reviewer's note and pointers, for the
+   * transition row (never for the notice). */
+  decision?: DecisionNote;
 };
 
 export function createOnboardRoute<A extends OnboardAccess>(
@@ -584,6 +617,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
     db: OnboardDb,
     id: string,
     source: Exclude<TransitionSource, "backfill">,
+    decision?: DecisionNote,
   ) {
     try {
       const row = await db
@@ -604,7 +638,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
         setupState: row.setup_state,
       });
       const at = now().toISOString();
-      if (await applyObservedStage(db, id, stage, at, source)) {
+      if (await applyObservedStage(db, id, stage, at, source, decision)) {
         // Measures read off what Atlas saw, once per draft (default off).
         if (stage === "submitted")
           await measure(db, row.atlas_project_id, "sent", at);
@@ -624,11 +658,16 @@ export function createOnboardRoute<A extends OnboardAccess>(
     retryAfter: number | null = null,
   ) {
     const installationId = deps.installationId();
+    const operation = await latestOperation(db, atlasProjectId);
     // An editor's projection never shows the link, so it is not read.
     return projectStatus(
       { superAdmin },
       {
-        operation: await latestOperation(db, atlasProjectId),
+        operation,
+        decision:
+          operation?.state === "rejected"
+            ? await decisionNoteOf(db, operation.id)
+            : undefined,
         link:
           superAdmin && installationId
             ? await linkFor(db, installationId, atlasProjectId)
@@ -1056,6 +1095,9 @@ export function createOnboardRoute<A extends OnboardAccess>(
             "send_in_progress",
             "A send for this project is already in progress.",
           );
+        // This is the corrected request: an earlier send's reviewer note is
+        // not kept beyond it (D-037 item 5).
+        await clearProjectNotes(db, project.id);
       }
       const result = await submissions.submit(envelope);
       const response = await settle(
@@ -1231,7 +1273,15 @@ export function createOnboardRoute<A extends OnboardAccess>(
           },
           ["filed", "promoted"],
         );
-        return none;
+        return s.reasonCode === "needs-more-info"
+          ? {
+              ...none,
+              decision: {
+                ...(s.note !== undefined ? { note: s.note } : {}),
+                ...(s.fields !== undefined ? { fields: s.fields } : {}),
+              },
+            }
+          : none;
       case "promoted-or-withdrawn":
         await touch(receipt);
         return {
@@ -1346,7 +1396,8 @@ export function createOnboardRoute<A extends OnboardAccess>(
       if (found.canEdit && !op && found.project.onboarding === undefined)
         await measure(db, atlasProjectId, "draft-opened", now().toISOString());
       let notice: string | null = null,
-        retryAfter: number | null = null;
+        retryAfter: number | null = null,
+        decision: DecisionNote | undefined;
       // Only the Super Admin's view reads the OS: the machine credential
       // cannot filter per Atlas user (same rule as the context route).
       if (
@@ -1362,7 +1413,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
           notice =
             "FlightDeck is not configured, so Atlas cannot check this request.";
         else if (await claimCheck(db, op, POLL_MS)) {
-          ({ notice, retryAfter } = await reconcile(
+          ({ notice, retryAfter, decision } = await reconcile(
             db,
             op,
             os.reader,
@@ -1370,7 +1421,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
             os.installationId,
             access.userId,
           ));
-          await observe(db, op.id, "poll");
+          await observe(db, op.id, "poll", decision);
         }
       }
       return json(
@@ -1430,7 +1481,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
             os.installationId,
             access.userId,
           );
-          await observe(db, op.id, "poll");
+          await observe(db, op.id, "poll", result.decision);
           if (result.stop) {
             retryAfter = result.retryAfter;
             break;

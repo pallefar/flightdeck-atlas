@@ -30,6 +30,9 @@ export const de: Record<MessageKey, string> = {
   "onb.step.next": "Weiter",
   "onb.meter.forYou": "{done} von {total} für Sie",
   "onb.meter.required": "{done} von {total} erforderlich",
+  "onb.note.title": "Anmerkung der Prüfung",
+  "onb.note.fields": "Zu prüfende Felder",
+  "onb.step.flagged": "muss korrigiert werden",
   "onb.errors.title":
     "Bitte vervollständigen Sie diese Angaben, bevor Sie weitergehen:",
   "onb.check.last": "Zuletzt bei FlightDeck geprüft: {when}",
