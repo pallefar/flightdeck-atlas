@@ -11,6 +11,7 @@ import {
   json,
   sameOrigin,
   readFields,
+  lockedAiAgents,
   fromRow,
   newProject,
   requesterRequestsOn,
@@ -49,6 +50,9 @@ export async function POST(request: Request) {
   const auth = await authorize("projects.create");
   if (auth.error) return auth.error;
   const user = auth.access.userId;
+  const agents = await lockedAiAgents(request);
+  if (agents)
+    return json({ error: agents.error, code: agents.code }, agents.status);
   let fields;
   try {
     ({ fields } = await readFields(request));

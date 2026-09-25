@@ -76,6 +76,7 @@ import {
   type OnboardingStage,
   type OnboardingStatus,
   type OnboardingStep,
+  AI_AGENT_PREREQUISITES,
 } from "@/lib/flightdeck/onboarding";
 import { waitingView } from "@/lib/flightdeck/waiting";
 import { t, type Locale, type MessageKey } from "@/lib/i18n";
@@ -2271,7 +2272,37 @@ export function OnboardingEditor({
           <p className="fd-hint">{t("onb.step.apps.note", locale)}</p>
         )}
         {tab === "agents" && (
-          <p className="fd-hint">{t("onb.step.agents.note", locale)}</p>
+          // Locked: no inputs. The prerequisites are shown, never answered
+          // here, and nothing on this step is sent or counted.
+          <div className="fd-agents">
+            <p className="fd-hint">{t("onb.step.agents.note", locale)}</p>
+            <h4 id="fd-agents-prereq">{t("onb.agents.heading", locale)}</h4>
+            <div aria-labelledby="fd-agents-prereq">
+              {AI_AGENT_PREREQUISITES.map((group) => (
+                <section
+                  key={group.capability}
+                  aria-labelledby={`fd-agents-${group.capability}`}
+                >
+                  <h5 id={`fd-agents-${group.capability}`}>
+                    {t(`onb.agents.cap.${group.capability}`, locale)}
+                  </h5>
+                  <ul>
+                    {group.items.map((item) => (
+                      <li key={item.id}>
+                        {t(`onb.agents.pre.${item.id}` as MessageKey, locale)}{" "}
+                        <strong>{t(`onb.agents.status.${item.status}`, locale)}</strong>{" "}
+                        <span className="fd-hint">
+                          {t("onb.agents.ownerLabel", locale, {
+                            owner: t(`onb.agents.owner.${item.owner}`, locale),
+                          })}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          </div>
         )}
         {tab === "review" && (
           <div className="fd-review">

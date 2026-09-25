@@ -16,6 +16,7 @@ import {
   readFields,
   recordChanges,
   readScopedSave,
+  lockedAiAgents,
   requesterRequestsOn,
   onboardingMetricsEnabled,
 } from "@/lib/server-projects";
@@ -91,6 +92,9 @@ export async function PUT(
   const auth = await authorize("projects.read");
   if (auth.error) return auth.error;
   const { id } = await params;
+  const agents = await lockedAiAgents(request);
+  if (agents)
+    return json({ error: agents.error, code: agents.code }, agents.status);
   let scoped;
   try {
     scoped = await readScopedSave(request);

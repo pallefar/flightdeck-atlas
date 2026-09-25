@@ -24,6 +24,35 @@ export const en = {
     "Choosing apps for this project is not available yet. It is optional and never counted as a required detail.",
   "onb.step.agents.note":
     "AI agents are locked: they cannot be requested yet. Nothing on this step is sent or counted.",
+  // AI agents prerequisites (onb-aiagents-locked-atlas). OWNER REVIEW: this
+  // wording is a draft until the owner reviews it
+  // (AI_AGENTS_COPY_REVIEW_STATUS in lib/flightdeck/onboarding.ts).
+  "onb.agents.heading": "What must be in place before AI agents can be requested",
+  "onb.agents.status.open": "Open",
+  "onb.agents.ownerLabel": "Owner: {owner}",
+  "onb.agents.cap.bedrock": "Use Bedrock at all",
+  "onb.agents.cap.employeeData": "Agents touching employee data",
+  "onb.agents.cap.studio": "Agents defined in Studio",
+  "onb.agents.cap.cowork": "Agents run by Cowork",
+  "onb.agents.pre.providerDpaRegion":
+    "AWS approved as provider, the data processing agreement and cross-border approval, and the Bedrock region",
+  "onb.agents.pre.aiHold":
+    "The hold on AI features (roadmap phase 56) answered, or agents carved out of it",
+  "onb.agents.pre.iam":
+    "The AWS IAM role or keys set up with least privilege",
+  "onb.agents.pre.worksCouncil":
+    "The works council's decision for agents that process employee data (§87(1) Nr. 6 BetrVG)",
+  "onb.agents.pre.retention":
+    "Legal's ruling on retention and cross-border handling of what is sent to agents (D-033 decision 6)",
+  "onb.agents.pre.ruling8":
+    "Studio ruling 8: approval of the agent assistant template",
+  "onb.agents.pre.promptWording":
+    "A human-approved change to the Cowork project-setup prompt wording",
+  "onb.agents.owner.owner": "Owner",
+  "onb.agents.owner.ownerAndDpo": "Owner and Legal / data protection officer",
+  "onb.agents.owner.legal": "Legal",
+  "onb.agents.owner.operator": "Operator",
+  "onb.agents.owner.worksCouncil": "Works council",
   "onb.step.back": "Back",
   "onb.step.next": "Next",
   "onb.step.position": "Step {n} of {total}: {name}",
