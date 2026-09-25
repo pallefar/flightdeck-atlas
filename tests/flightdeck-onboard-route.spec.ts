@@ -380,3 +380,165 @@ test.describe("onboarding status projection per viewer", () => {
     }
   });
 });
+
+// Review round 3 (onb-atlas-decision-note; D-037 item 5): the earlier send's
+// reviewer note is kept only until the corrected send. A fresh send clears it
+// right after it reserves the new key; if that cleanup failed (503), the
+// retry takes the reserved row as is, so it must finish the cleanup before it
+// sends, or the corrected request completes with the old note still stored.
+test("a retry of a reserved corrected send clears the earlier send's reviewer note before it sends", async () => {
+  const { buildOnboardingPayload, onboardingEnvelope } =
+    await import("../lib/flightdeck/onboarding");
+  const { examples } = await import("../lib/projects");
+  const s = store();
+  s.sqlite
+    .prepare(
+      "INSERT INTO atlas_projects (id,owner_id,data,source,updated_at,revision) VALUES (?,?,?,?,?,?)",
+    )
+    .run(ATLAS_ID, "user-1", "{}", "atlas", AT, 8);
+  const insertOp = s.sqlite.prepare(
+    "INSERT INTO atlas_flightdeck_operations (id,atlas_project_id,atlas_revision,idempotency_key,destination_workspace_id,proposed_label,proposed_project_id,state,submission_id,received_at,payload_sha256,reason_code,setup_state,created_by,updated_at,checked_at,request_body,adopted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+  );
+  // The earlier send, answered needs-more-info with a note.
+  insertOp.run(
+    "op-old",
+    ATLAS_ID,
+    7,
+    "0b5c6d7e-8f90-4a1b-9c2d-3e4f5a6b7c8d",
+    "hr-de",
+    "Payroll rollout",
+    "payroll-rollout",
+    "rejected",
+    "sub-old",
+    AT,
+    "a".repeat(64),
+    "needs-more-info",
+    null,
+    "user-0",
+    AT,
+    CHECKED,
+    null,
+    0,
+  );
+  s.sqlite
+    .prepare(
+      "INSERT INTO atlas_flightdeck_transitions (send_id,seq,stage,observed_at,source,note,fields) VALUES (?,?,?,?,?,?,?)",
+    )
+    .run(
+      "op-old",
+      1,
+      "needs-more-info",
+      AT,
+      "poll",
+      "Please name the site.",
+      '["site"]',
+    );
+  // The corrected send, reserved, whose note cleanup failed (the POST said
+  // 503 and left the reservation in place).
+  const project = {
+    ...examples[0],
+    id: ATLAS_ID,
+    source: "atlas",
+    revision: 8,
+  } as Project;
+  const key = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
+  const envelope = onboardingEnvelope(
+    buildOnboardingPayload({
+      project,
+      destinationWorkspaceId: "hr-de",
+      idempotencyKey: key,
+      installationId: "atlas-test",
+      requestedBy: "b".repeat(64),
+    }),
+  );
+  // The stored bytes of a send that passed readiness when it was reserved.
+  envelope.payload.target.label = "Payroll rollout";
+  envelope.payload.profile.functionArea = "HR";
+  envelope.payload.facts.countryCode = "DE";
+  envelope.payload.facts.worksCouncilRelevant = "unknown";
+  insertOp.run(
+    "op-new",
+    ATLAS_ID,
+    8,
+    key,
+    "hr-de",
+    envelope.payload.target.label,
+    envelope.payload.target.projectId ?? null,
+    "reserved",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "user-2",
+    AT,
+    null,
+    JSON.stringify(envelope),
+    0,
+  );
+  let notesAtSubmit: unknown[] = [];
+  const route = createOnboardRoute({
+    async authorize() {
+      return { access: { userId: "user-2", superAdmin: true } };
+    },
+    async loadProject() {
+      return { project, canEdit: true };
+    },
+    async visibleProjectIds() {
+      return [ATLAS_ID];
+    },
+    reader() {
+      return {} as never;
+    },
+    submissions() {
+      return {
+        async submit(sent) {
+          expect(sent.payload.idempotencyKey).toBe(key);
+          notesAtSubmit = s.sqlite
+            .prepare(
+              "SELECT note FROM atlas_flightdeck_transitions WHERE note IS NOT NULL OR fields IS NOT NULL",
+            )
+            .all();
+          return {
+            state: "ok",
+            data: {
+              submissionId: "sub-new",
+              receivedAt: AT,
+              payloadSha256: "c".repeat(64),
+            },
+          } as never;
+        },
+        async readSubmission() {
+          throw new Error("not expected");
+        },
+      };
+    },
+    db: () => s.db,
+    installationId: () => "atlas-test",
+    now: () => new Date(AT),
+  });
+  const response = await route.POST(
+    new Request(`${ORIGIN}/api/flightdeck/onboard/${ATLAS_ID}`, {
+      method: "POST",
+      headers: {
+        "Sec-Fetch-Site": "same-origin",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ destinationWorkspaceId: "hr-de", revision: 8 }),
+    }),
+    ATLAS_ID,
+  );
+  expect(`${response.status} ${await response.clone().text()}`).toMatch(
+    /^202 /,
+  );
+  // Cleared before the corrected request left Atlas, and still cleared.
+  expect(notesAtSubmit).toEqual([]);
+  expect(
+    s.sqlite
+      .prepare(
+        "SELECT note,fields FROM atlas_flightdeck_transitions WHERE send_id='op-old'",
+      )
+      .all()
+      .map((r) => ({ ...r })),
+  ).toEqual([{ note: null, fields: null }]);
+});

@@ -1109,10 +1109,13 @@ export function createOnboardRoute<A extends OnboardAccess>(
             "send_in_progress",
             "A send for this project is already in progress.",
           );
-        // This is the corrected request: an earlier send's reviewer note is
-        // not kept beyond it (D-037 item 5).
-        await clearProjectNotes(db, project.id);
       }
+      // This is the corrected request: an earlier send's reviewer note is
+      // not kept beyond it (D-037 item 5). Cleared on every attempt, retries
+      // included, and before anything leaves Atlas: a cleanup that failed
+      // after the reservation (503) is finished by the retry, which reuses
+      // the reserved row, instead of leaving the old note stored for good.
+      await clearProjectNotes(db, project.id);
       const result = await submissions.submit(envelope);
       const response = await settle(
         db,
