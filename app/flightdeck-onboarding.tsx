@@ -44,16 +44,19 @@ import {
   type OnboardingStatus,
   type OnboardingTab,
 } from "@/lib/flightdeck/onboarding";
+import { t, type Locale, type MessageKey } from "@/lib/i18n";
+import { en } from "@/lib/i18n/en";
+import { useLocale } from "@/lib/i18n/react";
 
 // The To FlightDeck form: Basics (prefilled from the Atlas project), the
 // FlightDeck details, and Review & send, which lists every field that will
 // travel. Sending files a request for an OS admin to review; nothing is
 // created automatically. The browser only ever talks to Atlas's own
 // /api/flightdeck/onboard routes.
-const TABS: { id: OnboardingTab; label: string }[] = [
-  { id: "basics", label: "Basics" },
-  { id: "details", label: "FlightDeck details" },
-  { id: "review", label: "Review & send" },
+const TABS: { id: OnboardingTab; label: MessageKey }[] = [
+  { id: "basics", label: "onb.tab.basics" },
+  { id: "details", label: "onb.tab.details" },
+  { id: "review", label: "onb.tab.review" },
 ];
 const POLL_MS = 60_000;
 /** The first retry after the form could not load its status at all: the
@@ -63,17 +66,9 @@ const MAX_BACKOFF_MS = 15 * 60_000;
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const PREVIEW_KEY = "00000000-0000-4000-8000-000000000000";
 const PREVIEW_HASH = "0".repeat(64);
-export const STAGE_LABEL: Record<OnboardingStage, string> = {
-  "not-confirmed": "Not confirmed",
-  submitted: "Submitted",
-  linked: "Linked",
-  "setup-in-progress": "Setup in progress",
-  "setup-complete": "Setup complete",
-  "needs-more-info": "Needs more info",
-  rejected: "Declined",
-  "not-sent": "Not sent",
-  closed: "Send closed",
-};
+/** A stage's name in the viewer's language (English by default). */
+export const stageLabel = (stage: OnboardingStage, locale: Locale = "en") =>
+  t(`onb.stage.${stage}`, locale);
 const when = (iso: string) =>
   new Date(iso).toLocaleString(undefined, {
     dateStyle: "medium",
@@ -81,52 +76,23 @@ const when = (iso: string) =>
   });
 /** When Atlas last read the send back, for a status that can still change:
  * Atlas has no background job, so it can be out of date. */
-export const checkedLine = (checkedAt: string | null) =>
+export const checkedLine = (
+  checkedAt: string | null,
+  locale: Locale = "en",
+) =>
   checkedAt
-    ? `Last checked with FlightDeck: ${when(checkedAt)}`
-    : "Not checked with FlightDeck yet";
-export const CHECK_NOTE =
-  "Atlas checks FlightDeck only while the Atlas Super Admin has Atlas open.";
-const REASON_TEXT: Record<string, string> = {
-  os_unreachable: "FlightDeck could not be reached.",
-  invalid_response: "FlightDeck answered unexpectedly.",
-  rate_limited: "FlightDeck was busy.",
-  already_submitted: "FlightDeck already holds a request for this project.",
-  invalid_submission: "FlightDeck rejected the request format.",
-  unauthorized: "FlightDeck refused Atlas's credential.",
-  refused:
-    "Project onboarding is not enabled for Atlas in FlightDeck, or Atlas's credential lacks submit:proposal.",
-  invalid_payload: "Some details were not in the agreed format.",
-  project_not_visible:
-    "FlightDeck accepted it and is creating the project; Atlas is waiting to see it listed.",
-  destination_not_shared:
-    "FlightDeck accepted it into a workspace that is not shared with Atlas, so Atlas cannot confirm it.",
-  credential_scope:
-    "FlightDeck accepted it, but Atlas's credential lacks read:context, so Atlas cannot see the outcome.",
-  lock_unreadable:
-    "FlightDeck needs an operator to inspect this request's lock.",
-  idempotency_key_conflict:
-    "FlightDeck holds this request's key for a different Atlas project, so nothing was filed.",
-  instance_unknown:
-    "FlightDeck does not publish its instance id yet, so Atlas cannot record the link.",
-  link_conflict:
-    "That FlightDeck project is already linked elsewhere, so Atlas did not link it.",
-  submission_not_found: "FlightDeck does not know this request.",
-  abandoned: "The Atlas Super Admin closed it before FlightDeck confirmed it.",
-  duplicate: "It duplicates another request.",
-  "out-of-scope": "It is out of scope for FlightDeck.",
-  other: "No reason code was given.",
+    ? t("onb.check.last", locale, { when: when(checkedAt) })
+    : t("onb.check.never", locale);
+export const checkNote = (locale: Locale = "en") => t("onb.check.note", locale);
+/** The words for an OS reason code; an unknown code says nothing. */
+const reasonText = (code: string, locale: Locale) => {
+  const key = `onb.reason.${code}`;
+  return Object.hasOwn(en, key) ? t(key as MessageKey, locale) : "";
 };
 const COUNTRIES = ISO_COUNTRY_CODES.map((code) => ({
   code,
   name: countryName(code),
 })).sort((a, b) => a.name.localeCompare(b.name));
-const HEADCOUNT_LABEL: Record<(typeof headcountBands)[number], string> = {
-  "<50": "Fewer than 50",
-  "50-249": "50 to 249",
-  "250+": "250 or more",
-  unknown: "Unknown",
-};
 const slugify = (text: string) =>
   text
     .toLowerCase()
@@ -362,15 +328,16 @@ export function useOnboardingStages(superAdmin: boolean) {
 }
 
 export function OnboardingTimeline({ stage }: { stage: OnboardingStage }) {
+  const locale = useLocale();
   return (
-    <ol className="fd-timeline" aria-label="FlightDeck status">
+    <ol className="fd-timeline" aria-label={t("onb.timeline.aria", locale)}>
       {timelineSteps(stage).map((step) => (
         <li
           key={step.stage}
           className={step.state === "done" ? "done" : ""}
           aria-current={step.state === "current" ? "step" : undefined}
         >
-          {STAGE_LABEL[step.stage]}
+          {stageLabel(step.stage, locale)}
         </li>
       ))}
     </ol>
@@ -386,9 +353,10 @@ function StatusBanner({
   workspaces: OsContextEntry[];
   superAdmin: boolean;
 }) {
+  const locale = useLocale();
   const op = status.operation;
   if (!op) return null;
-  const reason = op.reasonCode ? REASON_TEXT[op.reasonCode] || "" : "";
+  const reason = op.reasonCode ? reasonText(op.reasonCode, locale) : "";
   const where = op.destinationWorkspaceId
     ? workspaces.find((w) => w.id === op.destinationWorkspaceId)?.label ||
       op.destinationWorkspaceId
@@ -443,7 +411,8 @@ function StatusBanner({
         {open && (
           <span className="fd-hint">
             {" "}
-            {checkedLine(op.checkedAt)}.{superAdmin ? "" : ` ${CHECK_NOTE}`}
+            {checkedLine(op.checkedAt, locale)}.
+            {superAdmin ? "" : ` ${checkNote(locale)}`}
           </span>
         )}
       </p>
@@ -486,6 +455,7 @@ export function OnboardingEditor({
   onMessage: (message: string) => void;
   onStage: (id: string, stage: OnboardingStage | null) => void;
 }) {
+  const locale = useLocale();
   const [draft, setDraft] = useState(() => draftFrom(project));
   const [dirty, setDirty] = useState(false);
   // The revision the draft was built from. Atlas reloads its projects on
@@ -844,25 +814,25 @@ export function OnboardingEditor({
         aria-label="FlightDeck onboarding"
         className="filter-tabs fd-onboard-tabs"
       >
-        {TABS.map((t, i) => (
+        {TABS.map((item, i) => (
           <button
-            key={t.id}
+            key={item.id}
             type="button"
             role="tab"
-            id={`fd-tab-${t.id}`}
+            id={`fd-tab-${item.id}`}
             ref={(el) => {
-              tabRefs.current[t.id] = el;
+              tabRefs.current[item.id] = el;
             }}
-            aria-selected={tab === t.id}
+            aria-selected={tab === item.id}
             // Only the chosen tab's panel is rendered, so only that tab
             // names one: an id that is not in the page is a dead reference.
-            aria-controls={tab === t.id ? `fd-panel-${t.id}` : undefined}
-            tabIndex={tab === t.id ? 0 : -1}
-            className={tab === t.id ? "chosen" : ""}
-            onClick={() => setTab(t.id)}
+            aria-controls={tab === item.id ? `fd-panel-${item.id}` : undefined}
+            tabIndex={tab === item.id ? 0 : -1}
+            className={tab === item.id ? "chosen" : ""}
+            onClick={() => setTab(item.id)}
             onKeyDown={(e) => onTabKey(e, i)}
           >
-            {t.label}
+            {t(item.label, locale)}
           </button>
         ))}
       </div>
@@ -1185,7 +1155,7 @@ export function OnboardingEditor({
                 <option value="">Not set</option>
                 {headcountBands.map((band) => (
                   <option key={band} value={band}>
-                    {HEADCOUNT_LABEL[band]}
+                    {t(`onb.headcount.${band}`, locale)}
                   </option>
                 ))}
               </select>,
@@ -1584,12 +1554,13 @@ export function FlightDeckPromo({
   superAdmin: boolean;
   onOpen: () => void;
 }) {
+  const locale = useLocale();
   const { stages, failed } = useOnboardingStages(superAdmin);
   const line = !stages
     ? failed
-      ? "Onboarding status is unavailable right now."
-      : "Checking onboarding status…"
-    : onboardingSummaryLine(Object.values(stages));
+      ? t("onb.promo.unavailable", locale)
+      : t("onb.promo.checking", locale)
+    : onboardingSummaryLine(Object.values(stages), locale);
   return (
     <div className="flightdeck-promo">
       <span className="promo-mark">
@@ -1598,9 +1569,9 @@ export function FlightDeckPromo({
       <h3>FlightDeck OS</h3>
       <p>{line}</p>
       <button className="text-link" onClick={onOpen}>
-        FlightDeck connection <ArrowUpRight size={16} />
+        {t("onb.promo.open", locale)} <ArrowUpRight size={16} />
       </button>
-      <small>Import from FlightDeck: not enabled</small>
+      <small>{t("onb.promo.import", locale)}</small>
     </div>
   );
 }

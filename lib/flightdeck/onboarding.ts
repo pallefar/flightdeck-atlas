@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Project } from "../projects";
 import { ONBOARDING_CHECKLIST, opportunities } from "../opportunities";
 import { isoSchema, osIdSchema } from "./context";
+import { t, type Locale } from "../i18n";
 // Atlas -> FlightDeck OS project onboarding (onboarding plan §3, §4.2, §4.6).
 // Shared by the server route and the browser, so the review screen lists
 // exactly what the server sends. Keep this module free of server-only
@@ -910,9 +911,11 @@ export function exportDraftText(
  * "Sent" is every request FlightDeck filed, answered ones included: a
  * declined or needs-more-info project shows "Submitted" done on its own
  * timeline, so the card must not call it unsent. */
-export function onboardingSummaryLine(stages: readonly OnboardingStage[]) {
-  if (!stages.length)
-    return "Onboarding: no project sent yet. Prepare one in To FlightDeck.";
+export function onboardingSummaryLine(
+  stages: readonly OnboardingStage[],
+  locale: Locale = "en",
+) {
+  if (!stages.length) return t("onb.summary.none", locale);
   const count = (...list: OnboardingStage[]) =>
     stages.filter((stage) => list.includes(stage)).length;
   const linked = count("linked", "setup-in-progress", "setup-complete");
@@ -920,17 +923,19 @@ export function onboardingSummaryLine(stages: readonly OnboardingStage[]) {
   const declined = count("rejected");
   const sent = count("submitted") + linked + moreInfo + declined;
   const extra = [
-    [moreInfo, "need more info"],
-    [declined, "declined"],
-    [count("not-confirmed"), "awaiting confirmation"],
-    [count("not-sent"), "not sent"],
-    [count("closed"), "closed before FlightDeck confirmed"],
+    [moreInfo, "onb.summary.moreInfo"],
+    [declined, "onb.summary.declined"],
+    [count("not-confirmed"), "onb.summary.awaiting"],
+    [count("not-sent"), "onb.summary.notSent"],
+    [count("closed"), "onb.summary.closed"],
   ] as const;
-  return `Onboarding: ${[
-    `${sent} sent to FlightDeck`,
-    `${linked} linked`,
-    ...extra.filter(([n]) => n).map(([n, text]) => `${n} ${text}`),
-  ].join(", ")}.`;
+  return t("onb.summary.line", locale, {
+    parts: [
+      t("onb.summary.sent", locale, { n: sent }),
+      t("onb.summary.linked", locale, { n: linked }),
+      ...extra.filter(([n]) => n).map(([n, key]) => t(key, locale, { n })),
+    ].join(", "),
+  });
 }
 /** Stages Atlas still reads back from FlightDeck (the server's own pollable
  * set, as stages): the status can change with nobody here doing anything, so

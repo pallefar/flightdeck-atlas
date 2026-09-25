@@ -28,13 +28,15 @@ import { downloadText } from "@/lib/briefing";
 import { useFlightDeckContext } from "./flightdeck-context-switcher";
 import { useWorkspace } from "./workspace-tools";
 import {
-  CHECK_NOTE,
   OnboardingEditor,
-  STAGE_LABEL,
+  checkNote,
   checkedLine,
   fetchStatus,
+  stageLabel,
   useOnboardingStages,
 } from "./flightdeck-onboarding";
+import { t, type Locale } from "@/lib/i18n";
+import { useLocale } from "@/lib/i18n/react";
 import {
   exportDraftText,
   isDraftLocked,
@@ -42,66 +44,32 @@ import {
   lockNote,
 } from "@/lib/flightdeck/onboarding";
 import type { ContextState } from "@/lib/flightdeck/context";
-const contextStatus: Record<
-  ContextState | "check_failed" | "checking",
-  { chip: string; tone: string; text: string }
-> = {
-  ok: {
-    chip: "Connected (read-only)",
-    tone: "completed",
-    text: "connected (read-only). The sidebar mirrors your FlightDeck OS workspace and project lists through the OS inbound API.",
-  },
-  workspace_not_found: {
-    chip: "Connected (read-only)",
-    tone: "completed",
-    text: "connected (read-only). Your saved workspace is no longer shared with Atlas; choose another in the sidebar.",
-  },
-  workspace_disabled: {
-    chip: "Connected (read-only)",
-    tone: "completed",
-    text: "connected (read-only). The selected workspace is disabled in FlightDeck.",
-  },
-  checking: {
-    chip: "Checking",
-    tone: "planning",
-    text: "checking the FlightDeck inbound API.",
-  },
-  not_configured: {
-    chip: "Not configured",
-    tone: "planning",
-    text: "not configured. Set the FlightDeck URL and inbound credential in Atlas server configuration.",
-  },
-  not_permitted: {
-    chip: "Super Admin only",
-    tone: "planning",
-    text: "read-only lists are shown to the Atlas Super Admin because they use one shared OS machine credential.",
-  },
-  os_unreachable: {
-    chip: "Unreachable",
-    tone: "on-hold",
-    text: "FlightDeck OS could not be reached. The last confirmed lists stay visible.",
-  },
-  rate_limited: {
-    chip: "Busy",
-    tone: "on-hold",
-    text: "FlightDeck asked Atlas to wait before reading again.",
-  },
-  invalid_response: {
-    chip: "Unexpected response",
-    tone: "on-hold",
-    text: "FlightDeck answered, but not with the agreed context contract.",
-  },
-  check_failed: {
-    chip: "Unavailable",
-    tone: "on-hold",
-    text: "Atlas could not check the context right now.",
-  },
-  unauthorized: {
-    chip: "Refused",
-    tone: "on-hold",
-    text: "FlightDeck refused Atlas's inbound credential. Nothing is shown.",
-  },
+type ContextRowKey = ContextState | "check_failed" | "checking";
+const CONTEXT_TONE: Record<ContextRowKey, string> = {
+  ok: "completed",
+  workspace_not_found: "completed",
+  workspace_disabled: "completed",
+  checking: "planning",
+  not_configured: "planning",
+  not_permitted: "planning",
+  os_unreachable: "on-hold",
+  rate_limited: "on-hold",
+  invalid_response: "on-hold",
+  check_failed: "on-hold",
+  unauthorized: "on-hold",
 };
+/** The context line's chip and text; the three connected states share the
+ * "Connected (read-only)" chip. */
+const contextStatus = (key: ContextRowKey, locale: Locale) => ({
+  chip: t(
+    key === "workspace_not_found" || key === "workspace_disabled"
+      ? "onb.context.ok.chip"
+      : `onb.context.${key}.chip`,
+    locale,
+  ),
+  tone: CONTEXT_TONE[key],
+  text: t(`onb.context.${key}.text`, locale),
+});
 async function fetchCatalog(cursor?: string) {
   const r = await fetch(
     `/api/flightdeck/catalog${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
@@ -139,6 +107,7 @@ export default function FlightDeckConnection({
     [query, setQuery] = useState("");
   const [editing, setEditing] = useState<string | null>(null),
     [message, setMessage] = useState("");
+  const locale = useLocale();
   const onboarding = useOnboardingStages(superAdmin);
   const [importing, setImporting] = useState<string | null>(null);
   const context = useFlightDeckContext(superAdmin);
@@ -148,8 +117,10 @@ export default function FlightDeckConnection({
   // shown here, in the signed-in Connections view, and not there.
   const { data: workspace } = useWorkspace();
   const osUrl = (workspace?.apps.find((x) => x.id === "flightdeck")?.url ?? "").replace(/\/+$/, "");
-  const contextRow =
-    contextStatus[!superAdmin ? "not_permitted" : context.state || "checking"];
+  const contextRow = contextStatus(
+    !superAdmin ? "not_permitted" : context.state || "checking",
+    locale,
+  );
   function failed(e: unknown) {
     setError((e as Error).message);
     setCatalog(null);
@@ -404,7 +375,7 @@ export default function FlightDeckConnection({
             FlightDeck details, then Review &amp; send. Saving a draft sends
             nothing. The Atlas Super Admin reviews every field and sends it as a
             request; an OS admin decides, and nothing is created automatically.{" "}
-            {CHECK_NOTE} Each sent project says when it was last checked.
+            {checkNote(locale)} Each sent project says when it was last checked.
           </p>
           <label className="bridge-search">
             <Search size={16} />
@@ -483,7 +454,7 @@ export default function FlightDeckConnection({
                     </p>
                     {isStatusMoving(stage) && (
                       <p className="fd-hint">
-                        {checkedLine(onboarding.checked[p.id] ?? null)}
+                        {checkedLine(onboarding.checked[p.id] ?? null, locale)}
                       </p>
                     )}
                   </div>
@@ -491,10 +462,10 @@ export default function FlightDeckConnection({
                     className={`status ${stage === "linked" || stage === "setup-in-progress" || stage === "setup-complete" ? "completed" : p.flightdeckDraft || stage ? "planning" : ""}`}
                   >
                     {stage
-                      ? STAGE_LABEL[stage]
+                      ? stageLabel(stage, locale)
                       : p.flightdeckDraft
-                        ? "Draft prepared"
-                        : "Not prepared"}
+                        ? t("onb.row.draftPrepared", locale)
+                        : t("onb.row.notPrepared", locale)}
                   </span>
                 </div>
                 {editing === p.id ? (
