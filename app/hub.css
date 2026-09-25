@@ -937,6 +937,52 @@
   display: flex;
   gap: 8px;
 }
+/* The reviewer's note on a needs-more-info send (D-037 item 5): plain text
+   as FlightDeck wrote it, the fields it points at outlined, their steps
+   badged. */
+.fd-reviewer-note {
+  border: 1px solid var(--orange);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+}
+.fd-reviewer-note > p:first-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--orange);
+}
+.fd-note-text {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.fd-reviewer-note ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+.fd-flagged [aria-invalid="true"] {
+  outline: 2px solid var(--orange);
+  outline-offset: 1px;
+}
+.fd-flagged > label,
+.fd-flagged > span:first-child {
+  color: var(--orange);
+}
+.fd-step-flag::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--orange);
+}
 .fd-error-summary {
   border: 1px solid var(--orange);
   border-radius: 8px;

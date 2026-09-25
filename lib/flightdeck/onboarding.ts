@@ -849,34 +849,101 @@ export const REVIEW_FIELDS: {
   { path: "schema", label: "Format" },
 ];
 /** What a reviewer's read-back may point at (plan 2026-09-25 §7, D-037
- * item 5): the payload fields a requester can change. Technical ids, the
- * key, the requester hash and the format are never pointed at. A pointer
- * outside this list is dropped on read. */
+ * item 5): the payload's own editable field names, exactly as FlightDeck
+ * publishes them in its contract (`features.decisionNote.fieldPointers`,
+ * OS onb-decision-note-os). Technical ids, the key, the requester hash, the
+ * format and the computed progress are never pointed at. A pointer outside
+ * this list is dropped on read. */
 export const FIELD_POINTERS = [
-  "target.label",
-  "target.workspaceId",
-  "target.projectId",
-  "profile.functionArea",
-  "profile.category",
-  "profile.summary",
-  "profile.successMeasure",
-  "profile.status",
-  "profile.priority",
-  "profile.targetDate",
-  "profile.site",
-  "facts.countryCode",
-  "facts.worksCouncilRelevant",
-  "facts.legalEntity",
-  "facts.headcountBand",
-  "facts.ownerRoles.process",
-  "facts.ownerRoles.data",
-  "facts.ownerRoles.support",
-  "facts.dataSources",
-  "facts.accessRequested",
-  "progress",
-  "cowork.requested",
+  "summary",
+  "successMeasure",
+  "functionArea",
+  "category",
+  "status",
+  "priority",
+  "targetDate",
+  "site",
+  "countryCode",
+  "legalEntity",
+  "headcountBand",
+  "worksCouncilRelevant",
+  "ownerRoles",
+  "dataSources",
+  "accessRequested",
+  "coworkRequested",
 ] as const;
 export type FieldPointer = (typeof FIELD_POINTERS)[number];
+/** Where each pointer lives in the form: its label, its step and the ids
+ * of the controls it outlines (the first one is focused). */
+const POINTER_TARGETS: Record<
+  FieldPointer,
+  { label: string; step: OnboardingTab; ids: readonly string[] }
+> = {
+  summary: { label: "Summary", step: "basics", ids: ["fd-summary"] },
+  successMeasure: {
+    label: "Success measure",
+    step: "basics",
+    ids: ["fd-success"],
+  },
+  functionArea: {
+    label: "Function area",
+    step: "basics",
+    ids: ["fd-function"],
+  },
+  category: { label: "Category", step: "basics", ids: ["fd-category"] },
+  status: { label: "Status", step: "basics", ids: ["fd-status"] },
+  priority: { label: "Priority", step: "basics", ids: ["fd-priority"] },
+  targetDate: { label: "Target date", step: "basics", ids: ["fd-target"] },
+  site: { label: "Site", step: "basics", ids: ["fd-site"] },
+  countryCode: { label: "Country", step: "details", ids: ["fd-country"] },
+  legalEntity: { label: "Legal entity", step: "details", ids: ["fd-legal"] },
+  headcountBand: {
+    label: "Headcount band",
+    step: "details",
+    ids: ["fd-headcount"],
+  },
+  worksCouncilRelevant: {
+    label: "Works council relevant",
+    step: "details",
+    ids: ["fd-works-council"],
+  },
+  ownerRoles: {
+    label: "Owner roles",
+    step: "details",
+    ids: ["fd-role-process", "fd-role-data", "fd-role-support"],
+  },
+  dataSources: { label: "Data sources", step: "details", ids: ["fd-sources"] },
+  accessRequested: {
+    label: "Access requested",
+    step: "details",
+    ids: ["fd-access"],
+  },
+  coworkRequested: {
+    label: "Cowork setup requested",
+    step: "details",
+    ids: ["fd-cowork"],
+  },
+};
+const isFieldPointer = (value: unknown): value is FieldPointer =>
+  typeof value === "string" && Object.hasOwn(POINTER_TARGETS, value);
+/** What a reviewer's pointers flag in the form: the control ids to outline
+ * (aria-invalid), the steps to badge, and one entry per pointer for the
+ * note's list. Anything not on the allowlist is ignored. */
+export function flaggedFields(fields: readonly unknown[] | undefined) {
+  const pointers = [...new Set((fields ?? []).filter(isFieldPointer))].map(
+    (pointer) => {
+      const { label, step, ids } = POINTER_TARGETS[pointer];
+      return { pointer, label, step, field: ids[0]! };
+    },
+  );
+  return {
+    ids: new Set(
+      pointers.flatMap(({ pointer }) => POINTER_TARGETS[pointer].ids),
+    ),
+    steps: new Set<OnboardingStep>(pointers.map((p) => p.step)),
+    pointers,
+  };
+}
 const at = (value: unknown, path: string): unknown =>
   path
     .split(".")
@@ -1224,7 +1291,12 @@ const osSubmissionStatusSchema = z.object({
 /** A reviewer note is bounded plain text (D-037 item 5: at most 500
  * characters). Typed only: it is never rendered from here, and never
  * logged. */
-const reviewerNoteSchema = z.string().min(1).max(500);
+export const reviewerNoteSchema = z
+  .string()
+  .min(1)
+  .max(500)
+  // Plain text, as FlightDeck bounds it: no control character but newline.
+  .regex(/^[^\u0000-\u0009\u000b-\u001f\u007f-\u009f]*$/);
 const FIELD_POINTER_SET: ReadonlySet<string> = new Set(FIELD_POINTERS);
 /** Why the OS answered `promoted` without an outcome: Atlas's credential
  * lacks read:context (`scope`: re-mint it), or the destination is not in
@@ -1630,6 +1702,12 @@ export const onboardingStatusSchema = z
         adopted: z.boolean(),
         updatedAt: isoSchema,
         checkedAt: isoSchema.nullable(),
+        /** Needs more info only: the reviewer's bounded plain-text note
+         * (D-037 item 5), for the requester and the Super Admin. Rendered
+         * as text, never as markup. */
+        note: reviewerNoteSchema.optional(),
+        /** Needs more info only: the allowlisted fields it points at. */
+        fields: z.array(z.enum(FIELD_POINTERS)).optional(),
       })
       .strict()
       .nullable(),

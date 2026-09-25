@@ -228,7 +228,7 @@ test.describe("read-back tolerance", () => {
         state: "rejected",
         outcome: { reasonCode: "needs-more-info" },
         note: "Please name the data owner's role.",
-        fields: ["facts.ownerRoles.data", "profile.summary"],
+        fields: ["ownerRoles", "summary"],
         supersedes: PRED,
         supersededBy: SUB.replace("0a", "1b"),
         decidedAt: "2026-09-23T10:00:00.000Z",
@@ -238,7 +238,7 @@ test.describe("read-back tolerance", () => {
       state: "rejected",
       reasonCode: "needs-more-info",
       note: "Please name the data owner's role.",
-      fields: ["facts.ownerRoles.data", "profile.summary"],
+      fields: ["ownerRoles", "summary"],
       supersedes: PRED,
       supersededBy: "1b1b2c3d4e5f60718293a4b5",
       decidedAt: "2026-09-23T10:00:00.000Z",
@@ -250,14 +250,14 @@ test.describe("read-back tolerance", () => {
         outcome: {
           reasonCode: "needs-more-info",
           note: "Which site?",
-          fields: ["profile.site"],
+          fields: ["site"],
         },
       }),
     );
     expect(inOutcome).toMatchObject({
       reasonCode: "needs-more-info",
       note: "Which site?",
-      fields: ["profile.site"],
+      fields: ["site"],
     });
   });
 
@@ -266,7 +266,7 @@ test.describe("read-back tolerance", () => {
       readBack({
         state: "filed",
         note: "x".repeat(501),
-        fields: "profile.site",
+        fields: "site",
         supersedes: "not-an-id",
         supersededBy: 42,
         decidedAt: "yesterday",
@@ -285,7 +285,7 @@ test.describe("read-back tolerance", () => {
   });
 
   test("an unknown field-pointer value is dropped and logged as a count only", () => {
-    expect(FIELD_POINTERS).toContain("facts.ownerRoles.data");
+    expect(FIELD_POINTERS).toContain("ownerRoles");
     expect(FIELD_POINTERS).not.toContain("requestedBy");
     const logged: unknown[][] = [];
     const warn = console.warn;
@@ -296,15 +296,15 @@ test.describe("read-back tolerance", () => {
           state: "rejected",
           outcome: { reasonCode: "needs-more-info" },
           fields: [
-            "profile.site",
+            "site",
             "sponsor.secretName",
             "requestedBy",
             7,
-            "profile.site",
+            "site",
           ],
         }),
       );
-      expect(parsed!.fields).toEqual(["profile.site"]);
+      expect(parsed!.fields).toEqual(["site"]);
     } finally {
       console.warn = warn;
     }
@@ -316,7 +316,7 @@ test.describe("read-back tolerance", () => {
     // An injected sink receives the count and nothing else.
     const counts: number[] = [];
     parseSubmissionStatus(
-      readBack({ state: "filed", fields: ["nope", "profile.site"] }),
+      readBack({ state: "filed", fields: ["nope", "site"] }),
       { onUnknownFieldPointers: (count) => counts.push(count) },
     );
     expect(counts).toEqual([1]);

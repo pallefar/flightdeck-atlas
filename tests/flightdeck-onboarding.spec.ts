@@ -276,3 +276,72 @@ test("'Next' reports only the viewer's missing items on the current step", () =>
     field: "fd-label",
   });
 });
+
+// The reviewer note's field pointers (onb-atlas-decision-note; D-037 item 5).
+// FlightDeck names the payload's own fields (its published contract,
+// features.decisionNote.fieldPointers); each one outlines its form fields and
+// badges the step they live on.
+test.describe("reviewer field pointers", () => {
+  const api = onboarding as unknown as {
+    FIELD_POINTERS: readonly string[];
+    flaggedFields?: (fields: readonly unknown[] | undefined) => {
+      ids: Set<string>;
+      steps: Set<string>;
+      pointers: { pointer: string; label: string; step: string; field: string }[];
+    };
+  };
+
+  test("the allowlist is the OS contract's, exactly", () => {
+    expect([...api.FIELD_POINTERS]).toEqual([
+      "summary",
+      "successMeasure",
+      "functionArea",
+      "category",
+      "status",
+      "priority",
+      "targetDate",
+      "site",
+      "countryCode",
+      "legalEntity",
+      "headcountBand",
+      "worksCouncilRelevant",
+      "ownerRoles",
+      "dataSources",
+      "accessRequested",
+      "coworkRequested",
+    ]);
+  });
+
+  test("each pointer outlines its fields and badges its step; unknown pointers are ignored", () => {
+    expect(typeof api.flaggedFields).toBe("function");
+    const flagged = api.flaggedFields!([
+      "site",
+      "ownerRoles",
+      "requestedBy",
+      "profile.site",
+      7,
+    ]);
+    expect([...flagged.ids].sort()).toEqual([
+      "fd-role-data",
+      "fd-role-process",
+      "fd-role-support",
+      "fd-site",
+    ]);
+    expect([...flagged.steps].sort()).toEqual(["basics", "details"]);
+    expect(flagged.pointers).toEqual([
+      { pointer: "site", label: "Site", step: "basics", field: "fd-site" },
+      {
+        pointer: "ownerRoles",
+        label: "Owner roles",
+        step: "details",
+        field: "fd-role-process",
+      },
+    ]);
+    // Every allowlisted pointer maps to a form field on a real step.
+    const all = api.flaggedFields!(api.FIELD_POINTERS);
+    expect(all.pointers).toHaveLength(api.FIELD_POINTERS.length);
+    for (const p of all.pointers)
+      expect(["basics", "details"]).toContain(p.step);
+    expect(api.flaggedFields!(undefined).ids.size).toBe(0);
+  });
+});

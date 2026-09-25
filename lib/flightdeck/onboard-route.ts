@@ -48,6 +48,9 @@ import {
 } from "./onboarding";
 import {
   applyObservedStage,
+  clearProjectNotes,
+  decisionNoteOf,
+  type DecisionNote,
   transitionsOf,
   type TransitionSource,
 } from "./transitions";
@@ -473,6 +476,8 @@ export function projectStatus(
     operation?: OperationRow | null;
     link?: LinkRow | null;
     waiting?: WaitingFacts;
+    /** The send's needs-more-info note (transitions.decisionNoteOf). */
+    decision?: DecisionNote;
   },
   notice: string | null = null,
   retryAfter: number | null = null,
@@ -481,7 +486,7 @@ export function projectStatus(
   const op = send.operation ?? null;
   if (viewer.superAdmin)
     return {
-      ...statusBody(op, send.link ?? null, notice, retryAfter),
+      ...statusBody(op, send.link ?? null, notice, retryAfter, send.decision),
       ...waitingFields(op, send.waiting),
     };
   const stage = op
@@ -511,6 +516,7 @@ export function projectStatus(
             adopted: !!op.adopted,
             updatedAt: op.updated_at,
             checkedAt: op.checked_at,
+            ...noteFor(stage, send.decision),
           }
         : null,
     link: null,
@@ -559,6 +565,18 @@ async function observedOf(db: OnboardDb, sendId: string) {
     .slice(-50)
     .map(({ stage, observedAt }) => ({ stage, observedAt }));
 }
+/** The reviewer's note and pointers, for a needs-more-info send only. The
+ * requester is who fixes the draft, so both projections carry it. */
+function noteFor(
+  stage: OnboardingStage,
+  decision: DecisionNote | undefined,
+): Pick<NonNullable<OnboardingStatus["operation"]>, "note" | "fields"> {
+  if (stage !== "needs-more-info" || !decision) return {};
+  return {
+    ...(decision.note !== undefined ? { note: decision.note } : {}),
+    ...(decision.fields?.length ? { fields: [...decision.fields] } : {}),
+  };
+}
 
 /** The Atlas Super Admin's status body (projectStatus). */
 function statusBody(
@@ -566,16 +584,20 @@ function statusBody(
   link: LinkRow | null,
   notice: string | null,
   retryAfter: number | null,
+  decision?: DecisionNote,
 ): OnboardingStatus {
+  const stage = op
+    ? stageFor({
+        state: op.state,
+        reasonCode: op.reason_code,
+        setupState: op.setup_state,
+      })
+    : null;
   return {
     operation: op
       ? {
           state: op.state,
-          stage: stageFor({
-            state: op.state,
-            reasonCode: op.reason_code,
-            setupState: op.setup_state,
-          }),
+          stage: stage!,
           // An adopted request's destination and revision are FlightDeck's;
           // the row only holds what the adopting request asked for.
           destinationWorkspaceId: op.adopted
@@ -588,6 +610,7 @@ function statusBody(
           adopted: !!op.adopted,
           updatedAt: op.updated_at,
           checkedAt: op.checked_at,
+          ...noteFor(stage!, decision),
         }
       : null,
     link: link
@@ -667,19 +690,39 @@ export function createOnboardRoute<A extends OnboardAccess>(
         reasonCode: row.reason_code,
         setupState: row.setup_state,
       });
-      const at = now().toISOString();
-      // The row and its notices go in one batch (lib/flightdeck/notices.ts).
-      const notify = { superAdmins: deps.superAdminEmails?.() ?? [] };
-      if (await applyObservedStage(db, id, stage, at, source, notify)) {
-        // Measures read off what Atlas saw, once per draft (default off).
-        if (stage === "submitted")
-          await measure(db, row.atlas_project_id, "sent", at);
-        else if (stage === "needs-more-info")
-          await measure(db, row.atlas_project_id, "correction", at);
-      }
+      await logStage(
+        db,
+        id,
+        row.atlas_project_id,
+        stage,
+        now().toISOString(),
+        source,
+      );
     } catch {
       // Caught up by the next observation of this send.
     }
+  }
+  /** Writes one transition row (applyObservedStage) and, when it was
+   * written, the measure it stands for: read off what Atlas saw, once per
+   * draft (default off). Throws when the row cannot be written. */
+  async function logStage(
+    db: OnboardDb,
+    id: string,
+    atlasProjectId: string,
+    stage: OnboardingStage,
+    at: string,
+    source: Exclude<TransitionSource, "backfill">,
+    decision?: DecisionNote,
+  ) {
+    // The row and its notices go in one batch (lib/flightdeck/notices.ts).
+    const notify = { superAdmins: deps.superAdminEmails?.() ?? [] };
+    if (
+      !(await applyObservedStage(db, id, stage, at, source, notify, decision))
+    )
+      return;
+    if (stage === "submitted") await measure(db, atlasProjectId, "sent", at);
+    else if (stage === "needs-more-info")
+      await measure(db, atlasProjectId, "correction", at);
   }
 
   async function currentStatus(
@@ -733,6 +776,10 @@ export function createOnboardRoute<A extends OnboardAccess>(
       { superAdmin },
       {
         operation,
+        decision:
+          operation?.state === "rejected"
+            ? await decisionNoteOf(db, operation.id)
+            : undefined,
         link:
           superAdmin && installationId
             ? await linkFor(db, installationId, atlasProjectId)
@@ -1169,6 +1216,12 @@ export function createOnboardRoute<A extends OnboardAccess>(
             "A send for this project is already in progress.",
           );
       }
+      // This is the corrected request: an earlier send's reviewer note is
+      // not kept beyond it (D-037 item 5). Cleared on every attempt, retries
+      // included, and before anything leaves Atlas: a cleanup that failed
+      // after the reservation (503) is finished by the retry, which reuses
+      // the reserved row, instead of leaving the old note stored for good.
+      await clearProjectNotes(db, project.id);
       const result = await submissions.submit(envelope);
       // settle() logs the send's stage before it builds its answer.
       return await settle(db, op, result, submissions, reuse !== null);
@@ -1345,6 +1398,26 @@ export function createOnboardRoute<A extends OnboardAccess>(
         await touch(receipt);
         return none;
       case "rejected":
+        // A needs-more-info answer: its note and pointers are logged FIRST,
+        // on the send's needs-more-info row, and a failure to log them
+        // throws here, before the send is marked rejected. A rejected send
+        // is no longer read back, so marking it first would lose the note
+        // for good; this way the send stays pollable and the next read-back
+        // tries again. A repeat of the stage (a racing check) writes
+        // nothing, so the rejection below still goes through.
+        if (s.reasonCode === "needs-more-info")
+          await logStage(
+            db,
+            op.id,
+            op.atlas_project_id,
+            "needs-more-info",
+            stamp,
+            "poll",
+            {
+              ...(s.note !== undefined ? { note: s.note } : {}),
+              ...(s.fields !== undefined ? { fields: s.fields } : {}),
+            },
+          );
         // Rejection releases the OS subject lock: the draft reopens and a
         // revised draft is sent with a fresh key.
         await touch(

@@ -40,6 +40,7 @@ import {
   onboardingSummaryLine,
   onboardingStatusSchema,
   operationStates,
+  parseSubmissionStatus,
   payloadLeafPaths,
   personalDataHint,
   personalDataIn,
@@ -69,6 +70,7 @@ import {
 import { NO_FEATURES, type InboundFeatures } from "../lib/flightdeck/features";
 import { withD1Batch } from "./fixtures/d1-batch";
 import { NEEDS_CHANGES_TEXT, noticeText } from "../lib/flightdeck/notices";
+import { applyObservedStage } from "../lib/flightdeck/transitions";
 
 // Nothing in this file contacts FlightDeck OS. The OS's responses for the
 // project-onboarding kind come from a fixture recorded from the OS
@@ -2877,6 +2879,171 @@ test("needs more info reopens the draft, and the next send uses a fresh key", as
   expect(h.fake.submits[1].payload.idempotencyKey).toBe(second.idempotency_key);
 });
 
+// The reviewer note (D-037 item 5, DPO signed off; onb-atlas-decision-note).
+// FlightDeck returns it on a needs-more-info read-back while its
+// features.decisionNote is on; Atlas keeps it only on that send's
+// needs-more-info transition row, and only while the send is the project's
+// current one.
+const NOTE = "Please name the <b>site</b> and the data owner's role.";
+/** Every value in every table of the database, as one string: a note that
+ * leaked into another table or column shows up here. */
+function everything(store: ReturnType<typeof onboardDb>) {
+  const tables = store.sqlite
+    .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+    .all() as { name: string }[];
+  return tables
+    .map(({ name }) =>
+      JSON.stringify(store.sqlite.prepare(`SELECT * FROM "${name}"`).all()),
+    )
+    .join("\n");
+}
+function withNote(h: ReturnType<typeof harness>, fields: unknown) {
+  h.fake.onRead = async () => ({
+    state: "ok",
+    data: parseSubmissionStatus(
+      {
+        ...readBack("needsMoreInfo"),
+        outcome: { reasonCode: "needs-more-info", note: NOTE, fields },
+      },
+      { onUnknownFieldPointers: () => {} },
+    )!,
+  });
+}
+const noteRows = (store: ReturnType<typeof onboardDb>) =>
+  store.sqlite
+    .prepare(
+      "SELECT stage,note,fields FROM atlas_flightdeck_transitions WHERE note IS NOT NULL OR fields IS NOT NULL",
+    )
+    .all();
+
+test("a needs-more-info note and its allowlisted fields are kept on the transition row only, shown to requester and Super Admin, never in a notice", async () => {
+  const h = harness();
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  withNote(h, ["site", "ownerRoles", "requestedBy", "sponsor.name", 7]);
+  h.tick(61_000);
+  const admin = await h.status();
+  expect(admin.operation).toMatchObject({
+    stage: "needs-more-info",
+    note: NOTE,
+    fields: ["site", "ownerRoles"],
+  });
+  expect(admin.notice ?? "").not.toContain("site");
+  // Stored once, on the needs-more-info transition, and nowhere else.
+  expect(noteRows(h.store)).toEqual([
+    {
+      stage: "needs-more-info",
+      note: NOTE,
+      fields: JSON.stringify(["site", "ownerRoles"]),
+    },
+  ]);
+  const all = everything(h.store);
+  expect(all.split("name the <b>site</b>").length).toBe(2);
+  expect(JSON.stringify(h.store.ops())).not.toContain("name the");
+  // The requester reads the note from the projection (never the OS).
+  h.as("user-2", false);
+  const editor = await h.status(false);
+  expect(editor.operation).toMatchObject({
+    note: NOTE,
+    fields: ["site", "ownerRoles"],
+  });
+  expect(editor.notice).toBeNull();
+  // The list carries stages only.
+  h.as("user-1", true);
+  const list = await h.route.LIST(listRequest(true));
+  expect(await list.text()).not.toContain("name the");
+  // A needs-more-info answer without a note (feature off in FlightDeck):
+  // no note keys at all, today's answer.
+  const plain = harness();
+  await plain.route.POST(sendTo("hr-de"), ATLAS_ID);
+  plain.fake.onRead = plain.readAs("needsMoreInfo");
+  plain.tick(61_000);
+  const off = await plain.status();
+  expect(off.operation?.stage).toBe("needs-more-info");
+  expect(off.operation).not.toHaveProperty("note");
+  expect(off.operation).not.toHaveProperty("fields");
+  expect(noteRows(plain.store)).toEqual([]);
+});
+
+test("the note goes with its send: a new send of the project, a later stage of the send, and a project delete each delete it", async () => {
+  // A new send of the project (the corrected request) supersedes it.
+  const resent = harness();
+  await resent.route.POST(sendTo("hr-de"), ATLAS_ID);
+  withNote(resent, ["summary"]);
+  resent.tick(61_000);
+  expect((await resent.status()).operation?.note).toBe(NOTE);
+  resent.fake.onSubmit = async () => ({
+    state: "ok",
+    data: {
+      submissionId: os.otherSubmissionId,
+      receivedAt: os.receivedAt,
+      payloadSha256: os.payloadSha256,
+      duplicate: false,
+    },
+  });
+  expect((await resent.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  expect(noteRows(resent.store)).toEqual([]);
+  expect(everything(resent.store)).not.toContain("name the");
+  expect((await resent.status(false)).operation).not.toHaveProperty("note");
+
+  // The send moves on (closed, or sent again): the note is deleted.
+  const moved = harness();
+  await moved.route.POST(sendTo("hr-de"), ATLAS_ID);
+  withNote(moved, ["summary"]);
+  moved.tick(61_000);
+  await moved.status();
+  const sendId = String(moved.store.ops()[0].id);
+  expect(
+    await applyObservedStage(
+      moved.store.db,
+      sendId,
+      "closed",
+      new Date().toISOString(),
+      "atlas",
+    ),
+  ).toBe(true);
+  expect(noteRows(moved.store)).toEqual([]);
+  expect(everything(moved.store)).not.toContain("name the");
+
+  // The project is deleted: the send, its log and the note go with it.
+  const gone = harness();
+  await gone.route.POST(sendTo("hr-de"), ATLAS_ID);
+  withNote(gone, ["summary"]);
+  gone.tick(61_000);
+  await gone.status();
+  expect(noteRows(gone.store)).toHaveLength(1);
+  expect(await deleteProject(gone.store.db, ATLAS_ID, readyProject().revision)).toBe(
+    "deleted",
+  );
+  expect(everything(gone.store)).not.toContain("name the");
+});
+
+test("the rejection is stored only once its note is: a failed note write leaves the send pollable, and the next read-back keeps the note", async () => {
+  for (const view of ["form", "list"] as const) {
+    const h = harness();
+    await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+    withNote(h, ["site"]);
+    // The needs-more-info row cannot be written (storage fault).
+    h.store.sqlite.exec(
+      "CREATE TRIGGER fail_note BEFORE INSERT ON atlas_flightdeck_transitions WHEN NEW.stage='needs-more-info' BEGIN SELECT RAISE(ABORT,'disk I/O error'); END;",
+    );
+    h.tick(61_000);
+    if (view === "form") await h.route.GET(statusRequest(true), ATLAS_ID);
+    else await h.route.LIST(listRequest(true));
+    // Not yet rejected: the send is still read back until the note is kept.
+    expect(h.store.ops()[0].state).toBe("filed");
+    expect(noteRows(h.store)).toEqual([]);
+    h.store.sqlite.exec("DROP TRIGGER fail_note");
+    h.tick(61_000);
+    const after = await h.status();
+    expect(after.operation).toMatchObject({
+      stage: "needs-more-info",
+      note: NOTE,
+      fields: ["site"],
+    });
+    expect(h.store.ops()[0].state).toBe("rejected");
+  }
+});
+
 test("definitive OS refusals close the send; an OS subject lock is adopted only when it is this project's", async () => {
   const h = harness();
   h.fake.onSubmit = async () => ({ state: "refused" });
@@ -3871,6 +4038,88 @@ test("needs more info reopens the draft for editing and sending again", async ({
     await expect(
       row.getByRole("button", { name: "Send to FlightDeck" }),
     ).toBeEnabled();
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
+test("needs more info shows the reviewer note as plain text, outlines the pointed fields and badges their steps", async ({
+  page,
+}) => {
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const project = await createProject(page, {
+    name: qa("Note"),
+    description: "Summary",
+    benefit: "Measure",
+    functionArea: "HR",
+    onboardingStage: "Ready for FlightDeck",
+    flightdeckDraft: { label: qa("Note"), workspaceHint: "" },
+    onboarding: { countryCode: "DE", worksCouncilRelevant: "no" },
+  });
+  const body = statusBody("needs-more-info");
+  body.operation = {
+    ...body.operation!,
+    note: "Please name the <b>site</b>.\nAnd the country.",
+    fields: ["site", "countryCode"],
+  };
+  await page.route(`**/api/flightdeck/onboard/${project.id}**`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    }),
+  );
+  try {
+    await page.reload();
+    await openToFlightDeck(page);
+    const row = page.locator("article.bridge-project", {
+      hasText: qa("Note"),
+    });
+    await row.getByRole("button", { name: "Edit draft", exact: true }).click();
+    const callout = row.getByRole("note", { name: "Reviewer's note" });
+    await expect(callout).toBeVisible();
+    // A text node: the markup is shown, never parsed.
+    await expect(callout).toContainText("Please name the <b>site</b>.");
+    await expect(callout.locator("b")).toHaveCount(0);
+    await expect(
+      callout.getByRole("list", { name: "Fields to check" }).getByRole("button"),
+    ).toHaveText(["Site", "Country"]);
+    // The pointed field is outlined and marked invalid; others are not.
+    await expect(row.locator("#fd-site")).toHaveAttribute("aria-invalid", "true");
+    await expect(row.locator("#fd-summary")).not.toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    const outline = await row
+      .locator("#fd-site")
+      .evaluate((el) => getComputedStyle(el).outlineStyle);
+    expect(outline).not.toBe("none");
+    // Each step holding a pointed field is badged, the others are not.
+    const steps = row.getByRole("navigation", { name: "Onboarding steps" });
+    await expect(steps.locator(".fd-step-flag")).toHaveCount(2);
+    await expect(
+      steps.locator("#fd-step-basics .fd-step-flag"),
+    ).toHaveCount(1);
+    await expect(
+      steps.locator("#fd-step-details .fd-step-flag"),
+    ).toHaveCount(1);
+    await expect(steps.locator("#fd-step-apps .fd-step-flag")).toHaveCount(0);
+    // A field in the list opens its step and focuses it.
+    await callout.getByRole("button", { name: "Country" }).click();
+    await expect(row.locator("#fd-step-details")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+    await expect(row.locator("#fd-step-basics .fd-step-flag")).toHaveText(
+      "needs a fix",
+    );
+    await expect(row.locator("#fd-country")).toBeFocused();
+    await expect(row.locator("#fd-country")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    await row.screenshot({ path: shot("decision-note-1440.png") });
   } finally {
     await removeProject(page, project.id);
   }
