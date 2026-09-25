@@ -441,6 +441,51 @@ export function readinessFor(
   );
 }
 
+/** The guided stepper's steps, in order (plan 2026-09-25 §7, J2). Apps and
+ * AI agents are selections, never requirements: they hold nothing that
+ * counts, so 'Next' never stops on them. AI agents stay locked until the
+ * epic's Bedrock slices land. */
+export type OnboardingStep = OnboardingTab | "apps" | "agents";
+export const ONBOARDING_STEPS: readonly {
+  id: OnboardingStep;
+  optional: boolean;
+  locked: boolean;
+}[] = [
+  { id: "basics", optional: false, locked: false },
+  { id: "details", optional: false, locked: false },
+  { id: "apps", optional: true, locked: false },
+  { id: "agents", optional: true, locked: true },
+  { id: "review", optional: false, locked: false },
+];
+
+/** The meter a viewer sees on a step. An editor sees only their own items
+ * ('n of 8 for you') everywhere; the Super Admin sees the same until Review,
+ * where the destination (theirs alone) joins and the count is the full Send
+ * gate, readiness(). */
+export function meterFor(
+  project: ReadinessProject,
+  destinationWorkspaceId: string | null,
+  viewer: RequirementActor,
+  step: OnboardingStep,
+) {
+  return viewer === "superAdmin" && step === "review"
+    ? readiness(project, destinationWorkspaceId)
+    : readinessFor(project, destinationWorkspaceId, "requester");
+}
+
+/** What 'Next' reports on a step: the viewer's missing items that live on
+ * it, in meter order. */
+export function stepErrors(
+  project: ReadinessProject,
+  destinationWorkspaceId: string | null,
+  viewer: RequirementActor,
+  step: OnboardingStep,
+) {
+  return meterFor(project, destinationWorkspaceId, viewer, step)
+    .items.filter((item) => !item.done && item.tab === step)
+    .map(({ key, label, tab, field }) => ({ key, label, tab, field }));
+}
+
 /** Everything Atlas holds that never travels to FlightDeck (plan §3). Only
  * what Atlas can keep: it cannot promise that text someone typed holds no
  * name (see FREE_TEXT_NOTE). */

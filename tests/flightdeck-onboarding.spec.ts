@@ -191,3 +191,88 @@ test("adding a requirement changes N with no UI edit; optional items never count
     readinessFor(complete, "work-a", "superAdmin", [...base, extra]).total,
   ).toBe(1);
 });
+
+// Guided stepper (onb-atlas-stepper, plan 2026-09-25 §7 J2): named steps,
+// the meter a viewer sees on each step, and the errors 'Next' reports.
+type Step = "basics" | "details" | "apps" | "agents" | "review";
+const stepper = onboarding as unknown as {
+  ONBOARDING_STEPS?: readonly { id: Step; optional: boolean; locked: boolean }[];
+  meterFor?: (
+    project: ReadinessInput,
+    dest: string | null,
+    viewer: "requester" | "superAdmin",
+    step: Step,
+  ) => {
+    items: { key: string; tab: string; field: string; done: boolean }[];
+    done: number;
+    total: number;
+    ready: boolean;
+  };
+  stepErrors?: (
+    project: ReadinessInput,
+    dest: string | null,
+    viewer: "requester" | "superAdmin",
+    step: Step,
+  ) => { key: string; tab: string; field: string }[];
+};
+
+test("the stepper names Basics, Details, Apps (optional), AI agents (locked) and Review", () => {
+  expect(stepper.ONBOARDING_STEPS).toEqual([
+    { id: "basics", optional: false, locked: false },
+    { id: "details", optional: false, locked: false },
+    { id: "apps", optional: true, locked: false },
+    { id: "agents", optional: true, locked: true },
+    { id: "review", optional: false, locked: false },
+  ]);
+  // Every requirement lives on a step the stepper shows.
+  const ids = stepper.ONBOARDING_STEPS!.map((s) => s.id as string);
+  for (const r of api.REQUIREMENTS!)
+    expect(ids).toContain((r as unknown as { tab: string }).tab);
+});
+
+test("an editor's meter is 'n of 8 for you' on every step; the Super Admin adds the destination on Review only", () => {
+  const meterFor = stepper.meterFor!;
+  expect(typeof meterFor).toBe("function");
+  for (const step of ["basics", "details", "apps", "agents", "review"] as const) {
+    const editor = meterFor(empty, null, "requester", step);
+    expect({ step, total: editor.total }).toEqual({ step, total: 8 });
+    expect(editor.items.map((i) => i.key)).not.toContain("destination");
+  }
+  for (const step of ["basics", "details", "apps", "agents"] as const) {
+    const admin = meterFor(complete, null, "superAdmin", step);
+    expect({ step, total: admin.total, ready: admin.ready }).toEqual({
+      step,
+      total: 8,
+      ready: true,
+    });
+  }
+  const review = meterFor(complete, null, "superAdmin", "review");
+  expect(review).toEqual(readiness(complete, null));
+  expect(review.total).toBe(9);
+  expect(review.items.find((i) => i.key === "destination")?.done).toBe(false);
+  expect(meterFor(complete, "work-a", "superAdmin", "review").ready).toBe(true);
+});
+
+test("'Next' reports only the viewer's missing items on the current step", () => {
+  const stepErrors = stepper.stepErrors!;
+  expect(typeof stepErrors).toBe("function");
+  expect(stepErrors(empty, null, "requester", "basics").map((e) => e.key)).toEqual(
+    ["label", "functionArea", "category", "summary", "successMeasure"],
+  );
+  expect(stepErrors(empty, null, "requester", "details").map((e) => e.key)).toEqual(
+    ["countryCode", "worksCouncilRelevant", "ready"],
+  );
+  // Optional and locked steps never block, and an editor is never told to
+  // pick the Super Admin's destination.
+  expect(stepErrors(empty, null, "requester", "apps")).toEqual([]);
+  expect(stepErrors(empty, null, "requester", "agents")).toEqual([]);
+  expect(stepErrors(empty, null, "requester", "review")).toEqual([]);
+  expect(
+    stepErrors(complete, null, "superAdmin", "review").map((e) => e.key),
+  ).toEqual(["destination"]);
+  expect(stepErrors(complete, null, "requester", "basics")).toEqual([]);
+  expect(stepErrors(empty, null, "requester", "basics")[0]).toMatchObject({
+    tab: "basics",
+    field: "fd-label",
+  });
+});

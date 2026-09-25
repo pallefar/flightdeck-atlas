@@ -36,28 +36,33 @@ import {
   onboardingStatusSchema,
   personalDataHint,
   personalDataIn,
+  ONBOARDING_STEPS,
+  meterFor,
   readiness,
   reviewRows,
+  stepErrors,
   timelineSteps,
   type OnboardingDraft,
   type OnboardingStage,
   type OnboardingStatus,
-  type OnboardingTab,
+  type OnboardingStep,
 } from "@/lib/flightdeck/onboarding";
 import { t, type Locale, type MessageKey } from "@/lib/i18n";
 import { en } from "@/lib/i18n/en";
 import { useLocale } from "@/lib/i18n/react";
 
-// The To FlightDeck form: Basics (prefilled from the Atlas project), the
-// FlightDeck details, and Review & send, which lists every field that will
-// travel. Sending files a request for an OS admin to review; nothing is
-// created automatically. The browser only ever talks to Atlas's own
-// /api/flightdeck/onboard routes.
-const TABS: { id: OnboardingTab; label: MessageKey }[] = [
-  { id: "basics", label: "onb.tab.basics" },
-  { id: "details", label: "onb.tab.details" },
-  { id: "review", label: "onb.tab.review" },
-];
+// The To FlightDeck form, a guided stepper: Basics (prefilled from the Atlas
+// project), the FlightDeck details, Apps (optional), AI agents (locked) and
+// Review & send, which lists every field that will travel. Sending files a
+// request for an OS admin to review; nothing is created automatically. The
+// browser only ever talks to Atlas's own /api/flightdeck/onboard routes.
+const STEP_LABEL: Record<OnboardingStep, MessageKey> = {
+  basics: "onb.tab.basics",
+  details: "onb.tab.details",
+  apps: "onb.step.apps",
+  agents: "onb.step.agents",
+  review: "onb.tab.review",
+};
 const POLL_MS = 60_000;
 /** The first retry after the form could not load its status at all: the
  * draft stays read-only until it has, so the wait starts short. */
@@ -471,7 +476,12 @@ export function OnboardingEditor({
     setRefreshedTo(project.revision);
   }
   const stale = project.revision !== base;
-  const [tab, setTab] = useState<OnboardingTab>("basics");
+  const [tab, setTab] = useState<OnboardingStep>("basics");
+  // The step whose 'Next' found missing details; the summary lists what is
+  // still missing there, so it empties itself as the viewer fills them in.
+  const [summaryStep, setSummaryStep] = useState<OnboardingStep | null>(null);
+  const [summaryShown, setSummaryShown] = useState(0);
+  const summaryRef = useRef<HTMLDivElement | null>(null);
   const [destination, setDestination] = useState("");
   const [sending, setSending] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -483,7 +493,6 @@ export function OnboardingEditor({
     level: (typeof accessLevels)[number];
   }>({ system: "", level: "read" });
   const pendingFocus = useRef<string | null>(null);
-  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const { status, show, failed, load } = useOnboardingStatus(
     project.id,
     superAdmin,
@@ -495,6 +504,9 @@ export function OnboardingEditor({
     document.getElementById(pendingFocus.current)?.focus();
     pendingFocus.current = null;
   }, [tab]);
+  useEffect(() => {
+    if (summaryShown) summaryRef.current?.focus();
+  }, [summaryShown]);
 
   // An open send (reserved, filed, promoted or linked) locks the draft; the
   // readiness meter and "What will be sent" describe a send still to make,
@@ -517,7 +529,15 @@ export function OnboardingEditor({
     () => ({ ...project, ...fieldsFrom(project, draft) }),
     [project, draft],
   );
+  // Send is gated on every item, whoever owns it; the meter shows the
+  // viewer's own share (plan 2026-09-25 §7: readinessFor by actor).
   const ready = readiness(preview, target || null);
+  const viewer = superAdmin ? "superAdmin" : "requester";
+  const meter = meterFor(preview, target || null, viewer, tab);
+  const summary =
+    summaryStep === tab && !frozen
+      ? stepErrors(preview, target || null, viewer, tab)
+      : [];
   const suggestions = frozen ? [] : checklistSuggestions(preview);
   const payload = buildOnboardingPayload({
     project: preview,
@@ -550,12 +570,30 @@ export function OnboardingEditor({
   };
   const setRole = (role: "process" | "data" | "support", value: string) =>
     setDetail("ownerRoles", { ...draft.onboarding.ownerRoles, [role]: value });
-  function goTo(next: OnboardingTab, field: string) {
+  function step(next: OnboardingStep) {
+    setSummaryStep(null);
+    setTab(next);
+  }
+  function goTo(next: OnboardingStep, field: string) {
     if (next === tab) document.getElementById(field)?.focus();
     else {
       pendingFocus.current = field;
-      setTab(next);
+      step(next);
     }
+  }
+  const stepIndex = ONBOARDING_STEPS.findIndex((s) => s.id === tab);
+  const prevStep = ONBOARDING_STEPS[stepIndex - 1]?.id;
+  const nextStep = ONBOARDING_STEPS[stepIndex + 1]?.id;
+  /** 'Next' stops on a step with missing details and says which, in a
+   * focused summary; a read-only draft has nothing to fix, so it moves on. */
+  function next() {
+    if (!nextStep) return;
+    if (!frozen && stepErrors(preview, target || null, viewer, tab).length) {
+      setSummaryStep(tab);
+      setSummaryShown((n) => n + 1);
+      return;
+    }
+    step(nextStep);
   }
   function applySuggestions() {
     setDraft((d) => {
@@ -746,16 +784,6 @@ export function OnboardingEditor({
       {extra}
     </div>
   );
-  const onTabKey = (e: React.KeyboardEvent, index: number) => {
-    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-    e.preventDefault();
-    const next =
-      TABS[
-        (index + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length
-      ];
-    setTab(next.id);
-    tabRefs.current[next.id]?.focus();
-  };
 
   return (
     <form
@@ -809,33 +837,26 @@ export function OnboardingEditor({
           {project.revision}. Review it again before sending.
         </p>
       )}
-      <div
-        role="tablist"
-        aria-label="FlightDeck onboarding"
-        className="filter-tabs fd-onboard-tabs"
-      >
-        {TABS.map((item, i) => (
-          <button
-            key={item.id}
-            type="button"
-            role="tab"
-            id={`fd-tab-${item.id}`}
-            ref={(el) => {
-              tabRefs.current[item.id] = el;
-            }}
-            aria-selected={tab === item.id}
-            // Only the chosen tab's panel is rendered, so only that tab
-            // names one: an id that is not in the page is a dead reference.
-            aria-controls={tab === item.id ? `fd-panel-${item.id}` : undefined}
-            tabIndex={tab === item.id ? 0 : -1}
-            className={tab === item.id ? "chosen" : ""}
-            onClick={() => setTab(item.id)}
-            onKeyDown={(e) => onTabKey(e, i)}
-          >
-            {t(item.label, locale)}
-          </button>
-        ))}
-      </div>
+      <nav aria-label={t("onb.step.aria", locale)}>
+        <ol className="filter-tabs fd-onboard-tabs fd-stepper">
+          {ONBOARDING_STEPS.map((item, i) => (
+            <li key={item.id}>
+              <button
+                type="button"
+                id={`fd-step-${item.id}`}
+                aria-current={tab === item.id ? "step" : undefined}
+                className={tab === item.id ? "chosen" : ""}
+                onClick={() => step(item.id)}
+              >
+                <span className="fd-step-n" aria-hidden="true">
+                  {i + 1}
+                </span>
+                {t(STEP_LABEL[item.id], locale)}
+              </button>
+            </li>
+          ))}
+        </ol>
+      </nav>
       {!locked && (
         <div className="fd-readiness">
           <div
@@ -843,40 +864,68 @@ export function OnboardingEditor({
             role="meter"
             aria-label="Required FlightDeck details"
             aria-valuemin={0}
-            aria-valuemax={ready.total}
-            aria-valuenow={ready.done}
-            aria-valuetext={`${ready.done} of ${ready.total} required`}
+            aria-valuemax={meter.total}
+            aria-valuenow={meter.done}
+            aria-valuetext={t(
+              superAdmin ? "onb.meter.required" : "onb.meter.forYou",
+              locale,
+              { done: meter.done, total: meter.total },
+            )}
           >
             <span>
-              {ready.done} of {ready.total} required
+              {t(
+                superAdmin ? "onb.meter.required" : "onb.meter.forYou",
+                locale,
+                { done: meter.done, total: meter.total },
+              )}
             </span>
             <span className="fd-meter" aria-hidden="true">
-              <span style={{ width: `${(ready.done / ready.total) * 100}%` }} />
+              <span style={{ width: `${(meter.done / meter.total) * 100}%` }} />
             </span>
           </div>
-          {!ready.ready && (
+          {!meter.ready && (
             <ul className="fd-missing" aria-label="Missing details">
-              {ready.items
+              {meter.items
                 .filter((item) => !item.done)
                 .map((item) => (
                   <li key={item.key}>
-                    {item.key === "destination" && !superAdmin ? (
-                      <span className="fd-hint">
-                        {item.label} (chosen by the Atlas Super Admin)
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="text-link"
-                        onClick={() => goTo(item.tab, item.field)}
-                      >
-                        {item.label}
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="text-link"
+                      onClick={() => goTo(item.tab, item.field)}
+                    >
+                      {item.label}
+                    </button>
                   </li>
                 ))}
             </ul>
           )}
+        </div>
+      )}
+      {!!summary.length && (
+        <div
+          ref={summaryRef}
+          className="fd-error-summary"
+          role="alert"
+          tabIndex={-1}
+          aria-labelledby={`fd-errors-${project.id}`}
+        >
+          <p id={`fd-errors-${project.id}`}>
+            <AlertTriangle size={15} /> {t("onb.errors.title", locale)}
+          </p>
+          <ul>
+            {summary.map((item) => (
+              <li key={item.key}>
+                <button
+                  type="button"
+                  className="text-link"
+                  onClick={() => goTo(item.tab, item.field)}
+                >
+                  {item.label}
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
       {!!suggestions.length && (
@@ -902,8 +951,7 @@ export function OnboardingEditor({
       <fieldset
         disabled={frozen || busy}
         id={`fd-panel-${tab}`}
-        role="tabpanel"
-        aria-labelledby={`fd-tab-${tab}`}
+        aria-labelledby={`fd-step-${tab}`}
       >
         {tab === "basics" && (
           <div className="fd-grid">
@@ -1348,6 +1396,12 @@ export function OnboardingEditor({
             </label>
           </div>
         )}
+        {tab === "apps" && (
+          <p className="fd-hint">{t("onb.step.apps.note", locale)}</p>
+        )}
+        {tab === "agents" && (
+          <p className="fd-hint">{t("onb.step.agents.note", locale)}</p>
+        )}
         {tab === "review" && (
           <div className="fd-review">
             {locked ? (
@@ -1446,6 +1500,24 @@ export function OnboardingEditor({
           </div>
         )}
       </fieldset>
+      {(prevStep || nextStep) && (
+        <div className="fd-step-nav">
+          {prevStep && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => step(prevStep)}
+            >
+              {t("onb.step.back", locale)}
+            </Button>
+          )}
+          {nextStep && (
+            <Button type="button" variant="outline" onClick={next}>
+              {t("onb.step.next", locale)}
+            </Button>
+          )}
+        </div>
+      )}
       {tab === "review" && (
         <div className="fd-send">
           <p className="fd-hint">
