@@ -373,3 +373,22 @@ test("a too_large entry added after the budget filled still leaves the file with
     { id: "d01", reason: "too_large" },
   ]);
 });
+
+test("a deck whose identity the OS reader would refuse is withheld as invalid, not exported", async () => {
+  const h = harness(["a"]);
+  const longId = "x".repeat(81);
+  h.insert("ok", "owner", deckFor("a"), 1, "2026-09-22T10:00:00.000Z");
+  h.insert(longId, "owner", deckFor("a"), 1, "2026-09-21T10:00:00.000Z");
+  h.insert("long-at", "owner", deckFor("a"), 1, `2026-09-20T${"0".repeat(80)}`);
+  const b = await read(await h.route.GET(get()));
+  expect(b.decks.map((d) => d.id)).toEqual(["ok"]);
+  expect(b.withheld).toEqual([
+    { id: longId, reason: "invalid" },
+    { id: "long-at", reason: "invalid" },
+  ]);
+  // Every exported deck is one the OS reader accepts.
+  for (const d of b.decks)
+    expect(atlasV0Schema.safeParse(withoutChecksum(d)).success).toBe(true);
+  // An invalid deck costs no source lookup.
+  expect(h.state.lookups).toBe(1);
+});

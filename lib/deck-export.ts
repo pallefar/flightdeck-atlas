@@ -17,6 +17,7 @@
 // the sha256 of the deck's canonical JSON, which the OS import pairs with the
 // deck id for idempotency (D-048). The OS reader must drop `checksum` before
 // it validates the deck.
+import { z } from "zod";
 import { json, sameOrigin } from "./http";
 import { deckSchema } from "./presentations";
 import type { DeckAccess, DeckAuth } from "./deck-policy";
@@ -31,6 +32,17 @@ export const DECK_EXPORT_MAX_BYTES = 5 * 1024 * 1024;
 export function serializeDeckExport(body: unknown): string {
   return JSON.stringify(body, null, 2);
 }
+/** The whole deck as the OS atlasV0Schema reads it. deckSchema checks only the
+ * stored data; the identity comes from the row, and the POST handler accepts
+ * any string id, so the assembled deck is checked here: a deck the import
+ * would refuse is withheld as `invalid`, never announced as exported. */
+const importSchema = deckSchema
+  .extend({
+    id: z.string().min(1).max(80),
+    revision: z.number().int(),
+    updatedAt: z.string().max(80),
+  })
+  .strict();
 const utf8Length = (text: string) => new TextEncoder().encode(text).length;
 export type WithheldReason = "source_unavailable" | "invalid" | "too_large";
 export type DeckExportDb = {
@@ -93,9 +105,16 @@ export function createDeckExportRoute<A extends DeckAccess>(deps: {
         const eligible: Exported[] = [],
           withheld: { id: string; reason: WithheldReason }[] = [];
         for (const row of rows.results) {
-          let data;
+          let data, deck;
           try {
             data = deckSchema.parse(JSON.parse(row.data));
+            deck = {
+              id: row.id,
+              revision: row.revision,
+              updatedAt: row.updated_at,
+              ...data,
+            };
+            importSchema.parse(deck);
           } catch {
             withheld.push({ id: row.id, reason: "invalid" });
             continue;
@@ -110,12 +129,6 @@ export function createDeckExportRoute<A extends DeckAccess>(deps: {
             withheld.push({ id: row.id, reason: "source_unavailable" });
             continue;
           }
-          const deck = {
-            id: row.id,
-            revision: row.revision,
-            updatedAt: row.updated_at,
-            ...data,
-          };
           const utf8 = new TextEncoder().encode(canonicalJson(deck));
           eligible.push({ ...deck, checksum: await sha256(utf8) });
         }
