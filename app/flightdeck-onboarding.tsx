@@ -112,6 +112,8 @@ const REASON_TEXT: Record<string, string> = {
   link_conflict:
     "That FlightDeck project is already linked elsewhere, so Atlas did not link it.",
   submission_not_found: "FlightDeck does not know this request.",
+  // An editor's view of a send FlightDeck holds but has not yet linked.
+  waiting_to_be_filed: "Sent, waiting for FlightDeck to file it.",
   abandoned: "The Atlas Super Admin closed it before FlightDeck confirmed it.",
   duplicate: "It duplicates another request.",
   "out-of-scope": "It is out of scope for FlightDeck.",
