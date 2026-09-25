@@ -1059,6 +1059,66 @@
 .fd-banner.warn > svg {
   color: var(--orange);
 }
+/* The onboarding autosave pill (aria-live polite) and the conflict view
+   that shows both versions side by side. */
+.fd-autosave {
+  flex: 1 1 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+.fd-autosave::before {
+  content: "";
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+}
+.fd-autosave.busy::before {
+  background: var(--muted-foreground);
+}
+.fd-autosave.warn {
+  color: var(--orange);
+}
+.fd-autosave.warn::before {
+  background: var(--orange);
+}
+.fd-conflict > div {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+.fd-conflict h3 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.fd-conflict-table {
+  overflow-x: auto;
+}
+.fd-conflict table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.fd-conflict th,
+.fd-conflict td {
+  text-align: left;
+  vertical-align: top;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.fd-conflict thead th,
+.fd-conflict tbody th {
+  color: var(--muted-foreground);
+  font-weight: 500;
+}
 .fd-review {
   display: grid;
   gap: 18px;

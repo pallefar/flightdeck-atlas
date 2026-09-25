@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState, useRef } from "react";
 import Link from "next/link";
+import { confirmLeave } from "@/lib/flightdeck/autosave-ux";
 import { useHydrated } from "@/hooks/use-hydrated";
 import {
   ArrowRight,
@@ -173,6 +174,11 @@ export default function Atlas() {
   const workspaceRef = useRef("");
   const [menuOpen, setMenuOpen] = useState(false);
   const menuTrigger = useRef<HTMLButtonElement>(null);
+  /** The address the page shows, restored when a back/forward is refused. */
+  const shownUrl = useRef("");
+  useEffect(() => {
+    shownUrl.current = location.href;
+  }, []);
   const [view, setView] = useState<View>("dashboard"),
     [projects, setProjects] = useState<Project[]>([]),
     [loaded, setLoaded] = useState(false),
@@ -244,6 +250,13 @@ export default function Atlas() {
   }, [load]);
   useEffect(() => {
     function restoreNavigation() {
+      // Back/forward away from a form holding unsaved work asks first; if
+      // the viewer stays, the address goes back to where the form is.
+      if (!confirmLeave()) {
+        history.pushState(null, "", shownUrl.current);
+        return;
+      }
+      shownUrl.current = location.href;
       const params = new URLSearchParams(location.search);
       const destination = params.get("view") as View;
       setView(validViews.includes(destination) ? destination : "dashboard");
@@ -288,6 +301,8 @@ export default function Atlas() {
       (!projectId || projectId === workspaceId)
     )
       return;
+    // A form holding unsaved work (the onboarding autosave) asks first.
+    if (!confirmLeave()) return;
     const portfolio = (value: View): value is PortfolioView =>
       value === "dashboard" || value === "globe";
     if (portfolio(next)) lastPortfolioView.current = next;
@@ -334,6 +349,7 @@ export default function Atlas() {
       setWorkspaceId("");
     }
     history.pushState(null, "", "/?" + params);
+    shownUrl.current = location.href;
     setFlightTarget(null);
     window.scrollTo({
       top:
@@ -883,6 +899,16 @@ export default function Atlas() {
                 }}
                 onOpen={openProject}
                 onSave={save}
+                viewerId={access?.userId ?? ""}
+                onProjectSaved={(saved) =>
+                  setProjects((prev) =>
+                    prev.map((p) =>
+                      p.id === saved.id && p.revision < saved.revision
+                        ? saved
+                        : p,
+                    ),
+                  )
+                }
                 onImported={load}
               />
             ) : view === "globe" ? (

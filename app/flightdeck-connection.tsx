@@ -1,5 +1,6 @@
 "use client";
 import { freshProject } from "@/lib/fresh-export";
+import { confirmLeave } from "@/lib/flightdeck/autosave-ux";
 import { useEffect, useState } from "react";
 import {
   ArrowDownToLine,
@@ -85,6 +86,8 @@ export default function FlightDeckConnection({
   onNew,
   onOpen,
   onSave,
+  viewerId = "",
+  onProjectSaved,
   onImported,
 }: {
   projects: Project[];
@@ -97,6 +100,10 @@ export default function FlightDeckConnection({
     fields: ProjectFields,
     existing?: Project,
   ) => Promise<Project | null>;
+  /** Who is viewing (the onboarding form holds unsaved work per viewer). */
+  viewerId?: string;
+  /** The onboarding form's autosave landed. */
+  onProjectSaved?: (project: Project) => void;
   onImported: () => Promise<void>;
 }) {
   const [tab, setTab] = useState<"import" | "onboard">("import");
@@ -255,6 +262,9 @@ export default function FlightDeckConnection({
             aria-pressed={tab === "import"}
             className={tab === "import" ? "chosen" : ""}
             onClick={() => {
+              // The onboarding form lives on the other tab: leaving it with
+              // unsaved work asks first.
+              if (tab !== "import" && !confirmLeave()) return;
               setTab("import");
               setQuery("");
             }}
@@ -476,6 +486,8 @@ export default function FlightDeckConnection({
                     workspaces={superAdmin ? context.workspaces : []}
                     contextState={superAdmin ? context.state : null}
                     onSave={onSave}
+                    viewerId={viewerId}
+                    onAutosaved={onProjectSaved}
                     onClose={() => setEditing(null)}
                     onMessage={setMessage}
                     onStage={onboarding.mark}
@@ -487,6 +499,7 @@ export default function FlightDeckConnection({
                         variant="outline"
                         disabled={busy || p.canEdit === false}
                         onClick={() => {
+                          if (editing && !confirmLeave()) return;
                           setEditing(p.id);
                           setMessage("");
                         }}

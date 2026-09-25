@@ -1,5 +1,12 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { z } from "zod";
 import {
   AlertTriangle,
@@ -18,6 +25,22 @@ import { Textarea } from "@/components/ui/textarea";
 import type { Project, ProjectFields } from "@/lib/projects";
 import { functions } from "@/lib/opportunities";
 import type { OsContextEntry } from "@/lib/flightdeck/context";
+import {
+  createSaveCoordinator,
+  type AutosaveState,
+} from "@/lib/flightdeck/autosave";
+import {
+  autosavePill,
+  clearHeld,
+  confirmLeave,
+  hasUnsavedWork,
+  readHeld,
+  registerLeaveGuard,
+  sameOutsideOnboarding,
+  stableJson,
+  writeHeld,
+} from "@/lib/flightdeck/autosave-ux";
+import { freshProject } from "@/lib/fresh-export";
 import {
   FREE_TEXT_NOTE,
   ISO_COUNTRY_CODES,
@@ -431,13 +454,297 @@ function Hint({ text, strict = false }: { text: string; strict?: boolean }) {
   ) : null;
 }
 
+// ── Autosave (onb-atlas-save-ux) ─────────────────────────────────────────
+// The onboarding part of the form saves itself through the single-flight
+// coordinator, with the onboarding-scoped PUT (only that field is written,
+// so other people's edits to the rest of the project are never overwritten).
+// Everything else on the form still waits for Save now.
+
+/** One field of the form, as the conflict view compares and re-applies it. */
+type DiffField = {
+  label: string;
+  basics: boolean;
+  get: (d: Draft) => unknown;
+  set: (d: Draft, value: unknown) => Draft;
+  show?: (value: unknown, locale: Locale) => string;
+};
+const yesNo = (v: unknown) => (v ? "Yes" : "No");
+const basicField = (
+  key: Exclude<keyof Draft, "onboarding">,
+  label: string,
+  show?: DiffField["show"],
+): DiffField => ({
+  label,
+  basics: true,
+  get: (d) => d[key],
+  set: (d, value) => ({ ...d, [key]: value }),
+  show,
+});
+const detailField = (
+  key: Exclude<keyof OnboardingDraft, "ownerRoles">,
+  label: string,
+  show?: DiffField["show"],
+): DiffField => ({
+  label,
+  basics: false,
+  get: (d) => cleanOnboarding(d.onboarding)[key],
+  set: (d, value) => ({ ...d, onboarding: { ...d.onboarding, [key]: value } }),
+  show,
+});
+const roleField = (
+  role: "process" | "data" | "support",
+  label: string,
+): DiffField => ({
+  label,
+  basics: false,
+  get: (d) => cleanOnboarding(d.onboarding).ownerRoles?.[role],
+  set: (d, value) => ({
+    ...d,
+    onboarding: {
+      ...d.onboarding,
+      ownerRoles: { ...d.onboarding.ownerRoles, [role]: value as string },
+    },
+  }),
+});
+const DIFF_FIELDS: DiffField[] = [
+  basicField("label", "Proposed OS project name"),
+  basicField("workspaceHint", "Preferred workspace (optional)"),
+  basicField("functionArea", "Function area"),
+  basicField("category", "Category"),
+  basicField("description", "Summary"),
+  basicField("benefit", "Success measure"),
+  basicField("status", "Status"),
+  basicField("priority", "Priority"),
+  basicField("dueDate", "Target date"),
+  basicField("location", "Site"),
+  basicField("ready", "Ready for FlightDeck", yesNo),
+  detailField("proposedProjectId", "Proposed OS project id (optional)"),
+  detailField("countryCode", "Country", (v) => countryName(String(v))),
+  detailField("worksCouncilRelevant", "Works council relevant"),
+  detailField("legalEntity", "Legal entity (optional)"),
+  detailField("headcountBand", "Headcount band (optional)", (v, locale) =>
+    t(`onb.headcount.${v as NonNullable<OnboardingDraft["headcountBand"]>}`, locale),
+  ),
+  roleField("process", "Process owner role"),
+  roleField("data", "Data owner role"),
+  roleField("support", "Support owner role"),
+  detailField("dataSources", "Data sources", (v) => (v as string[]).join(", ")),
+  detailField("accessRequested", "Access requested", (v) =>
+    (v as { system: string; level: string }[])
+      .map((a) => `${a.system} (${a.level})`)
+      .join(", "),
+  ),
+  detailField("coworkRequested", "Cowork requested", yesNo),
+];
+const differs = (f: DiffField, a: Draft, b: Draft) =>
+  stableJson(f.get(a) ?? null) !== stableJson(f.get(b) ?? null);
+/** "Keep mine": their version with every field this form changed (since the
+ * version its edits were based on) put back on top. A field only they
+ * changed keeps their value. */
+function reapplyMine(base: Draft, mine: Draft, theirs: Draft): Draft {
+  return DIFF_FIELDS.reduce(
+    (d, f) => (differs(f, base, mine) ? f.set(d, f.get(mine)) : d),
+    theirs,
+  );
+}
+/** The fields where Keep mine and Use theirs give different results. */
+function conflictRows(base: Draft, mine: Draft, theirs: Draft) {
+  return DIFF_FIELDS.filter(
+    (f) => differs(f, base, mine) && differs(f, mine, theirs),
+  );
+}
+const basicsDiffer = (a: Draft, b: Draft) =>
+  DIFF_FIELDS.some((f) => f.basics && differs(f, a, b));
+const showValue = (f: DiffField, value: unknown, locale: Locale) =>
+  value === undefined ||
+  value === null ||
+  value === "" ||
+  (Array.isArray(value) && !value.length)
+    ? t("onb.conflict.empty", locale)
+    : f.show
+      ? f.show(value, locale)
+      : String(value);
+
+type AutosaveSnapshot = {
+  state: AutosaveState;
+  /** The project the newest acknowledged save answered with. */
+  acked: Project | null;
+  /** When this form last saw a save succeed. */
+  savedAt: Date | null;
+};
+/** One coordinator for one form, with a snapshot React reads through
+ * useSyncExternalStore. It is disposed a tick after its last user lets go,
+ * so a StrictMode rehearsal (unmount, mount again) keeps it alive. */
+function createAutosave(
+  projectId: string,
+  revision: number,
+  onSaved: (project: Project) => void,
+) {
+  let answered: Project | null = null;
+  const coordinator = createSaveCoordinator<OnboardingDraft>({
+    initialRevision: revision,
+    send: (onboarding, baseRevision, signal) =>
+      fetch(`/api/projects/${encodeURIComponent(projectId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: "onboarding", baseRevision, onboarding }),
+        signal,
+      }),
+    readRevision: (body) => {
+      const project = (body as { project?: Project } | null)?.project;
+      const r = project?.revision;
+      if (typeof r !== "number" || !Number.isInteger(r) || r < 1) return null;
+      answered = project!;
+      return r;
+    },
+  });
+  let snapshot: AutosaveSnapshot = {
+    state: coordinator.getState(),
+    acked: null,
+    savedAt: null,
+  };
+  const listeners = new Set<() => void>();
+  coordinator.subscribe((state) => {
+    const fresh =
+      answered &&
+      answered !== snapshot.acked &&
+      answered.revision === state.acknowledgedRevision
+        ? answered
+        : null;
+    snapshot = {
+      state,
+      acked: fresh ?? snapshot.acked,
+      savedAt: fresh ? new Date() : snapshot.savedAt,
+    };
+    if (fresh) onSaved(fresh);
+    for (const fn of [...listeners]) fn();
+  });
+  let release: ReturnType<typeof setTimeout> | undefined;
+  return {
+    coordinator,
+    getSnapshot: () => snapshot,
+    subscribe: (fn: () => void) => {
+      listeners.add(fn);
+      return () => {
+        listeners.delete(fn);
+      };
+    },
+    hold: () => clearTimeout(release),
+    release: () => {
+      release = setTimeout(() => coordinator.dispose(), 0);
+    },
+  };
+}
+type Autosave = ReturnType<typeof createAutosave>;
+/** A conflict the viewer has to resolve: the coordinator's 409, a save
+ * elsewhere while fields outside the onboarding part were edited, or a copy
+ * held from before a reload. `base` is the version the local edits started
+ * from. */
+type Held = {
+  kind: "conflict" | "stale" | "recovered";
+  theirs: Project | null;
+  failed?: boolean;
+  base: Draft;
+  /** The revision the local edits started from. */
+  baseRevision: number;
+};
+
+function ConflictPanel({
+  held,
+  base,
+  mine,
+  onKeepMine,
+  onUseTheirs,
+  disabled,
+}: {
+  held: Held;
+  base: Draft;
+  mine: Draft;
+  onKeepMine: () => void;
+  onUseTheirs: () => void;
+  disabled: boolean;
+}) {
+  const locale = useLocale();
+  const theirs = held.theirs;
+  const theirsDraft = theirs ? draftFrom(theirs) : null;
+  const rows = theirsDraft ? conflictRows(base, mine, theirsDraft) : [];
+  const titleId = `fd-conflict-${theirs?.id ?? "loading"}`;
+  const title =
+    theirs &&
+    (held.kind !== "recovered" || theirs.revision > held.baseRevision)
+      ? t("onb.conflict.title", locale, { revision: theirs.revision })
+      : t("onb.conflict.recoveredTitle", locale);
+  return (
+    <section className="fd-banner warn fd-conflict" aria-labelledby={titleId}>
+      <AlertTriangle size={16} />
+      <div>
+        <h3 id={titleId}>{title}</h3>
+        {!theirs ? (
+          <p role="status">
+            {held.failed
+              ? t("onb.conflict.unavailable", locale)
+              : t("onb.conflict.loading", locale)}
+          </p>
+        ) : (
+          <>
+            <p>{t("onb.conflict.intro", locale, { revision: theirs.revision })}</p>
+            {rows.length ? (
+              <div className="fd-conflict-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col">{t("onb.conflict.field", locale)}</th>
+                      <th scope="col">{t("onb.conflict.yours", locale)}</th>
+                      <th scope="col">{t("onb.conflict.theirs", locale)}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((f) => (
+                      <tr key={f.label}>
+                        <th scope="row">{f.label}</th>
+                        <td>{showValue(f, f.get(mine), locale)}</td>
+                        <td>{showValue(f, f.get(theirsDraft!), locale)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="fd-hint">{t("onb.conflict.same", locale)}</p>
+            )}
+          </>
+        )}
+        <div className="bridge-actions">
+          <Button
+            type="button"
+            disabled={disabled || (!theirs && !held.failed)}
+            onClick={onKeepMine}
+          >
+            {t("onb.conflict.keepMine", locale)}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={disabled || (!theirs && !held.failed)}
+            onClick={onUseTheirs}
+          >
+            {t("onb.conflict.useTheirs", locale)}
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function OnboardingEditor({
   project,
   superAdmin,
   busy,
   workspaces,
   contextState,
+  viewerId = "",
   onSave,
+  onAutosaved,
   onClose,
   onMessage,
   onStage,
@@ -447,33 +754,165 @@ export function OnboardingEditor({
   busy: boolean;
   workspaces: OsContextEntry[];
   contextState: string | null;
+  /** Who is viewing: the held copy of unsaved work is kept per viewer. */
+  viewerId?: string;
   onSave: (
     fields: ProjectFields,
     existing?: Project,
   ) => Promise<Project | null>;
+  /** A save of the onboarding part landed (the project it returned). */
+  onAutosaved?: (project: Project) => void;
   onClose: () => void;
   onMessage: (message: string) => void;
   onStage: (id: string, stage: OnboardingStage | null) => void;
 }) {
   const locale = useLocale();
-  const [draft, setDraft] = useState(() => draftFrom(project));
-  const [dirty, setDirty] = useState(false);
-  // The revision the draft was built from. Atlas reloads its projects on
-  // focus and every minute, so a save elsewhere can arrive while the form
-  // is open: an untouched draft follows it, so Review always shows what the
-  // server would send; an edited one keeps the edits, but may neither save
-  // over that change nor be sent until the latest version is loaded.
-  const [base, setBase] = useState(project.revision);
+  // Work held from before a reload (a conflict not yet resolved, or a save
+  // that never landed), for this viewer and project only. It is offered
+  // again only if it would still change something.
+  const [recovered] = useState(() => {
+    const kept = readHeld<Draft>(viewerId, project.id);
+    if (!kept) return null;
+    const theirs = draftFrom(project);
+    return stableJson(reapplyMine(kept.baseDraft, kept.draft, theirs)) !==
+      stableJson(theirs)
+      ? kept
+      : null;
+  });
+  const [draft, setDraft] = useState<Draft>(
+    () => recovered?.draft ?? draftFrom(project),
+  );
+  /** Fields outside the autosaved onboarding part were edited. */
+  const [basicsDirty, setBasicsDirty] = useState(
+    () => recovered?.basicsDirty ?? false,
+  );
+  /** An onboarding edit held back because the server would refuse it (a
+   * project id that is not a valid slug yet). */
+  const [unsent, setUnsent] = useState(false);
+  // The version the form is based on. Atlas reloads its projects on focus
+  // and every minute, and each autosave answers with the saved project, so
+  // a newer version can arrive while the form is open: an untouched form
+  // follows it, so Review always shows what the server would send; edited
+  // fields are never overwritten, and a change elsewhere to a field this
+  // form edited asks the viewer to choose (Keep mine / Use theirs).
+  const [server, setServer] = useState(project);
+  /** The onboarding part the local onboarding edits started from. */
+  const [onboardingBase, setOnboardingBase] = useState<OnboardingDraft>(
+    () => recovered?.baseDraft.onboarding ?? draftFrom(project).onboarding,
+  );
+  const [held, setHeld] = useState<Held | null>(() =>
+    recovered
+      ? {
+          kind: "recovered",
+          theirs: project,
+          base: recovered.baseDraft,
+          baseRevision: recovered.base,
+        }
+      : null,
+  );
   const [refreshedTo, setRefreshedTo] = useState<number | null>(null);
-  if (project.revision !== base && !dirty) {
-    setBase(project.revision);
-    setDraft(draftFrom(project));
-    setRefreshedTo(project.revision);
+  const onAutosavedRef = useRef(onAutosaved);
+  useEffect(() => {
+    onAutosavedRef.current = onAutosaved;
+  });
+  const startAutosave = (revision: number) =>
+    createAutosave(project.id, revision, (p) => onAutosavedRef.current?.(p));
+  const [autosave, setAutosave] = useState<Autosave>(() =>
+    startAutosave(project.revision),
+  );
+  useEffect(() => {
+    autosave.hold();
+    return () => autosave.release();
+  }, [autosave]);
+  const snap = useSyncExternalStore(
+    autosave.subscribe,
+    autosave.getSnapshot,
+    autosave.getSnapshot,
+  );
+  const save = snap.state;
+  /** The onboarding part holds local work the server has not taken. */
+  const localOnboarding =
+    unsent ||
+    save.pending ||
+    save.status === "conflict" ||
+    save.status === "stopped" ||
+    save.status === "retrying";
+  const newest =
+    snap.acked && snap.acked.revision > project.revision
+      ? snap.acked
+      : project;
+  const baseDraft: Draft = { ...draftFrom(server), onboarding: onboardingBase };
+  /** Moves the form's base onto a newer version, keeping local work. */
+  function adopt(p: Project, keepBasics: boolean) {
+    const fresh = draftFrom(p);
+    const same =
+      stableJson(cleanOnboarding(draft.onboarding)) ===
+      stableJson(cleanOnboarding(fresh.onboarding));
+    const keepOnboarding = localOnboarding || same;
+    setServer(p);
+    setDraft({
+      ...(keepBasics ? draft : fresh),
+      onboarding: keepOnboarding ? draft.onboarding : fresh.onboarding,
+    });
+    if (p.revision === save.acknowledgedRevision || !keepOnboarding)
+      setOnboardingBase(fresh.onboarding);
+    // A coordinator with nothing to send starts again on the new revision,
+    // so its next save is based on what the form now shows.
+    if (!localOnboarding && save.acknowledgedRevision < p.revision)
+      setAutosave(startAutosave(p.revision));
   }
-  const stale = project.revision !== base;
+  if (newest.revision > server.revision && !held) {
+    if (!basicsDirty) {
+      adopt(newest, false);
+      setRefreshedTo(
+        newest.revision !== save.acknowledgedRevision ? newest.revision : null,
+      );
+    } else if (sameOutsideOnboarding(newest, server)) adopt(newest, true);
+    else
+      setHeld({
+        kind: "stale",
+        theirs: newest,
+        base: baseDraft,
+        baseRevision: server.revision,
+      });
+  }
+  if (save.status === "conflict" && !held)
+    setHeld({
+      kind: "conflict",
+      theirs: null,
+      base: baseDraft,
+      baseRevision: server.revision,
+    });
+  // A held choice always compares against the newest version known.
+  if (
+    held?.theirs &&
+    held.kind !== "conflict" &&
+    newest.revision > held.theirs.revision
+  )
+    setHeld({ ...held, theirs: newest });
+  // The coordinator's conflict names no version: read the one saved.
+  useEffect(() => {
+    if (!held || held.theirs || held.failed) return;
+    let live = true;
+    freshProject(project.id).then(
+      (theirs) => {
+        if (live) setHeld((h) => (h && !h.theirs ? { ...h, theirs } : h));
+      },
+      () => {
+        if (live) setHeld((h) => (h ? { ...h, failed: true } : h));
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [held, project.id]);
+  const stale = !!held || newest.revision > server.revision;
   const [tab, setTab] = useState<OnboardingTab>("basics");
   const [destination, setDestination] = useState("");
   const [sending, setSending] = useState(false);
+  /** Save now is running: the form is frozen until it is done. */
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [closing, setClosing] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
   const [error, setError] = useState("");
@@ -539,15 +978,38 @@ export function OnboardingEditor({
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => {
     setDraft((d) => ({ ...d, [key]: value }));
-    setDirty(true);
+    setBasicsDirty(true);
   };
+  /** An onboarding edit: shown at once, and handed to the autosave unless
+   * the server would refuse it as it stands. While a conflict waits for
+   * Keep mine or Use theirs, edits stay local: the form may hold a copy
+   * based on an older version (say, recovered after a reload), and sending
+   * it would overwrite the other change without a 409. The held copy keeps
+   * them, and Keep mine re-applies them on top. */
+  function editOnboarding(
+    next: OnboardingDraft,
+    via: Autosave = autosave,
+    local = !!held,
+  ) {
+    setDraft((d) => ({ ...d, onboarding: next }));
+    if (next.proposedProjectId && !SLUG_RE.test(next.proposedProjectId)) {
+      setUnsent(true);
+      return;
+    }
+    setUnsent(false);
+    if (local) return;
+    const c = via.coordinator;
+    const state = c.getState();
+    // A save refused as it stood (say, a value the server rejected) gets a
+    // new chance once the value changes; a locked draft never does.
+    if (state.status === "stopped" && state.stopReason === "refused")
+      c.resume(state.acknowledgedRevision);
+    c.edit(cleanOnboarding(next));
+  }
   const setDetail = <K extends keyof OnboardingDraft>(
     key: K,
     value: OnboardingDraft[K],
-  ) => {
-    setDraft((d) => ({ ...d, onboarding: { ...d.onboarding, [key]: value } }));
-    setDirty(true);
-  };
+  ) => editOnboarding({ ...draft.onboarding, [key]: value });
   const setRole = (role: "process" | "data" | "support", value: string) =>
     setDetail("ownerRoles", { ...draft.onboarding.ownerRoles, [role]: value });
   function goTo(next: OnboardingTab, field: string) {
@@ -558,53 +1020,203 @@ export function OnboardingEditor({
     }
   }
   function applySuggestions() {
-    setDraft((d) => {
-      const next = {
-        ...d,
-        onboarding: {
-          ...d.onboarding,
-          ownerRoles: { ...d.onboarding.ownerRoles },
-        },
-      };
-      for (const s of suggestions) {
-        if (s.field === "functionArea") next.functionArea = s.value;
-        else if (s.field === "summary") next.description = s.value;
-        else if (s.field === "successMeasure") next.benefit = s.value;
-        else
-          next.onboarding.ownerRoles[
-            s.field.slice("ownerRoles.".length) as
-              "process" | "data" | "support"
-          ] = s.value;
+    const next = {
+      ...draft,
+      onboarding: {
+        ...draft.onboarding,
+        ownerRoles: { ...draft.onboarding.ownerRoles },
+      },
+    };
+    let basics = false,
+      roles = false;
+    for (const s of suggestions) {
+      if (s.field === "functionArea") next.functionArea = s.value;
+      else if (s.field === "summary") next.description = s.value;
+      else if (s.field === "successMeasure") next.benefit = s.value;
+      else {
+        next.onboarding.ownerRoles[
+          s.field.slice("ownerRoles.".length) as
+            "process" | "data" | "support"
+        ] = s.value;
+        roles = true;
+        continue;
       }
-      return next;
-    });
-    setDirty(true);
+      basics = true;
+    }
+    setDraft(next);
+    if (basics) setBasicsDirty(true);
+    if (roles) editOnboarding(next.onboarding);
   }
-  function loadLatest() {
-    setBase(project.revision);
-    setDraft(draftFrom(project));
-    setDirty(false);
+  /** Keep mine: their version with this form's changes put back on top,
+   * saved at once. */
+  function keepMine() {
+    if (!held) return;
+    const theirs = held.theirs;
+    if (!theirs) {
+      setHeld({ ...held, failed: false });
+      return;
+    }
+    const theirsDraft = draftFrom(theirs);
+    const next = reapplyMine(held.base, draft, theirsDraft);
+    const dirty = basicsDiffer(next, theirsDraft);
+    setHeld(null);
+    clearHeld(viewerId, project.id);
+    setServer(theirs);
+    setOnboardingBase(theirsDraft.onboarding);
+    setDraft(next);
+    setBasicsDirty(dirty);
     setRefreshedTo(null);
+    // Always a new coordinator on their revision: the old one may still
+    // queue the pre-conflict value, which would be sent over theirs even
+    // when the reconciled copy already equals theirs.
+    const via = startAutosave(theirs.revision);
+    setAutosave(via);
+    if (
+      stableJson(cleanOnboarding(next.onboarding)) !==
+      stableJson(cleanOnboarding(theirsDraft.onboarding))
+    )
+      editOnboarding(next.onboarding, via, false);
+    void saveNow({ server: theirs, draft: next, basicsDirty: dirty, via });
   }
-  async function save() {
-    if (frozen) return;
+  /** Use theirs: the local changes are discarded. */
+  function takeTheirs() {
+    if (!held) return;
+    const theirs = held.theirs;
+    if (!theirs) {
+      setHeld({ ...held, failed: false });
+      return;
+    }
+    const fresh = draftFrom(theirs);
+    setHeld(null);
+    clearHeld(viewerId, project.id);
+    setServer(theirs);
+    setOnboardingBase(fresh.onboarding);
+    setDraft(fresh);
+    setBasicsDirty(false);
+    setUnsent(false);
+    setRefreshedTo(null);
+    setAutosave(startAutosave(theirs.revision));
+  }
+  /** Save now: sends a waiting onboarding edit at once, then saves the rest
+   * of the form (and creates the draft) with a whole-project save. */
+  async function saveNow(
+    over: {
+      server?: Project;
+      draft?: Draft;
+      basicsDirty?: boolean;
+      via?: Autosave;
+    } = {},
+  ) {
+    if (frozen || savingRef.current) return;
+    // The form takes no edit until the whole save is done: the draft is
+    // captured here, and an edit made while the waiting autosave is flushed
+    // would be overwritten by the whole-project save that follows.
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await saveAll(over);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
+  async function saveAll(
+    over: {
+      server?: Project;
+      draft?: Draft;
+      basicsDirty?: boolean;
+      via?: Autosave;
+    },
+  ) {
     setError("");
-    // Saved against the revision the edits were made on, so a change saved
-    // elsewhere meanwhile is refused (409), never overwritten.
-    const saved = await onSave(fieldsFrom(project, draft), {
-      ...project,
-      revision: base,
-    });
-    if (saved) {
-      setBase(saved.revision);
-      setDraft(draftFrom(saved));
-      setRefreshedTo(null);
-      setDirty(false);
+    const via = over.via ?? autosave;
+    let d = over.draft ?? draft;
+    const dirty = over.basicsDirty ?? basicsDirty;
+    let base = over.server ?? server;
+    const state = await via.coordinator.flush();
+    // Still failing, refused or in conflict: the pill and the conflict view
+    // say why, and the rest waits.
+    if (state.pending || state.status === "conflict" || state.status === "stopped")
+      return;
+    const acked = via.getSnapshot().acked;
+    if (acked && acked.revision > base.revision) {
+      // Someone else changed a field this form edited: the conflict view
+      // asks first.
+      if (dirty && !sameOutsideOnboarding(acked, base)) return;
+      // Untouched Basics follow the acknowledged version: the draft was
+      // captured before the flush, so its Basics may predate a save made
+      // elsewhere that the onboarding autosave merged over, and sending them
+      // against the newer revision would silently put the old values back.
+      // The onboarding part is what the flush just saved.
+      if (!dirty) d = { ...draftFrom(acked), onboarding: d.onboarding };
+      base = acked;
+    }
+    if (!dirty && base.flightdeckDraft) {
       onMessage(
         "Onboarding draft saved in Atlas. Nothing has been sent to FlightDeck.",
       );
+      return;
     }
+    // Saved against the revision the form is based on, so a change saved
+    // elsewhere meanwhile is refused (409), never overwritten.
+    const saved = await onSave(fieldsFrom(base, d), base);
+    if (!saved) return;
+    const fresh = draftFrom(saved);
+    setServer(saved);
+    setBasicsDirty(false);
+    setRefreshedTo(null);
+    const pending = via.coordinator.getState().pending;
+    setDraft((cur) => ({
+      ...fresh,
+      onboarding: pending ? cur.onboarding : fresh.onboarding,
+    }));
+    if (!pending) {
+      setOnboardingBase(fresh.onboarding);
+      setAutosave(startAutosave(saved.revision));
+    }
+    onMessage(
+      "Onboarding draft saved in Atlas. Nothing has been sent to FlightDeck.",
+    );
   }
+  // Leaving (tab close, reload, or an in-app route change) asks while any
+  // local work is not on the server; nothing asks once everything is saved.
+  const unsaved = hasUnsavedWork(save, basicsDirty || unsent, !!held);
+  const unsavedRef = useRef(unsaved);
+  useEffect(() => {
+    unsavedRef.current = unsaved;
+  });
+  useEffect(() => {
+    const off = registerLeaveGuard(() =>
+      unsavedRef.current ? t("onb.autosave.leave", locale) : null,
+    );
+    const onUnload = (e: BeforeUnloadEvent) => {
+      if (!unsavedRef.current) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onUnload);
+    return () => {
+      off();
+      window.removeEventListener("beforeunload", onUnload);
+    };
+  }, [locale]);
+  // The held copy: kept in this tab while there is unsaved work, so a reload
+  // offers it again; dropped once saved or chosen, and when the viewer
+  // leaves the form after being asked.
+  useEffect(() => {
+    if (unsaved && !locked)
+      writeHeld(viewerId, project.id, {
+        draft,
+        baseDraft: held?.base ?? baseDraft,
+        basicsDirty,
+        base: held?.baseRevision ?? server.revision,
+      });
+    else clearHeld(viewerId, project.id);
+  });
+  useEffect(
+    () => () => clearHeld(viewerId, project.id),
+    [viewerId, project.id],
+  );
   async function send() {
     if (!target) return;
     setSending(true);
@@ -620,7 +1232,10 @@ export function OnboardingEditor({
           // anything saved after it is refused (409 project_changed).
           body: JSON.stringify({
             destinationWorkspaceId: target,
-            revision: retrying && op?.atlasRevision ? op.atlasRevision : base,
+            revision:
+              retrying && op?.atlasRevision
+                ? op.atlasRevision
+                : server.revision,
           }),
         },
       );
@@ -703,8 +1318,8 @@ export function OnboardingEditor({
         : retrying
           ? ""
           : stale
-            ? "This project was saved elsewhere. Load the latest version and review it before sending."
-            : dirty
+            ? "This project was saved elsewhere. Choose Keep mine or Use theirs, then review it before sending."
+            : unsaved
               ? "Save the draft first: FlightDeck receives the saved version."
               : !ready.ready
                 ? `Complete the required details first (${ready.done} of ${ready.total}).`
@@ -746,6 +1361,17 @@ export function OnboardingEditor({
       {extra}
     </div>
   );
+  // A held conflict keeps edits local, so the pill never claims they are
+  // saved while it waits for Keep mine or Use theirs.
+  const pill = autosavePill(
+    held && !["conflict", "stopped"].includes(save.status)
+      ? { ...save, status: "conflict" }
+      : unsent &&
+          !["conflict", "stopped", "retrying", "saving"].includes(save.status)
+        ? { ...save, status: "pending" }
+        : save,
+    { locale, savedAt: snap.savedAt, basicsDirty },
+  );
   const onTabKey = (e: React.KeyboardEvent, index: number) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     e.preventDefault();
@@ -762,7 +1388,7 @@ export function OnboardingEditor({
       className="fd-onboard"
       onSubmit={(e) => {
         e.preventDefault();
-        void save();
+        void saveNow();
       }}
     >
       {op && <OnboardingTimeline stage={op.stage} />}
@@ -789,24 +1415,20 @@ export function OnboardingEditor({
           </p>
         )
       )}
-      {!locked && stale && (
-        <div className="fd-banner warn" role="alert">
-          <AlertTriangle size={16} />
-          <p>
-            This project was saved elsewhere (now revision {project.revision})
-            after you started editing revision {base}. Your edits are kept here,
-            but saving them would overwrite that change, so Save and Send wait
-            until you load the latest version.{" "}
-            <Button type="button" variant="outline" onClick={loadLatest}>
-              Discard my edits and load revision {project.revision}
-            </Button>
-          </p>
-        </div>
+      {!locked && held && (
+        <ConflictPanel
+          held={held}
+          base={held.base}
+          mine={draft}
+          disabled={busy || saving}
+          onKeepMine={keepMine}
+          onUseTheirs={takeTheirs}
+        />
       )}
-      {!locked && !stale && refreshedTo === project.revision && (
+      {!locked && !stale && refreshedTo === server.revision && (
         <p className="fd-hint" role="status">
           This project was saved elsewhere, so this form now shows revision{" "}
-          {project.revision}. Review it again before sending.
+          {server.revision}. Review it again before sending.
         </p>
       )}
       <div
@@ -894,13 +1516,18 @@ export function OnboardingEditor({
               </li>
             ))}
           </ul>
-          <Button type="button" variant="outline" onClick={applySuggestions}>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={saving}
+            onClick={applySuggestions}
+          >
             Apply checklist suggestions
           </Button>
         </div>
       )}
       <fieldset
-        disabled={frozen || busy}
+        disabled={frozen || busy || saving}
         id={`fd-panel-${tab}`}
         role="tabpanel"
         aria-labelledby={`fd-tab-${tab}`}
@@ -1527,17 +2154,31 @@ export function OnboardingEditor({
         </p>
       )}
       <div className="bridge-actions">
+        {(!locked || save.pending) && (
+          <p
+            className={`fd-autosave ${pill.tone}`}
+            role="status"
+            aria-live="polite"
+            aria-label={t("onb.autosave.label", locale)}
+          >
+            {pill.text}
+          </p>
+        )}
         <Button
           type="submit"
-          disabled={busy || frozen || stale || !draft.label.trim() || !slugOk}
+          disabled={
+            busy || saving || frozen || !!held || !draft.label.trim() || !slugOk
+          }
         >
-          Save onboarding draft
+          {t("onb.autosave.saveNow", locale)}
         </Button>
         <Button
           type="button"
           variant="outline"
           disabled={busy}
-          onClick={onClose}
+          onClick={() => {
+            if (confirmLeave()) onClose();
+          }}
         >
           Close
         </Button>
