@@ -3,6 +3,11 @@ import type { Project } from "../projects";
 import { ONBOARDING_CHECKLIST, opportunities } from "../opportunities";
 import { isoSchema, osIdSchema } from "./context";
 import { t, type Locale } from "../i18n";
+import {
+  gatedFields,
+  type GatedPayload,
+  type InboundFeatures,
+} from "./features";
 // Atlas -> FlightDeck OS project onboarding (onboarding plan §3, §4.2, §4.6).
 // Shared by the server route and the browser, so the review screen lists
 // exactly what the server sends. Keep this module free of server-only
@@ -202,14 +207,20 @@ const clean = (value?: string | null) => (value ?? "").trim();
 
 /** Builds the payload field by field from the allowlist. Nothing is copied
  * wholesale, so a field Atlas adds later cannot leak into it. An unfinished
- * draft yields a payload that fails the strict schema; the caller checks. */
+ * draft yields a payload that fails the strict schema; the caller checks.
+ *
+ * `gated` fields travel only when `features` (this credential's whoami
+ * flags, read just before the send) has their flag true: the OS refuses a
+ * field whose feature is off. No features read means none of them. */
 export function buildOnboardingPayload(input: {
   project: PayloadProject;
   destinationWorkspaceId: string;
   idempotencyKey: string;
   installationId: string;
   requestedBy: string;
-}): ProjectOnboardingPayload {
+  features?: InboundFeatures;
+  gated?: GatedPayload;
+}): ProjectOnboardingPayload & GatedPayload {
   const p = input.project,
     o = p.onboarding ?? {};
   const active = p.tasks.filter((t) => !t.archived);
@@ -256,6 +267,7 @@ export function buildOnboardingPayload(input: {
       ? { done: active.filter((t) => t.done).length, total: active.length }
       : null,
     cowork: { requested: !!o.coworkRequested },
+    ...gatedFields(input.gated, input.features),
   };
 }
 
@@ -498,6 +510,35 @@ export const REVIEW_FIELDS: {
   { path: "idempotencyKey", label: "Request key" },
   { path: "schema", label: "Format" },
 ];
+/** What a reviewer's read-back may point at (plan 2026-09-25 §7, D-037
+ * item 5): the payload fields a requester can change. Technical ids, the
+ * key, the requester hash and the format are never pointed at. A pointer
+ * outside this list is dropped on read. */
+export const FIELD_POINTERS = [
+  "target.label",
+  "target.workspaceId",
+  "target.projectId",
+  "profile.functionArea",
+  "profile.category",
+  "profile.summary",
+  "profile.successMeasure",
+  "profile.status",
+  "profile.priority",
+  "profile.targetDate",
+  "profile.site",
+  "facts.countryCode",
+  "facts.worksCouncilRelevant",
+  "facts.legalEntity",
+  "facts.headcountBand",
+  "facts.ownerRoles.process",
+  "facts.ownerRoles.data",
+  "facts.ownerRoles.support",
+  "facts.dataSources",
+  "facts.accessRequested",
+  "progress",
+  "cowork.requested",
+] as const;
+export type FieldPointer = (typeof FIELD_POINTERS)[number];
 const at = (value: unknown, path: string): unknown =>
   path
     .split(".")
@@ -749,7 +790,20 @@ const osSubmissionStatusSchema = z.object({
   // Read leniently below: a cause word this Atlas does not know yet must not
   // fail the whole read-back.
   outcomeWithheld: z.unknown().optional(),
+  // Optional read-back fields a newer OS may add (reviewer note, lineage,
+  // decision time). Each is read on its own below, so an older OS, or a
+  // malformed value, never fails the read-back: the value is just absent.
+  note: z.unknown().optional(),
+  fields: z.unknown().optional(),
+  supersedes: z.unknown().optional(),
+  supersededBy: z.unknown().optional(),
+  decidedAt: z.unknown().optional(),
 });
+/** A reviewer note is bounded plain text (D-037 item 5: at most 500
+ * characters). Typed only: it is never rendered from here, and never
+ * logged. */
+const reviewerNoteSchema = z.string().min(1).max(500);
+const FIELD_POINTER_SET: ReadonlySet<string> = new Set(FIELD_POINTERS);
 /** Why the OS answered `promoted` without an outcome: Atlas's credential
  * lacks read:context (`scope`: re-mint it), or the destination is not in
  * readWorkspaces (`workspace-not-shared`: share it). */
@@ -768,9 +822,69 @@ export type OsSubmissionStatus = {
   /** Only when promoted without an outcome, and the OS said why. Null from
    * an OS that predates the field, or for a cause Atlas does not know. */
   outcomeWithheld: OutcomeWithheld | null;
+  // Present only when a newer OS sent a well-formed value; an older OS's
+  // read-back has none of them.
+  /** The reviewer's bounded plain-text note. */
+  note?: string;
+  /** The payload fields the reviewer pointed at, allowlisted. */
+  fields?: FieldPointer[];
+  /** The submission this one replaces. */
+  supersedes?: string;
+  /** The submission that replaced this one. */
+  supersededBy?: string;
+  /** When a human decided. */
+  decidedAt?: string;
 };
+export type ParseSubmissionOptions = {
+  /** Receives how many field pointers were dropped as unknown: a count,
+   * never the values. Defaults to a console warning. */
+  onUnknownFieldPointers?: (count: number) => void;
+};
+function readBackOptionals(
+  top: Record<string, unknown>,
+  outcome: unknown,
+  options: ParseSubmissionOptions,
+): Partial<OsSubmissionStatus> {
+  // The note and its pointers belong to the decision, so they may come at
+  // the top level or with the outcome; the top level wins.
+  const inOutcome =
+    outcome && typeof outcome === "object" && !Array.isArray(outcome)
+      ? (outcome as Record<string, unknown>)
+      : {};
+  const pick = (key: string) => top[key] ?? inOutcome[key];
+  const out: Partial<OsSubmissionStatus> = {};
+  const note = reviewerNoteSchema.safeParse(pick("note"));
+  if (note.success) out.note = note.data;
+  const raw = pick("fields");
+  if (Array.isArray(raw)) {
+    const known = new Set<FieldPointer>();
+    let unknown = 0;
+    for (const value of raw)
+      if (typeof value === "string" && FIELD_POINTER_SET.has(value))
+        known.add(value as FieldPointer);
+      else unknown++;
+    if (unknown) {
+      const report =
+        options.onUnknownFieldPointers ??
+        ((count: number) =>
+          console.warn(
+            `FlightDeck read-back: dropped ${count} unknown field pointer(s)`,
+          ));
+      report(unknown);
+    }
+    out.fields = [...known];
+  }
+  for (const key of ["supersedes", "supersededBy"] as const) {
+    const id = submissionIdSchema.safeParse(top[key]);
+    if (id.success) out[key] = id.data;
+  }
+  const decidedAt = isoSchema.safeParse(top.decidedAt);
+  if (decidedAt.success) out.decidedAt = decidedAt.data;
+  return out;
+}
 export function parseSubmissionStatus(
   body: unknown,
+  options: ParseSubmissionOptions = {},
 ): OsSubmissionStatus | null {
   const parsed = osSubmissionStatusSchema.safeParse(body);
   if (!parsed.success) return null;
@@ -797,6 +911,7 @@ export function parseSubmissionStatus(
         : "other"
       : null,
     outcomeWithheld: withheld?.success ? withheld.data : null,
+    ...readBackOptionals(s, s.outcome, options),
   };
 }
 

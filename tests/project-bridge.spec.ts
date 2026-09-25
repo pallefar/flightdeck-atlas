@@ -63,6 +63,7 @@ import {
   unconfirmedSend,
   type OnboardDb,
 } from "../lib/flightdeck/onboard-route";
+import { NO_FEATURES, type InboundFeatures } from "../lib/flightdeck/features";
 
 // Nothing in this file contacts FlightDeck OS. The OS's responses for the
 // project-onboarding kind come from a fixture recorded from the OS
@@ -973,7 +974,13 @@ function onboardDb() {
 }
 
 function harness(
-  options: { superAdmin?: boolean; project?: Project | null } = {},
+  options: {
+    superAdmin?: boolean;
+    project?: Project | null;
+    /** The OS features for this credential; omitted, the route runs with
+     * no features dependency at all. */
+    features?: () => Promise<InboundFeatures>;
+  } = {},
 ) {
   const store = onboardDb();
   let clock = Date.parse("2026-09-22T09:00:00.000Z");
@@ -1089,6 +1096,14 @@ function harness(
     db: () => store.db,
     installationId: () => "atlas-test",
     now: () => new Date(clock),
+    ...(options.features
+      ? {
+          features: async () => {
+            fake.calls.push("features");
+            return options.features!();
+          },
+        }
+      : {}),
   });
   const readAs = (name: string) => async (): Promise<ReadSubmissionResult> => {
     const body = readBack(name);
@@ -1261,6 +1276,27 @@ test("a send reserves its row with a fresh key before the remote call, then stor
   expect(again.status).toBe(409);
   expect(await again.json()).toMatchObject({ code: "already_submitted" });
   expect(h.fake.submits).toHaveLength(1);
+});
+
+test("a fresh send reads this credential's features before the remote call; a retry resends its bytes without reading them", async () => {
+  const h = harness({ features: async () => NO_FEATURES });
+  h.fake.onSubmit = async () => ({ state: "os_unreachable" });
+  const first = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  expect(first.status).toBe(503);
+  const firstCalls = [...h.fake.calls];
+  expect(firstCalls.filter((c) => c === "features")).toHaveLength(1);
+  expect(firstCalls.indexOf("features")).toBeLessThan(
+    firstCalls.indexOf("submit"),
+  );
+  h.fake.calls.length = 0;
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  expect(h.fake.calls).toContain("submit");
+  expect(h.fake.calls).not.toContain("features");
+  // With every flag off the envelope is today's allowlist, nothing more.
+  const [envelope] = h.fake.submits;
+  expect(Object.keys(envelope.payload).sort()).toEqual(
+    Object.keys(payloadFor()).sort(),
+  );
 });
 
 test("a lost response keeps the reservation, and the retry reuses the same key and destination", async () => {
