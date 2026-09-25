@@ -4,6 +4,7 @@ import {
   onboardingSchema,
   resolveSendRequest,
   requesterRequestsEnabled,
+  sendRequestAction,
   type OnboardingDraft,
 } from "../lib/flightdeck/onboarding";
 import { examples, projectSchema } from "../lib/projects";
@@ -112,45 +113,31 @@ test("with the flag off, any save carrying a new or changed sendRequest is refus
   ).toEqual({ ok: true, onboarding: { countryCode: "FR" } });
 });
 
-test("with the flag on, an ask is stored as asked and must name the asker", () => {
-  const stored = resolveSendRequest({
-    previous: { countryCode: "DE" },
-    next: { countryCode: "DE", sendRequest: ask },
-    enabled: true,
-    actor: EDITOR,
-  });
-  expect(stored).toEqual({
-    ok: true,
-    onboarding: { countryCode: "DE", sendRequest: ask },
-  });
-  // Nobody asks on someone else's behalf.
-  expect(
-    resolveSendRequest({
-      previous: { countryCode: "DE" },
-      next: { countryCode: "DE", sendRequest: ask },
-      enabled: true,
-      actor: ADMIN,
-    }),
-  ).toMatchObject({ ok: false, status: 400, code: "send_request_actor" });
-  // Case-insensitive identity.
-  expect(
-    resolveSendRequest({
-      previous: {},
-      next: { sendRequest: { ...ask, by: "Editor@Example.com" } },
-      enabled: true,
-      actor: EDITOR,
-    }),
-  ).toMatchObject({ ok: true });
-  // A client cannot pre-set stale or fake freshness on a new ask: the
-  // server owns `stale`.
-  expect(
-    resolveSendRequest({
-      previous: {},
-      next: { sendRequest: { ...ask, stale: true } },
-      enabled: true,
-      actor: EDITOR,
-    }),
-  ).toEqual({ ok: true, onboarding: { sendRequest: ask } });
+test("with the flag on, a save still cannot write the marker: asking and withdrawing are their own actions", () => {
+  // onb-atlas-ask-withdraw: an ask is bound to the revision the asker saw,
+  // and only the asker or the Super Admin withdraws. A save could otherwise
+  // name any revision or withdraw anyone's ask, so a save that writes a
+  // marker (new ask, changed ask, withdrawal) is refused, in anyone's name.
+  for (const [previous, next, actor] of [
+    [{ countryCode: "DE" }, { countryCode: "DE", sendRequest: ask }, EDITOR],
+    [{ countryCode: "DE" }, { countryCode: "DE", sendRequest: ask }, ADMIN],
+    [{}, { sendRequest: { ...ask, stale: true } }, EDITOR],
+    [
+      { sendRequest: ask },
+      { sendRequest: { ...ask, revision: 9, at: "2026-09-25T12:00:00.000Z" } },
+      EDITOR,
+    ],
+    [
+      { sendRequest: ask },
+      { sendRequest: { ...ask, withdrawnAt: "2026-09-25T11:00:00.000Z" } },
+      ADMIN,
+    ],
+    [undefined, { sendRequest: ask }, EDITOR],
+  ] as [OnboardingDraft | undefined, OnboardingDraft, string][])
+    expect(
+      resolveSendRequest({ previous, next, enabled: true, actor }),
+      JSON.stringify({ previous, next, actor }),
+    ).toMatchObject({ ok: false, status: 400, code: "send_request_action" });
 });
 
 test("a later onboarding save marks the ask stale in the same write, and stale sticks", () => {
@@ -222,7 +209,7 @@ test("a later onboarding save marks the ask stale in the same write, and stale s
       actor: EDITOR,
     }),
   ).toEqual({ ok: true, onboarding: previous });
-  // Asking again (a new revision) is a fresh ask.
+  // Asking again goes through the ask action (see below), never a save.
   const again = { ...ask, revision: 9, at: "2026-09-25T12:00:00.000Z" };
   expect(
     resolveSendRequest({
@@ -231,15 +218,15 @@ test("a later onboarding save marks the ask stale in the same write, and stale s
       enabled: true,
       actor: EDITOR,
     }),
-  ).toEqual({ ok: true, onboarding: { countryCode: "FR", sendRequest: again } });
+  ).toMatchObject({ ok: false, code: "send_request_action" });
 });
 
 test("a withdrawn ask stays withdrawn and is not marked stale", () => {
   const withdrawn = { ...ask, withdrawnAt: "2026-09-25T11:00:00.000Z" };
-  // The Super Admin (or the requester) withdraws: same ask, withdrawnAt set.
+  // Echoing the withdrawn marker is not a write.
   expect(
     resolveSendRequest({
-      previous: { sendRequest: ask },
+      previous: { sendRequest: withdrawn },
       next: { sendRequest: withdrawn },
       enabled: true,
       actor: ADMIN,
@@ -378,4 +365,186 @@ test("a whole-project save that changes a sent profile field marks the ask stale
       },
     }),
   ).toEqual({ ok: true, onboarding: previous });
+});
+
+// onb-atlas-ask-withdraw: the ask and withdraw actions, decided on the server
+// (the onboarding-scoped PUT with `action`). Plan J3: the editor asks the
+// Super Admin to send one exact revision; the requester or the Super Admin
+// can withdraw it. Only the Super Admin ever sends (D-033 decision 7).
+const NOW = "2026-09-25T15:00:00.000Z";
+const act = (
+  over: Partial<Parameters<typeof sendRequestAction>[0]> = {},
+): ReturnType<typeof sendRequestAction> =>
+  sendRequestAction({
+    onboarding: { countryCode: "DE" },
+    projectRevision: 7,
+    action: "ask",
+    revision: 7,
+    enabled: true,
+    actor: EDITOR,
+    superAdmin: false,
+    canEdit: true,
+    held: false,
+    at: NOW,
+    ...over,
+  });
+
+test("ask succeeds only for the revision the asker saw; otherwise 409 with the current revision", () => {
+  expect(act()).toEqual({
+    ok: true,
+    onboarding: {
+      countryCode: "DE",
+      sendRequest: { revision: 7, by: EDITOR, at: NOW },
+    },
+  });
+  for (const revision of [6, 8])
+    expect(act({ revision }), String(revision)).toEqual({
+      ok: false,
+      status: 409,
+      code: "revision_changed",
+      revision: 7,
+      error: expect.any(String),
+    });
+  // No onboarding draft yet: the ask still lands on the onboarding JSON.
+  expect(act({ onboarding: undefined })).toEqual({
+    ok: true,
+    onboarding: { sendRequest: { revision: 7, by: EDITOR, at: NOW } },
+  });
+  // The signed-in asker is stored lower-cased as the session names them.
+  expect(act({ actor: "Editor@Example.com" })).toMatchObject({
+    ok: true,
+    onboarding: { sendRequest: { by: EDITOR } },
+  });
+});
+
+test("asking again after the ask went stale (or was withdrawn) replaces the marker", () => {
+  const stale = { ...ask, revision: 5, stale: true };
+  expect(
+    act({ onboarding: { countryCode: "DE", sendRequest: stale } }),
+  ).toEqual({
+    ok: true,
+    onboarding: {
+      countryCode: "DE",
+      sendRequest: { revision: 7, by: EDITOR, at: NOW },
+    },
+  });
+  const withdrawn = { ...ask, revision: 5, withdrawnAt: NOW };
+  expect(
+    act({ onboarding: { sendRequest: withdrawn }, actor: "other@example.com" }),
+  ).toEqual({
+    ok: true,
+    onboarding: {
+      sendRequest: { revision: 7, by: "other@example.com", at: NOW },
+    },
+  });
+});
+
+test("withdraw by the asker or the Super Admin succeeds; another editor gets 403", () => {
+  const open: OnboardingDraft = { countryCode: "DE", sendRequest: ask };
+  const withdrawn = {
+    ok: true,
+    onboarding: {
+      countryCode: "DE",
+      sendRequest: { ...ask, withdrawnAt: NOW },
+    },
+  };
+  // The asker (any case of their sign-in).
+  expect(act({ onboarding: open, action: "withdraw", revision: 7 })).toEqual(
+    withdrawn,
+  );
+  expect(
+    act({
+      onboarding: open,
+      action: "withdraw",
+      revision: 7,
+      actor: "EDITOR@example.com",
+    }),
+  ).toEqual(withdrawn);
+  // The Super Admin, whatever the project-level rights say.
+  expect(
+    act({
+      onboarding: open,
+      action: "withdraw",
+      revision: 7,
+      actor: ADMIN,
+      superAdmin: true,
+      canEdit: false,
+    }),
+  ).toEqual(withdrawn);
+  // Another editor of the same project.
+  expect(
+    act({
+      onboarding: open,
+      action: "withdraw",
+      revision: 7,
+      actor: "other@example.com",
+    }),
+  ).toMatchObject({ ok: false, status: 403, code: "send_request_not_yours" });
+  // The asker who lost edit rights on the project.
+  expect(
+    act({ onboarding: open, action: "withdraw", revision: 7, canEdit: false }),
+  ).toMatchObject({ ok: false, status: 403 });
+  // A stale ask is still withdrawable (and stays stale).
+  expect(
+    act({
+      onboarding: { sendRequest: { ...ask, stale: true } },
+      action: "withdraw",
+      revision: 7,
+    }),
+  ).toEqual({
+    ok: true,
+    onboarding: { sendRequest: { ...ask, stale: true, withdrawnAt: NOW } },
+  });
+});
+
+test("withdraw names the ask it withdraws; nothing open to withdraw is 409", () => {
+  const open: OnboardingDraft = { sendRequest: ask };
+  // A newer ask replaced the one this client saw.
+  expect(
+    act({ onboarding: open, action: "withdraw", revision: 6 }),
+  ).toMatchObject({
+    ok: false,
+    status: 409,
+    code: "revision_changed",
+    revision: 7,
+  });
+  for (const onboarding of [
+    undefined,
+    {},
+    { sendRequest: { ...ask, withdrawnAt: NOW } },
+  ])
+    expect(
+      act({ onboarding, action: "withdraw", revision: 7 }),
+      JSON.stringify(onboarding),
+    ).toMatchObject({ ok: false, status: 409, code: "send_request_none" });
+});
+
+test("asking or withdrawing a locked (sent) draft is 409; the flag off is 400; a viewer cannot ask", () => {
+  expect(act({ held: true })).toMatchObject({
+    ok: false,
+    status: 409,
+    code: "draft_locked",
+  });
+  expect(
+    act({
+      onboarding: { sendRequest: ask },
+      action: "withdraw",
+      revision: 7,
+      held: true,
+    }),
+  ).toMatchObject({ ok: false, status: 409, code: "draft_locked" });
+  expect(act({ enabled: false })).toMatchObject({
+    ok: false,
+    status: 400,
+    code: "requester_requests_off",
+  });
+  expect(
+    act({
+      onboarding: { sendRequest: ask },
+      action: "withdraw",
+      revision: 7,
+      enabled: false,
+    }),
+  ).toMatchObject({ ok: false, status: 400, code: "requester_requests_off" });
+  expect(act({ canEdit: false })).toMatchObject({ ok: false, status: 403 });
 });

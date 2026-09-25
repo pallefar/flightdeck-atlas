@@ -29,6 +29,7 @@ import {
 import {
   draftEdited,
   resolveSendRequest,
+  sendRequestAction,
   type OnboardingDraft,
 } from "@/lib/flightdeck/onboarding";
 import type { AccessProfile } from "@/lib/access-policy";
@@ -95,7 +96,10 @@ export async function PUT(
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
-  if (scoped) return saveOnboarding(auth.access, id, scoped);
+  if (scoped)
+    return scoped.action
+      ? sendRequestActionRoute(auth.access, id, scoped)
+      : saveOnboarding(auth.access, id, scoped);
   let fields, revision, updateNote;
   try {
     ({ fields, revision, updateNote } = await readFields(request));
@@ -394,6 +398,92 @@ async function saveOnboarding(
     console.error("Atlas onboarding update unavailable");
     return json(
       { error: "Your changes could not be saved. Please try again." },
+      503,
+    );
+  }
+}
+
+/** Ask the Super Admin to send revision r, or withdraw the open ask
+ * (onb-atlas-ask-withdraw, plan J3): the onboarding-scoped PUT with
+ * `action`. The rules are sendRequestAction()'s; this writes the result in
+ * one UPDATE bound to the revision just read and to the draft lock, so an
+ * edit or a send that lands in between makes it 409 instead of asking about
+ * a revision nobody saw. The rights are projectFor()'s, like every save. */
+async function sendRequestActionRoute(
+  access: AccessProfile,
+  id: string,
+  { action, revision }: { action: "ask" | "withdraw"; revision: number },
+) {
+  try {
+    const db = database();
+    const authorized = await projectFor(access, id);
+    if (!authorized) return json({ error: "Project not found." }, 404);
+    const previous = authorized.project;
+    const updatedAt = new Date().toISOString();
+    const outcome = sendRequestAction({
+      onboarding: previous.onboarding,
+      projectRevision: previous.revision,
+      action,
+      revision,
+      enabled: requesterRequestsOn(),
+      actor: access.email,
+      superAdmin: access.superAdmin,
+      canEdit: authorized.rights.edit,
+      held: await draftHeld(db, id),
+      at: updatedAt,
+    });
+    if (!outcome.ok)
+      return json(
+        {
+          error: outcome.error,
+          code: outcome.code,
+          ...(outcome.revision ? { revision: outcome.revision } : {}),
+        },
+        outcome.status,
+      );
+    const onboarding = outcome.onboarding;
+    const stored = JSON.parse(authorized.row.data as string);
+    const data = {
+      ...stored,
+      onboarding,
+      // The marker is part of the onboarding JSON, so an onboarding-scoped
+      // save based on an older revision is refused rather than merging an
+      // old copy of the marker over this one.
+      onboardingRevision: previous.revision + 1,
+      activity: [
+        ...(previous.activity ?? []),
+        {
+          id: crypto.randomUUID(),
+          at: updatedAt,
+          kind: "project",
+          text:
+            action === "ask"
+              ? `Asked the Super Admin to send revision ${onboarding.sendRequest!.revision}`
+              : `Withdrew the request to send revision ${onboarding.sendRequest!.revision}`,
+        },
+      ].slice(-200),
+    };
+    const result = await db
+      .prepare(
+        "UPDATE atlas_projects SET data = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND revision = ?" +
+          DRAFT_NOT_HELD_SQL,
+      )
+      .bind(JSON.stringify(data), updatedAt, id, previous.revision)
+      .run();
+    if (!result.meta.changes)
+      return json(
+        {
+          error:
+            "This project changed in another session. Reload before asking again.",
+          code: "revision_changed",
+        },
+        409,
+      );
+    return json({ project: (await projectFor(access, id))!.project });
+  } catch {
+    console.error("Atlas send request action unavailable");
+    return json(
+      { error: "The request could not be saved. Please try again." },
       503,
     );
   }

@@ -118,7 +118,7 @@ export type SendRequestOutcome =
   | {
       ok: false;
       status: 400;
-      code: "requester_requests_off" | "send_request_actor";
+      code: "requester_requests_off" | "send_request_action";
       error: string;
     };
 
@@ -128,8 +128,11 @@ export type SendRequestOutcome =
  * - Flag off: a save that writes a marker (a new ask, a changed one or a
  *   withdrawal) is refused 400. Echoing the stored marker unchanged is not a
  *   write, so turning the flag off never blocks ordinary saves.
- * - A new ask (revision, by or at differ from the stored one) must name the
- *   signed-in saver as `by`: nobody asks on someone else's behalf.
+ * - Flag on: a save still never writes the marker. Asking and withdrawing
+ *   are their own actions (sendRequestAction, onb-atlas-ask-withdraw), so an
+ *   ask is bound to the revision the asker saw and only the asker or the
+ *   Super Admin withdraws. A save carrying a new ask, a changed one or a
+ *   withdrawal is refused 400 send_request_action.
  * - A save that omits the marker keeps the stored one; only removing the
  *   whole onboarding draft removes it. A withdrawal cannot be undone except
  *   by asking again.
@@ -142,7 +145,7 @@ export type SendRequestOutcome =
  *   priority, due date, location) are sent as they stand at send time and
  *   do not stale an ask, just as the lock (draftEdited()) lets them move.
  * - Project creation passes `previous: undefined`: any marker it carries is
- *   a new ask, under the same flag and asker rules. */
+ *   a new ask, so it is refused like one. */
 export function resolveSendRequest(input: {
   previous: OnboardingDraft | undefined;
   next: OnboardingDraft | undefined;
@@ -170,35 +173,23 @@ export function resolveSendRequest(input: {
       code: "requester_requests_off",
       error: "Requests to the Super Admin are not turned on here.",
     };
-  if (
-    asked &&
-    !sameAsk &&
-    asked.by.trim().toLowerCase() !== input.actor.trim().toLowerCase()
-  )
+  if (writes)
     return {
       ok: false,
       status: 400,
-      code: "send_request_actor",
-      error: "A send request can only be made in your own name.",
+      code: "send_request_action",
+      error:
+        "Ask the Super Admin or withdraw the request with its own action, not with a save.",
     };
   const { sendRequest: _p, ...draftBefore } = previous ?? {};
   const { sendRequest: _n, ...draftAfter } = next;
   void _p;
   void _n;
   let marker: SendRequest | undefined;
-  if (asked && !sameAsk)
-    // A new ask: stored as asked, without any client-sent `stale`.
-    marker = {
-      revision: asked.revision,
-      by: asked.by,
-      at: asked.at,
-      ...(asked.withdrawnAt ? { withdrawnAt: asked.withdrawnAt } : {}),
-    };
-  else if (before) {
-    // The stored ask, carried over: a withdrawal may be added, never undone.
+  if (before) {
+    // The stored ask, carried over unchanged: a save neither withdraws it
+    // nor undoes a withdrawal.
     marker = { ...before };
-    if (!before.withdrawnAt && asked?.withdrawnAt)
-      marker.withdrawnAt = asked.withdrawnAt;
     if (
       !marker.withdrawnAt &&
       !marker.stale &&
@@ -215,6 +206,127 @@ export function resolveSendRequest(input: {
   const onboarding: OnboardingDraft = { ...draftAfter };
   if (marker) onboarding.sendRequest = marker;
   return { ok: true, onboarding };
+}
+
+export type SendRequestActionOutcome =
+  | { ok: true; onboarding: OnboardingDraft }
+  | {
+      ok: false;
+      status: 400 | 403 | 409;
+      code:
+        | "requester_requests_off"
+        | "send_request_not_yours"
+        | "revision_changed"
+        | "send_request_none"
+        | "draft_locked";
+      error: string;
+      /** On revision_changed: the revision the client should look at (the
+       * project's current one for an ask, the open ask's for a withdraw). */
+      revision?: number;
+    };
+
+/** The ask and withdraw actions on the send request marker
+ * (onb-atlas-ask-withdraw, plan J3), decided on the server for the
+ * onboarding-scoped PUT with `action`. Pure: the route passes the project's
+ * rights from projectFor() and the session's Super Admin flag, and writes
+ * the result with `WHERE revision = projectRevision` plus the draft lock.
+ * Fails closed, in this order:
+ * - The flag off (ATLAS_REQUESTER_REQUESTS): 400, for both actions.
+ * - Ask: only an editor of the project (403), only for the revision the
+ *   asker last saw acknowledged, which must still be the project's current
+ *   revision (409 revision_changed with the current one), and never on a
+ *   draft FlightDeck may hold (409 draft_locked). The asker is the signed-in
+ *   session, never a client-sent name. Asking again replaces any earlier
+ *   marker, stale or withdrawn, with a fresh one.
+ * - Withdraw: only an open ask (409 send_request_none), named by its asked
+ *   revision (409 revision_changed when another ask replaced it), by the
+ *   Super Admin or by the asker while they can still edit the project (403
+ *   send_request_not_yours for anyone else), and not on a held draft.
+ * Nothing here sends: only the Super Admin presses Send (D-033 decision 7). */
+export function sendRequestAction(input: {
+  onboarding: OnboardingDraft | undefined;
+  projectRevision: number;
+  action: "ask" | "withdraw";
+  revision: number;
+  enabled: boolean;
+  actor: string;
+  superAdmin: boolean;
+  canEdit: boolean;
+  held: boolean;
+  at: string;
+}): SendRequestActionOutcome {
+  if (!input.enabled)
+    return {
+      ok: false,
+      status: 400,
+      code: "requester_requests_off",
+      error: "Requests to the Super Admin are not turned on here.",
+    };
+  const actor = input.actor.trim().toLowerCase();
+  const draft = input.onboarding ?? {};
+  const locked = {
+    ok: false,
+    status: 409,
+    code: "draft_locked",
+    error:
+      "FlightDeck may hold this project's onboarding draft, so it stays as it was sent. Nothing was saved.",
+  } as const;
+  if (input.action === "ask") {
+    if (!input.canEdit)
+      return {
+        ok: false,
+        status: 403,
+        code: "send_request_not_yours",
+        error: "You do not have permission to change this project.",
+      };
+    if (input.revision !== input.projectRevision)
+      return {
+        ok: false,
+        status: 409,
+        code: "revision_changed",
+        revision: input.projectRevision,
+        error: `This project is now at revision ${input.projectRevision}. Check it, then ask again.`,
+      };
+    if (input.held) return locked;
+    return {
+      ok: true,
+      onboarding: {
+        ...draft,
+        sendRequest: { revision: input.revision, by: actor, at: input.at },
+      },
+    };
+  }
+  const open = draft.sendRequest;
+  if (!open || open.withdrawnAt)
+    return {
+      ok: false,
+      status: 409,
+      code: "send_request_none",
+      error: "There is no open request to withdraw.",
+    };
+  if (
+    !input.superAdmin &&
+    !(input.canEdit && open.by.trim().toLowerCase() === actor)
+  )
+    return {
+      ok: false,
+      status: 403,
+      code: "send_request_not_yours",
+      error: "Only the person who asked or the Super Admin can withdraw it.",
+    };
+  if (open.revision !== input.revision)
+    return {
+      ok: false,
+      status: 409,
+      code: "revision_changed",
+      revision: open.revision,
+      error: `The open request is for revision ${open.revision}. Reload before withdrawing.`,
+    };
+  if (input.held) return locked;
+  return {
+    ok: true,
+    onboarding: { ...draft, sendRequest: { ...open, withdrawnAt: input.at } },
+  };
 }
 
 type SentProfileFields = Partial<

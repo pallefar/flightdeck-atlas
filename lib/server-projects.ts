@@ -73,9 +73,30 @@ export async function readScopedSave(request: Request) {
     return null;
   }
   if (!body || typeof body !== "object" || !("scope" in body)) return null;
-  const { scope, baseRevision, onboarding } = body as Record<string, unknown>;
+  const { scope, baseRevision, onboarding, action, revision } = body as Record<
+    string,
+    unknown
+  >;
   if (scope !== "onboarding")
     throw new Error("Only the onboarding details can be saved on their own.");
+  // onb-atlas-ask-withdraw: ask the Super Admin to send revision r, or
+  // withdraw the open ask for revision r. Nothing else rides along.
+  if (action !== undefined) {
+    if (action !== "ask" && action !== "withdraw")
+      throw new Error("Unknown onboarding action.");
+    if (!Number.isInteger(revision) || (revision as number) < 1)
+      throw new Error("The revision to ask about is required.");
+    if (
+      Object.keys(body).some(
+        (k) => !["scope", "action", "revision"].includes(k),
+      )
+    )
+      throw new Error("An onboarding action carries only its revision.");
+    return {
+      action: action as "ask" | "withdraw",
+      revision: revision as number,
+    } as const;
+  }
   if (!Number.isInteger(baseRevision) || (baseRevision as number) < 1)
     throw new Error("A base project revision is required.");
   const parsed = onboardingSchema.safeParse(onboarding);
