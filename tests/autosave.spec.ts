@@ -356,3 +356,54 @@ test("a 2xx without a readable revision stops rather than guessing", async () =>
     pending: true,
   });
 });
+
+// A response whose headers arrived but whose body stream then drops, as when
+// the connection is cut mid-download: r.json()/r.text() reject with a network
+// TypeError, not a parse error.
+const droppedBody = (status = 200) =>
+  new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.error(new TypeError("network error"));
+      },
+    }),
+    { status, headers: { "content-type": "application/json" } },
+  );
+
+test("a body that drops mid-download retries with backoff instead of stopping", async () => {
+  const { clock, calls, saver } = setup(5);
+  saver.edit("a");
+  await clock.advance(500);
+  calls[0].resolve(droppedBody(200));
+  await clock.settle();
+  expect(saver.getState()).toMatchObject({
+    status: "retrying",
+    retryInMs: 2_000,
+    acknowledgedRevision: 5,
+    pending: true,
+  });
+  expect(saver.getState().lastError).toContain("network error");
+  await clock.advance(2_000);
+  expect(calls).toHaveLength(2);
+  expect(calls[1].value).toBe("a");
+  calls[1].resolve(saved(6));
+  await clock.settle();
+  expect(saver.getState()).toMatchObject({
+    status: "saved",
+    acknowledgedRevision: 6,
+    lastError: null,
+    pending: false,
+  });
+});
+
+test("a dropped body on an abandoned request is still ignored", async () => {
+  const { clock, calls, saver } = setup(5, { timeoutMs: 1_000 });
+  saver.edit("a");
+  await clock.advance(500);
+  await clock.advance(1_000); // times out: request 0 abandoned, retry scheduled
+  expect(saver.getState().status).toBe("retrying");
+  const before = saver.getState();
+  calls[0].resolve(droppedBody(200));
+  await clock.settle();
+  expect(saver.getState()).toEqual(before);
+});

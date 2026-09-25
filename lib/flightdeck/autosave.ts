@@ -221,9 +221,21 @@ export function createSaveCoordinator<T>(
 
   async function answered(id: number, r: Response) {
     if (disposed || inFlight?.id !== id) return;
+    // Download the body first, then parse it: a transport failure while the
+    // body streams in (connection dropped after the headers) is retried like
+    // any other network failure, while a body that arrived but is not JSON is
+    // an answer without a revision.
+    let text: string;
+    try {
+      text = await r.text();
+    } catch (e) {
+      if (claim(id) === null) return;
+      retry(e instanceof Error ? e.message : "The save answer was cut off.");
+      return;
+    }
     let body: unknown = null;
     try {
-      body = await r.json();
+      body = JSON.parse(text);
     } catch {
       body = null;
     }
