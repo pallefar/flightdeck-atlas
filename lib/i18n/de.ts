@@ -26,6 +26,33 @@ export const de: Record<MessageKey, string> = {
     "Apps für dieses Projekt können noch nicht ausgewählt werden. Der Schritt ist optional und zählt nie als Pflichtangabe.",
   "onb.step.agents.note":
     "KI-Agenten sind gesperrt und können noch nicht angefragt werden. Nichts in diesem Schritt wird gesendet oder gezählt.",
+  // KI-Agenten-Voraussetzungen: Entwurf, wartet auf Prüfung durch den Owner.
+  "onb.agents.heading": "Was vorliegen muss, bevor KI-Agenten angefragt werden können",
+  "onb.agents.status.open": "Offen",
+  "onb.agents.ownerLabel": "Zuständig: {owner}",
+  "onb.agents.cap.bedrock": "Bedrock überhaupt nutzen",
+  "onb.agents.cap.employeeData": "Agenten mit Beschäftigtendaten",
+  "onb.agents.cap.studio": "In Studio definierte Agenten",
+  "onb.agents.cap.cowork": "Von Cowork ausgeführte Agenten",
+  "onb.agents.pre.providerDpaRegion":
+    "AWS als Anbieter freigegeben, Auftragsverarbeitungsvertrag und Freigabe der Drittlandübermittlung sowie die Bedrock-Region",
+  "onb.agents.pre.aiHold":
+    "Der Stopp für KI-Funktionen (Roadmap-Phase 56) beantwortet oder Agenten davon ausgenommen",
+  "onb.agents.pre.iam":
+    "Die AWS-IAM-Rolle oder -Schlüssel mit minimalen Rechten eingerichtet",
+  "onb.agents.pre.worksCouncil":
+    "Die Entscheidung des Betriebsrats zu Agenten, die Beschäftigtendaten verarbeiten (§87 Abs. 1 Nr. 6 BetrVG)",
+  "onb.agents.pre.retention":
+    "Die Entscheidung von Legal zu Aufbewahrung und Drittlandübermittlung der an Agenten gesendeten Daten (D-033 Entscheidung 6)",
+  "onb.agents.pre.ruling8":
+    "Studio-Regel 8: Freigabe der Vorlage „Agent-Assistent“",
+  "onb.agents.pre.promptWording":
+    "Eine von einem Menschen freigegebene Änderung am Wortlaut des Cowork-Projekt-Setup-Prompts",
+  "onb.agents.owner.owner": "Owner",
+  "onb.agents.owner.ownerAndDpo": "Owner und Legal / Datenschutzbeauftragte:r",
+  "onb.agents.owner.legal": "Legal",
+  "onb.agents.owner.operator": "Betrieb",
+  "onb.agents.owner.worksCouncil": "Betriebsrat",
   "onb.step.back": "Zurück",
   "onb.step.next": "Weiter",
   "onb.meter.forYou": "{done} von {total} für Sie",

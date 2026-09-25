@@ -623,6 +623,84 @@ export const ONBOARDING_STEPS: readonly {
   { id: "review", optional: false, locked: false },
 ];
 
+/** What must be in place before AI agents can be asked for, grouped by the
+ * capability that needs it (docs/EPIC-BEDROCK-AGENTS-2026-09-24.md, "Stays
+ * closed until a person acts"). Every item is Open: this list is shown, it
+ * never unlocks anything. Unlocking needs the epic slices
+ * bedrock-onboarding-payload, atlas-onboarding-agents-step and
+ * atlas-onboarding-agents-status, plus OS enforcement that refuses aiAgents
+ * while the relevant capability's prerequisites are open; a flag alone
+ * never unlocks the step. Labels live under onb.agents.* in lib/i18n. */
+export type AiAgentCapability = "bedrock" | "employeeData" | "studio" | "cowork";
+export type AiAgentPrerequisiteOwner =
+  | "owner"
+  | "ownerAndDpo"
+  | "legal"
+  | "operator"
+  | "worksCouncil";
+export type AiAgentPrerequisite = {
+  id: string;
+  owner: AiAgentPrerequisiteOwner;
+  status: "open";
+};
+export const AI_AGENT_PREREQUISITES: readonly {
+  capability: AiAgentCapability;
+  items: readonly AiAgentPrerequisite[];
+}[] = [
+  {
+    capability: "bedrock",
+    items: [
+      { id: "providerDpaRegion", owner: "ownerAndDpo", status: "open" },
+      { id: "aiHold", owner: "owner", status: "open" },
+      { id: "iam", owner: "operator", status: "open" },
+    ],
+  },
+  {
+    capability: "employeeData",
+    items: [
+      { id: "worksCouncil", owner: "worksCouncil", status: "open" },
+      { id: "retention", owner: "legal", status: "open" },
+    ],
+  },
+  { capability: "studio", items: [{ id: "ruling8", owner: "owner", status: "open" }] },
+  {
+    capability: "cowork",
+    items: [{ id: "promptWording", owner: "owner", status: "open" }],
+  },
+];
+/** The onb.agents.* wording is a draft until the owner reviews it. */
+export const AI_AGENTS_COPY_REVIEW_STATUS = "needs owner review" as const;
+
+export const AI_AGENTS_LOCKED = "AI_AGENTS_LOCKED" as const;
+const hasKey = (value: unknown, key: string) =>
+  !!value &&
+  typeof value === "object" &&
+  !Array.isArray(value) &&
+  Object.prototype.hasOwnProperty.call(value, key);
+/** A project save that carries `aiAgents` at all — on the project, its
+ * onboarding details or its FlightDeck draft, whole or scoped — is refused
+ * while the step is locked. It is never stripped: a stripped save would be
+ * reported as successful and the requester would believe agents were asked
+ * for. Fails closed: any presence of the key, whatever its value. */
+export function aiAgentsRefusal(
+  body: unknown,
+): { status: 400; code: typeof AI_AGENTS_LOCKED; error: string } | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const b = body as Record<string, unknown>;
+  if (
+    hasKey(b, "aiAgents") ||
+    hasKey(b.onboarding, "aiAgents") ||
+    hasKey(b.flightdeckDraft, "aiAgents")
+  )
+    return {
+      status: 400,
+      code: AI_AGENTS_LOCKED,
+      error:
+        "AI agents are locked and cannot be requested yet. Nothing was saved.",
+    };
+  return null;
+}
+
 /** The meter a viewer sees on a step. An editor sees only their own items
  * ('n of 8 for you') everywhere; the Super Admin sees the same until Review,
  * where the destination (theirs alone) joins and the count is the full Send

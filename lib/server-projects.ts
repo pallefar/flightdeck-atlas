@@ -7,6 +7,7 @@ import {
   type ProjectEvent,
 } from "./projects";
 import {
+  aiAgentsRefusal,
   onboardingSchema,
   requesterRequestsEnabled,
 } from "./flightdeck/onboarding";
@@ -57,6 +58,21 @@ export async function readFields(request: Request) {
     updateNote:
       typeof body.updateNote === "string" ? body.updateNote.trim() : "",
   };
+}
+/** The AI agents step is locked: a create or save whose JSON body carries
+ * `aiAgents` anywhere is refused 400 AI_AGENTS_LOCKED before anything else
+ * reads it, so it is never silently stripped and saved. Null otherwise
+ * (a body that is not JSON is left to the ordinary parsers to refuse). */
+export async function lockedAiAgents(request: Request) {
+  if (!request.headers.get("content-type")?.includes("application/json"))
+    return null;
+  const raw = await request.clone().text();
+  if (raw.length > 100_000) return null;
+  try {
+    return aiAgentsRefusal(JSON.parse(raw));
+  } catch {
+    return null;
+  }
 }
 /** A field-scoped save: `{ scope: "onboarding", baseRevision, onboarding }`.
  * Null when the body names no scope, so it is an ordinary whole-project save.

@@ -3427,6 +3427,23 @@ test("the stepper counts an editor's own items, Next stops with a focused error 
       "step",
     );
     await expect(row.getByText(/AI agents are locked/)).toBeVisible();
+    // Locked: the prerequisites grouped by capability, each Open with its
+    // owner role, and nothing to fill in (onb-aiagents-locked-atlas).
+    const agents = row.locator(".fd-agents");
+    for (const capability of [
+      "Use Bedrock at all",
+      "Agents touching employee data",
+      "Agents defined in Studio",
+      "Agents run by Cowork",
+    ])
+      await expect(
+        agents.getByRole("region", { name: capability }).getByRole("listitem"),
+      ).not.toHaveCount(0);
+    await expect(agents.getByRole("listitem")).toHaveCount(7);
+    await expect(agents.getByText("Open", { exact: true })).toHaveCount(7);
+    await expect(agents.getByText("Owner: Works council")).toBeVisible();
+    await expect(agents.locator("input, select, textarea, button")).toHaveCount(0);
+    await expect(meter).toHaveAttribute("aria-valuetext", "8 of 8 for you");
     await next.click();
     await expect(stepButton(row, "Review & send")).toHaveAttribute(
       "aria-current",
