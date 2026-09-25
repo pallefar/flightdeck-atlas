@@ -8,9 +8,16 @@ import {
   createContextClient,
   createGuardedSubmissions,
   createSubmissionClient,
+  createWhoamiLoader,
   readContextConfig,
   type ContextResult,
 } from "./context-client";
+import {
+  NO_FEATURES,
+  createFeatureReader,
+  type FeatureReader,
+  type InboundFeatures,
+} from "./features";
 
 // One cache per isolate for the context lists and for the credential-wide
 // rate limit, shared by the context and onboarding routes: they spend the
@@ -35,6 +42,16 @@ export function osReader(fresh: boolean) {
 export function osSubmissions() {
   const c = config();
   return c ? createGuardedSubmissions(createSubmissionClient(c), cache) : null;
+}
+// One features read per isolate, kept at most five minutes.
+let featureReader: FeatureReader | null = null;
+/** This credential's optional-feature flags, read before each send. All
+ * off when FlightDeck is not configured or the read fails. */
+export function osFeatures(): Promise<InboundFeatures> {
+  const c = config();
+  if (!c) return Promise.resolve(NO_FEATURES);
+  featureReader ??= createFeatureReader(createWhoamiLoader(c, cache));
+  return featureReader.read();
 }
 /** The OS's origin, for a LINK in the UI — never for a call.
  *

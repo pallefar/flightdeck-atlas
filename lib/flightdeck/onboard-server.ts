@@ -6,7 +6,12 @@ import type { AccessProfile } from "../access-policy";
 import { projectFor, visibleProjects } from "../project-access";
 import { database } from "../server-projects";
 import { createOnboardRoute } from "./onboard-route";
-import { atlasInstallationId, osReader, osSubmissions } from "./os-server";
+import {
+  atlasInstallationId,
+  osFeatures,
+  osReader,
+  osSubmissions,
+} from "./os-server";
 
 export const onboardRoute = createOnboardRoute<AccessProfile>({
   authorize: () => authorize("projects.read"),
@@ -21,6 +26,7 @@ export const onboardRoute = createOnboardRoute<AccessProfile>({
   },
   reader: osReader,
   submissions: osSubmissions,
+  features: osFeatures,
   db: database,
   installationId: atlasInstallationId,
 });

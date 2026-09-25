@@ -47,6 +47,7 @@ import {
   type SetupState,
 } from "./onboarding";
 import { applyObservedStage, type TransitionSource } from "./transitions";
+import { NO_FEATURES, type InboundFeatures } from "./features";
 
 export type OnboardAccess = { userId: string; superAdmin: boolean };
 export type OnboardAuth<A extends OnboardAccess> =
@@ -71,6 +72,10 @@ export type OnboardDeps<A extends OnboardAccess> = {
   /** The OS context reader, or null when FlightDeck is not configured. */
   reader(fresh: boolean): ContextReader | null;
   submissions(): SubmissionClient | null;
+  /** This credential's optional-feature flags from the OS whoami, at most
+   * five minutes old (lib/flightdeck/features.ts). Read before each fresh
+   * send; absent or failing, every flag is off and no gated field is sent. */
+  features?(): Promise<InboundFeatures>;
   db(): OnboardDb;
   /** This Atlas installation's slug, or null when misconfigured. */
   installationId(): string | null;
@@ -915,6 +920,15 @@ export function createOnboardRoute<A extends OnboardAccess>(
             "Complete the required FlightDeck details before sending.",
             { missing },
           );
+        // The OS refuses a field whose feature is off for this credential
+        // (400 FEATURE_OFF), so the flags are read before every fresh send.
+        // A failed read fails closed: no gated field travels.
+        let features: InboundFeatures = NO_FEATURES;
+        try {
+          if (deps.features) features = await deps.features();
+        } catch {
+          features = NO_FEATURES;
+        }
         const built = projectOnboardingPayloadSchema.safeParse(
           buildOnboardingPayload({
             project,
@@ -922,6 +936,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
             idempotencyKey: newId(),
             installationId,
             requestedBy: await sha256Hex(access.userId),
+            features,
           }),
         );
         if (!built.success)

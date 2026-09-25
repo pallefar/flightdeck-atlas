@@ -502,6 +502,35 @@ export function createSubmissionClient(
   };
 }
 
+// ── whoami — this credential's optional-feature flags ──────────────────────
+
+export const WHOAMI_PATH = "/api/inbound/v1/whoami";
+/** Loads the whoami body for lib/flightdeck/features.ts: the JSON body of a
+ * 200, or null for anything else (the reader then turns every flag off). It
+ * spends the same credential-wide rate limit as every other call. */
+export function createWhoamiLoader(
+  config: ContextConfig,
+  cache: Map<string, { until: number; value?: ContextResult<unknown> }>,
+  options: ClientOptions & { now?: () => number } = {},
+): () => Promise<unknown> {
+  const exchange = exchanger(config, options);
+  const now = options.now || Date.now;
+  return async () => {
+    const blocked = cache.get(RATE_LIMIT_KEY);
+    if (blocked && blocked.until > now()) return null;
+    const answer = await exchange(WHOAMI_PATH, { method: "GET" });
+    if (answer.state !== "answered") return null;
+    const { response, body } = answer;
+    if (response.status === 429) {
+      cache.set(RATE_LIMIT_KEY, {
+        until: now() + retryAfterFrom(response, body) * 1000,
+      });
+      return null;
+    }
+    return response.status === 200 && isJson(response) ? body : null;
+  };
+}
+
 /** Submits and read-backs spend the same 30-a-minute credential as the
  * context reads, so they honour (and record) the same rate limit. */
 export function createGuardedSubmissions(

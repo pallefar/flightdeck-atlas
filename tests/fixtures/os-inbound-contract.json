@@ -1,0 +1,2466 @@
+{
+  "contract": "flightdeck-inbound-contract/1",
+  "osSha": "6ee7f2499dcb4c64f8da79b6182c4c70dccfbe94",
+  "generatedBy": "flightdeck/scripts/export-inbound-contract.ts (npm run docs:inbound-contract)",
+  "baseUrl": "http://127.0.0.1:4173",
+  "surfacePrefix": "/api/inbound/v1",
+  "limits": {
+    "maxPayloadBytes": 65536,
+    "maxPayloadKeys": 64,
+    "payloadKeyPattern": "^[A-Za-z0-9_.-]{1,64}$",
+    "submissionBodyLimitBytes": 73728,
+    "perCredentialPerWindow": 30,
+    "windowSeconds": 60,
+    "ipRateLimit": {
+      "max": 120,
+      "timeWindow": "1 minute"
+    }
+  },
+  "kinds": {
+    "state-update": {
+      "requestSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "state-update"
+          },
+          "subject": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "payload": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "kind",
+          "subject",
+          "summary",
+          "payload"
+        ],
+        "additionalProperties": false
+      },
+      "notes": {
+        "kind": "What sort of proposal this is.",
+        "subject": "A slug naming what the proposal is about. It is recorded in a git-tracked pointer, so it may not carry free text. For `project-onboarding` it must be `atlas-` followed by the payload's `atlasProjectId` in lower case.",
+        "summary": "One sentence for the human who reviews it. Stored only in the untracked payload file. For `project-onboarding` it must be exactly `Atlas project onboarding request`.",
+        "payload": "The proposed state, never interpreted by Flightdeck. At most 64 top-level keys, each matching `^[A-Za-z0-9_.-]{1,64}$`, and at most 65536 bytes once the whole submission is serialized."
+      },
+      "gates": [],
+      "examples": [
+        {
+          "kind": "state-update",
+          "subject": "rhineland-rollout-dates",
+          "summary": "Go-live moved to 1 November for the Rhineland rollout.",
+          "payload": {
+            "projectRef": "rhineland-rollout",
+            "goLive": "2026-11-01",
+            "status": "planned"
+          }
+        }
+      ],
+      "refusals": [
+        {
+          "status": 400,
+          "schema": "InvalidSubmission",
+          "codes": [],
+          "error": "invalid submission"
+        },
+        {
+          "status": 400,
+          "schema": "ErrorMessage",
+          "codes": []
+        },
+        {
+          "status": 400,
+          "schema": "FrameworkError",
+          "codes": []
+        },
+        {
+          "status": 403,
+          "schema": "ScopeMissing",
+          "codes": [
+            "scope-missing"
+          ]
+        },
+        {
+          "status": 413,
+          "schema": "FrameworkError",
+          "codes": []
+        },
+        {
+          "status": 415,
+          "schema": "FrameworkError",
+          "codes": []
+        },
+        {
+          "status": 401,
+          "schema": "InvalidCredential",
+          "codes": [],
+          "error": "invalid or unauthorized credential"
+        },
+        {
+          "status": 429,
+          "schema": "CredentialRateLimited",
+          "codes": [],
+          "error": "too many requests"
+        },
+        {
+          "status": 429,
+          "schema": "FrameworkError",
+          "codes": []
+        }
+      ],
+      "refusalCodes": [
+        "scope-missing"
+      ]
+    },
+    "project-onboarding": {
+      "requestSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "project-onboarding"
+          },
+          "subject": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+          },
+          "summary": {
+            "type": "string",
+            "const": "Atlas project onboarding request"
+          },
+          "payload": {
+            "type": "object",
+            "properties": {
+              "schema": {
+                "type": "string",
+                "const": "atlas-project-onboarding/1"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "atlasProjectId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "atlasRevision": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "installationId": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+              },
+              "requestedBy": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "target": {
+                "type": "object",
+                "properties": {
+                  "workspaceId": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "projectId": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                  }
+                },
+                "required": [
+                  "workspaceId",
+                  "label"
+                ],
+                "additionalProperties": false
+              },
+              "profile": {
+                "type": "object",
+                "properties": {
+                  "summary": {
+                    "type": "string",
+                    "maxLength": 1500
+                  },
+                  "successMeasure": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "functionArea": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "category": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "In progress",
+                      "Planning",
+                      "On hold",
+                      "Completed"
+                    ]
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "High",
+                      "Normal",
+                      "Low"
+                    ]
+                  },
+                  "targetDate": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  "site": {
+                    "type": "string",
+                    "maxLength": 100
+                  }
+                },
+                "required": [
+                  "summary",
+                  "successMeasure",
+                  "functionArea",
+                  "category"
+                ],
+                "additionalProperties": false
+              },
+              "facts": {
+                "type": "object",
+                "properties": {
+                  "countryCode": {
+                    "type": "string",
+                    "pattern": "^[A-Z]{2}$"
+                  },
+                  "legalEntity": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "headcountBand": {
+                    "type": "string",
+                    "enum": [
+                      "<50",
+                      "50-249",
+                      "250+",
+                      "unknown"
+                    ]
+                  },
+                  "worksCouncilRelevant": {
+                    "type": "string",
+                    "enum": [
+                      "yes",
+                      "no",
+                      "unknown"
+                    ]
+                  },
+                  "ownerRoles": {
+                    "type": "object",
+                    "properties": {
+                      "process": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      },
+                      "data": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      },
+                      "support": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "dataSources": {
+                    "maxItems": 10,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80
+                    }
+                  },
+                  "accessRequested": {
+                    "maxItems": 10,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "system": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "level": {
+                          "type": "string",
+                          "enum": [
+                            "read",
+                            "write",
+                            "admin"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "system",
+                        "level"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "countryCode",
+                  "worksCouncilRelevant",
+                  "ownerRoles",
+                  "dataSources",
+                  "accessRequested"
+                ],
+                "additionalProperties": false
+              },
+              "progress": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "done": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "total": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "done",
+                      "total"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "cowork": {
+                "type": "object",
+                "properties": {
+                  "requested": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "requested"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "schema",
+              "idempotencyKey",
+              "atlasProjectId",
+              "atlasRevision",
+              "installationId",
+              "requestedBy",
+              "target",
+              "profile",
+              "facts",
+              "progress",
+              "cowork"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "kind",
+          "subject",
+          "summary",
+          "payload"
+        ],
+        "additionalProperties": false
+      },
+      "note": "Strict at every level: an unknown key anywhere is refused. No person's name, email or assignee is sent. `idempotencyKey` makes a retry safe: see Retries and idempotency.",
+      "notes": {
+        "kind": "What sort of proposal this is.",
+        "subject": "A slug naming what the proposal is about. It is recorded in a git-tracked pointer, so it may not carry free text. For `project-onboarding` it must be `atlas-` followed by the payload's `atlasProjectId` in lower case.",
+        "summary": "One sentence for the human who reviews it. Stored only in the untracked payload file. For `project-onboarding` it must be exactly `Atlas project onboarding request`.",
+        "payload": "The proposed state, never interpreted by Flightdeck. At most 64 top-level keys, each matching `^[A-Za-z0-9_.-]{1,64}$`, and at most 65536 bytes once the whole submission is serialized.",
+        "payload.idempotencyKey": "One per request the user makes in Atlas. Reuse it on every retry of that request.",
+        "payload.atlasProjectId": "The Atlas project. One open or promoted request per Atlas project.",
+        "payload.atlasRevision": "Atlas's revision of the project when the request was built.",
+        "payload.installationId": "Which Atlas installation sent it.",
+        "payload.requestedBy": "The sha256 of the Atlas user id. Never an email or a name.",
+        "payload.target.workspaceId": "The workspace Atlas asks for. The reviewer picks the final one.",
+        "payload.target.label": "The project label Atlas proposes.",
+        "payload.target.projectId": "A suggested project id. The reviewer picks the final one.",
+        "payload.progress": "`{\"done\":n,\"total\":n}` with whole numbers from 0, or null.",
+        "payload.cowork.requested": "Whether Atlas asks for the Cowork setup hand-off."
+      },
+      "gates": [
+        "killSwitch",
+        "integrationKinds"
+      ],
+      "examples": [
+        {
+          "kind": "project-onboarding",
+          "subject": "atlas-3f1c2a4e-8b7d-4c6a-9e5f-1a2b3c4d5e6f",
+          "summary": "Atlas project onboarding request",
+          "payload": {
+            "schema": "atlas-project-onboarding/1",
+            "idempotencyKey": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+            "atlasProjectId": "3f1c2a4e-8b7d-4c6a-9e5f-1a2b3c4d5e6f",
+            "atlasRevision": 3,
+            "installationId": "atlas-local",
+            "requestedBy": "c3a9f0e1d2b4a5968778695a4b3c2d1e0f9e8d7c6b5a49382716f5e4d3c2b1a0",
+            "target": {
+              "workspaceId": "te-ops",
+              "label": "Payroll onboarding",
+              "projectId": "payroll-onboarding"
+            },
+            "profile": {
+              "summary": "Move payroll onboarding for the Berlin site onto one checklist.",
+              "successMeasure": "Fewer than two corrections per payroll run.",
+              "functionArea": "HR Operations",
+              "category": "Process",
+              "status": "Planning",
+              "priority": "High",
+              "targetDate": "2026-12-01",
+              "site": "Berlin"
+            },
+            "facts": {
+              "countryCode": "DE",
+              "headcountBand": "50-249",
+              "worksCouncilRelevant": "unknown",
+              "ownerRoles": {
+                "process": "Head of HR Operations"
+              },
+              "dataSources": [
+                "SAP HCM"
+              ],
+              "accessRequested": [
+                {
+                  "system": "SAP HCM",
+                  "level": "read"
+                }
+              ]
+            },
+            "progress": {
+              "done": 7,
+              "total": 9
+            },
+            "cowork": {
+              "requested": true
+            }
+          }
+        }
+      ],
+      "refusals": [
+        {
+          "status": 400,
+          "schema": "InvalidSubmission",
+          "codes": [],
+          "error": "invalid submission"
+        },
+        {
+          "status": 400,
+          "schema": "InvalidOnboardingPayload",
+          "codes": [
+            "invalid-payload"
+          ],
+          "error": "invalid project-onboarding submission"
+        },
+        {
+          "status": 400,
+          "schema": "FeatureOff",
+          "codes": [
+            "FEATURE_OFF"
+          ],
+          "error": "a payload field was sent for a feature that is off for this credential"
+        },
+        {
+          "status": 400,
+          "schema": "ErrorMessage",
+          "codes": []
+        },
+        {
+          "status": 400,
+          "schema": "FrameworkError",
+          "codes": []
+        },
+        {
+          "status": 403,
+          "schema": "ScopeMissing",
+          "codes": [
+            "scope-missing"
+          ]
+        },
+        {
+          "status": 403,
+          "schema": "KindNotEnabled",
+          "codes": [
+            "kind-not-enabled"
+          ]
+        },
+        {
+          "status": 409,
+          "schema": "OnboardingAlreadySubmitted",
+          "codes": [
+            "already_submitted"
+          ]
+        },
+        {
+          "status": 409,
+          "schema": "OnboardingConflict",
+          "codes": [
+            "idempotency_key_conflict",
+            "lock_unreadable"
+          ]
+        },
+        {
+          "status": 413,
+          "schema": "FrameworkError",
+          "codes": []
+        },
+        {
+          "status": 415,
+          "schema": "FrameworkError",
+          "codes": []
+        },
+        {
+          "status": 401,
+          "schema": "InvalidCredential",
+          "codes": [],
+          "error": "invalid or unauthorized credential"
+        },
+        {
+          "status": 429,
+          "schema": "CredentialRateLimited",
+          "codes": [],
+          "error": "too many requests"
+        },
+        {
+          "status": 429,
+          "schema": "FrameworkError",
+          "codes": []
+        }
+      ],
+      "refusalCodes": [
+        "FEATURE_OFF",
+        "already_submitted",
+        "idempotency_key_conflict",
+        "invalid-payload",
+        "kind-not-enabled",
+        "lock_unreadable",
+        "scope-missing"
+      ]
+    }
+  },
+  "routes": [
+    {
+      "operationId": "whoami",
+      "method": "GET",
+      "url": "/api/inbound/v1/whoami",
+      "scope": null,
+      "responses": [
+        {
+          "status": 200,
+          "schema": "WhoamiResponse",
+          "when": "The credential is valid and the API is open.",
+          "example": {
+            "integrationId": "atlas",
+            "scopes": [
+              "submit:proposal",
+              "read:context"
+            ],
+            "expiresAt": "2026-10-22T09:30:00.000Z",
+            "limits": {
+              "maxPayloadBytes": 65536,
+              "requestsPerMinute": 30
+            },
+            "features": {
+              "decisionNote": false,
+              "supersedes": false,
+              "appDiscovery": false,
+              "requestedSubapps": false,
+              "aiAgents": false
+            },
+            "bridgeMediaCrossOrigin": false
+          }
+        },
+        {
+          "status": 401,
+          "schema": "InvalidCredential",
+          "when": "No usable credential, or the API is shut. One status and one body for all of these cases; see the uniform 401.",
+          "codes": [],
+          "error": "invalid or unauthorized credential",
+          "example": {
+            "error": "invalid or unauthorized credential"
+          }
+        },
+        {
+          "status": 429,
+          "schema": "CredentialRateLimited",
+          "when": "This credential has used its 30 requests in the last 60 seconds.",
+          "codes": [],
+          "error": "too many requests",
+          "example": {
+            "error": "too many requests",
+            "retryAfterSeconds": 42
+          }
+        },
+        {
+          "status": 429,
+          "schema": "FrameworkError",
+          "when": "This IP address has sent more than 120 requests to this route in one minute.",
+          "codes": [],
+          "example": {
+            "statusCode": 429,
+            "error": "Too Many Requests",
+            "message": "Rate limit exceeded, retry in 1 minute"
+          }
+        },
+        {
+          "status": 409,
+          "schema": "HeaderWorkspaceDisabled",
+          "when": "With `WORKSPACES_ENABLED=true`, the request's `X-Workspace-Id` names a disabled workspace. Answered before any credential or session is checked.",
+          "codes": [
+            "workspace_disabled"
+          ],
+          "example": {
+            "error": "workspace \"rhineland\" is currently disabled",
+            "code": "workspace_disabled",
+            "workspaceId": "rhineland"
+          }
+        },
+        {
+          "status": 409,
+          "schema": "HeaderProjectDisabled",
+          "when": "The request's `X-Project-Id` names a disabled project of the resolved workspace. Answered before any credential or session is checked.",
+          "codes": [
+            "project_disabled"
+          ],
+          "example": {
+            "error": "project \"paused-pilot\" is currently disabled",
+            "code": "project_disabled",
+            "projectId": "paused-pilot"
+          }
+        }
+      ]
+    },
+    {
+      "operationId": "createSubmission",
+      "method": "POST",
+      "url": "/api/inbound/v1/submissions",
+      "scope": "submit:proposal",
+      "request": {
+        "schema": "SubmissionRequest",
+        "example": {
+          "kind": "state-update",
+          "subject": "rhineland-rollout-dates",
+          "summary": "Go-live moved to 1 November for the Rhineland rollout.",
+          "payload": {
+            "projectRef": "rhineland-rollout",
+            "goLive": "2026-11-01",
+            "status": "planned"
+          }
+        }
+      },
+      "responses": [
+        {
+          "status": 202,
+          "schema": "SubmissionAccepted",
+          "when": "The proposal was filed. Nothing was applied.",
+          "example": {
+            "submissionId": "5f0c3a9e2b7d41c8a6e1f203",
+            "state": "filed",
+            "receivedAt": "2026-09-22T09:30:00.000Z",
+            "payloadSha256": "4d6f2a0c9b1e8f7a3c5d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b",
+            "payloadBytes": 412,
+            "note": "filed for human review — Flightdeck has applied nothing and has not interpreted the payload"
+          }
+        },
+        {
+          "status": 200,
+          "schema": "SubmissionDuplicate",
+          "when": "`project-onboarding` only: this idempotency key was already used for the same Atlas project. The answer names the submission the key filed, even when this body differs, and a retry after an interruption finishes filing it. Audited as `inbound.submission.duplicate`.",
+          "kinds": [
+            "project-onboarding"
+          ],
+          "example": {
+            "submissionId": "5f0c3a9e2b7d41c8a6e1f203",
+            "duplicate": true
+          }
+        },
+        {
+          "status": 400,
+          "schema": "InvalidSubmission",
+          "when": "The body does not match the schema. A `text/plain` body is parsed as a string and refused here, at the root (`path: []`), after the credential was checked and counted against its window.",
+          "codes": [],
+          "error": "invalid submission",
+          "example": {
+            "error": "invalid submission",
+            "issues": [
+              {
+                "origin": "string",
+                "code": "invalid_format",
+                "format": "regex",
+                "pattern": "/^[a-z0-9][a-z0-9-]{0,63}$/",
+                "path": [
+                  "subject"
+                ],
+                "message": "subject must be a lowercase slug (a-z, 0-9, dashes), 1-64 characters"
+              }
+            ]
+          }
+        },
+        {
+          "status": 400,
+          "schema": "InvalidOnboardingPayload",
+          "when": "`project-onboarding` only, once the kind is enabled: the payload does not match `atlas-project-onboarding/1`, the summary is not the fixed one, or the subject does not name the payload's Atlas project. The issues carry paths and codes, never a value. Not audited.",
+          "codes": [
+            "invalid-payload"
+          ],
+          "error": "invalid project-onboarding submission",
+          "kinds": [
+            "project-onboarding"
+          ],
+          "example": {
+            "error": "invalid project-onboarding submission",
+            "reason": "invalid-payload",
+            "issues": [
+              {
+                "path": [
+                  "payload",
+                  "target",
+                  "workspaceId"
+                ],
+                "code": "invalid_format"
+              }
+            ]
+          }
+        },
+        {
+          "status": 400,
+          "schema": "FeatureOff",
+          "when": "`project-onboarding` only, once the kind is enabled: the payload carries a field whose feature is false in `GET /api/inbound/v1/whoami` for this credential. Checked before the payload schema. The field is never stripped and nothing is filed. Not audited.",
+          "codes": [
+            "FEATURE_OFF"
+          ],
+          "error": "a payload field was sent for a feature that is off for this credential",
+          "kinds": [
+            "project-onboarding"
+          ],
+          "example": {
+            "error": "a payload field was sent for a feature that is off for this credential",
+            "code": "FEATURE_OFF",
+            "field": "aiAgents",
+            "fields": [
+              "aiAgents"
+            ]
+          }
+        },
+        {
+          "status": 400,
+          "schema": "ErrorMessage",
+          "when": "The body matches the schema but breaks a payload rule: too many top-level keys, a key outside the allowed characters, or too many bytes once serialized. The message names the rule, never the value. Audited as `inbound.submission.refused`.",
+          "codes": [],
+          "example": {
+            "error": "payload may not carry more than 64 top-level fields"
+          }
+        },
+        {
+          "status": 400,
+          "schema": "FrameworkError",
+          "when": "The content type is `application/json` but the body is empty or not valid JSON. Answered by the body parser, before the credential is checked.",
+          "codes": [],
+          "example": {
+            "statusCode": 400,
+            "code": "FST_ERR_CTP_INVALID_JSON_BODY",
+            "error": "Bad Request",
+            "message": "Body is not valid JSON but content-type is set to 'application/json'"
+          }
+        },
+        {
+          "status": 403,
+          "schema": "ScopeMissing",
+          "when": "The credential is valid but lacks `submit:proposal`.",
+          "codes": [
+            "scope-missing"
+          ],
+          "example": {
+            "error": "credential lacks the submit:proposal scope",
+            "reason": "scope-missing"
+          }
+        },
+        {
+          "status": 403,
+          "schema": "KindNotEnabled",
+          "when": "`project-onboarding` only: one of the kind's two switches is off for this integration. Which one is not said here; an operator sees it in `GET /api/inbound/status`. Checked before the payload. Audited as `inbound.submission.refused`.",
+          "codes": [
+            "kind-not-enabled"
+          ],
+          "kinds": [
+            "project-onboarding"
+          ],
+          "example": {
+            "error": "the project-onboarding kind is not enabled for this integration",
+            "reason": "kind-not-enabled"
+          }
+        },
+        {
+          "status": 409,
+          "schema": "OnboardingAlreadySubmitted",
+          "when": "`project-onboarding` only: a request with a NEW idempotency key for an Atlas project that already has an open or promoted request. A rejection releases the project, so a revised request can then be sent. Audited.",
+          "codes": [
+            "already_submitted"
+          ],
+          "kinds": [
+            "project-onboarding"
+          ],
+          "example": {
+            "error": "this Atlas project already has an open or promoted onboarding request",
+            "code": "already_submitted",
+            "submissionId": "5f0c3a9e2b7d41c8a6e1f203",
+            "state": "filed"
+          }
+        },
+        {
+          "status": 409,
+          "schema": "OnboardingConflict",
+          "when": "`project-onboarding` only: `idempotency_key_conflict`, the key was already used for a different Atlas project; or `lock_unreadable`, an intake lock for this request cannot be read and an operator must inspect it. Neither is a retry you can fix by resending. Audited.",
+          "codes": [
+            "idempotency_key_conflict",
+            "lock_unreadable"
+          ],
+          "kinds": [
+            "project-onboarding"
+          ],
+          "example": {
+            "error": "this idempotency key was already used for a different Atlas project",
+            "code": "idempotency_key_conflict"
+          }
+        },
+        {
+          "status": 413,
+          "schema": "FrameworkError",
+          "when": "The request body is larger than 73728 bytes. Answered before the credential is checked.",
+          "codes": [],
+          "example": {
+            "statusCode": 413,
+            "code": "FST_ERR_CTP_BODY_TOO_LARGE",
+            "error": "Payload Too Large",
+            "message": "Request body is too large"
+          }
+        },
+        {
+          "status": 415,
+          "schema": "FrameworkError",
+          "when": "The content type is one the server has no parser for: anything except `application/json` and `text/plain`, for example `application/xml` or `application/x-www-form-urlencoded`. Answered before the credential is checked. A `text/plain` body is not refused here: see the 400 `InvalidSubmission` row.",
+          "codes": [],
+          "example": {
+            "statusCode": 415,
+            "code": "FST_ERR_CTP_INVALID_MEDIA_TYPE",
+            "error": "Unsupported Media Type",
+            "message": "Unsupported Media Type"
+          }
+        },
+        {
+          "status": 401,
+          "schema": "InvalidCredential",
+          "when": "No usable credential, or the API is shut. One status and one body for all of these cases; see the uniform 401.",
+          "codes": [],
+          "error": "invalid or unauthorized credential",
+          "example": {
+            "error": "invalid or unauthorized credential"
+          }
+        },
+        {
+          "status": 429,
+          "schema": "CredentialRateLimited",
+          "when": "This credential has used its 30 requests in the last 60 seconds.",
+          "codes": [],
+          "error": "too many requests",
+          "example": {
+            "error": "too many requests",
+            "retryAfterSeconds": 42
+          }
+        },
+        {
+          "status": 429,
+          "schema": "FrameworkError",
+          "when": "This IP address has sent more than 120 requests to this route in one minute.",
+          "codes": [],
+          "example": {
+            "statusCode": 429,
+            "error": "Too Many Requests",
+            "message": "Rate limit exceeded, retry in 1 minute"
+          }
+        }
+      ]
+    },
+    {
+      "operationId": "getSubmission",
+      "method": "GET",
+      "url": "/api/inbound/v1/submissions/:submissionId",
+      "scope": "submit:proposal",
+      "responses": [
+        {
+          "status": 200,
+          "schema": "SubmissionStatus",
+          "when": "The submission is yours. The example is a promoted `project-onboarding` request.",
+          "example": {
+            "submissionId": "5f0c3a9e2b7d41c8a6e1f203",
+            "integrationId": "atlas",
+            "kind": "project-onboarding",
+            "subject": "atlas-3f1c2a4e-8b7d-4c6a-9e5f-1a2b3c4d5e6f",
+            "receivedAt": "2026-09-22T09:30:00.000Z",
+            "payloadSha256": "4d6f2a0c9b1e8f7a3c5d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b",
+            "payloadBytes": 1184,
+            "fieldNames": [
+              "atlasProjectId",
+              "atlasRevision",
+              "cowork",
+              "facts",
+              "idempotencyKey",
+              "installationId",
+              "profile",
+              "progress",
+              "requestedBy",
+              "schema",
+              "target"
+            ],
+            "state": "promoted",
+            "outcome": {
+              "workspaceId": "te-ops",
+              "projectId": "payroll-onboarding",
+              "setupState": "none"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "schema": "ScopeMissing",
+          "when": "The credential lacks `submit:proposal`.",
+          "codes": [
+            "scope-missing"
+          ],
+          "example": {
+            "error": "credential lacks the submit:proposal scope",
+            "reason": "scope-missing"
+          }
+        },
+        {
+          "status": 404,
+          "schema": "SubmissionNotFound",
+          "when": "No such submission, not yours, or an id of the wrong shape. The three cases are indistinguishable.",
+          "codes": [],
+          "error": "no such submission",
+          "example": {
+            "error": "no such submission"
+          }
+        },
+        {
+          "status": 401,
+          "schema": "InvalidCredential",
+          "when": "No usable credential, or the API is shut. One status and one body for all of these cases; see the uniform 401.",
+          "codes": [],
+          "error": "invalid or unauthorized credential",
+          "example": {
+            "error": "invalid or unauthorized credential"
+          }
+        },
+        {
+          "status": 429,
+          "schema": "CredentialRateLimited",
+          "when": "This credential has used its 30 requests in the last 60 seconds.",
+          "codes": [],
+          "error": "too many requests",
+          "example": {
+            "error": "too many requests",
+            "retryAfterSeconds": 42
+          }
+        },
+        {
+          "status": 429,
+          "schema": "FrameworkError",
+          "when": "This IP address has sent more than 120 requests to this route in one minute.",
+          "codes": [],
+          "example": {
+            "statusCode": 429,
+            "error": "Too Many Requests",
+            "message": "Rate limit exceeded, retry in 1 minute"
+          }
+        }
+      ]
+    },
+    {
+      "operationId": "listContextWorkspaces",
+      "method": "GET",
+      "url": "/api/inbound/v1/context/workspaces",
+      "scope": "read:context",
+      "responses": [
+        {
+          "status": 200,
+          "schema": "ContextWorkspacesResponse",
+          "when": "The credential carries `read:context`.",
+          "example": {
+            "integrationId": "atlas",
+            "instanceId": "0b6f3c1e-2d4a-4e8b-9c7f-5a1d2e3f4b6c",
+            "workspaces": [
+              {
+                "id": "te-ops",
+                "label": "TE Operations",
+                "enabled": true,
+                "isDefault": true
+              },
+              {
+                "id": "rhineland",
+                "label": "Rhineland",
+                "enabled": false,
+                "isDefault": false
+              }
+            ],
+            "generatedAt": "2026-09-22T09:30:00.000Z"
+          }
+        },
+        {
+          "status": 403,
+          "schema": "ScopeMissing",
+          "when": "The credential lacks `read:context`.",
+          "codes": [
+            "scope-missing"
+          ],
+          "example": {
+            "error": "credential lacks the read:context scope",
+            "reason": "scope-missing"
+          }
+        },
+        {
+          "status": 401,
+          "schema": "InvalidCredential",
+          "when": "No usable credential, or the API is shut. One status and one body for all of these cases; see the uniform 401.",
+          "codes": [],
+          "error": "invalid or unauthorized credential",
+          "example": {
+            "error": "invalid or unauthorized credential"
+          }
+        },
+        {
+          "status": 429,
+          "schema": "CredentialRateLimited",
+          "when": "This credential has used its 30 requests in the last 60 seconds.",
+          "codes": [],
+          "error": "too many requests",
+          "example": {
+            "error": "too many requests",
+            "retryAfterSeconds": 42
+          }
+        },
+        {
+          "status": 429,
+          "schema": "FrameworkError",
+          "when": "This IP address has sent more than 120 requests to this route in one minute.",
+          "codes": [],
+          "example": {
+            "statusCode": 429,
+            "error": "Too Many Requests",
+            "message": "Rate limit exceeded, retry in 1 minute"
+          }
+        }
+      ]
+    },
+    {
+      "operationId": "listContextProjects",
+      "method": "GET",
+      "url": "/api/inbound/v1/context/workspaces/:workspaceId/projects",
+      "scope": "read:context",
+      "responses": [
+        {
+          "status": 200,
+          "schema": "ContextProjectsResponse",
+          "when": "The workspace is allowlisted and enabled.",
+          "example": {
+            "workspaceId": "te-ops",
+            "projects": [
+              {
+                "id": "general",
+                "label": "General",
+                "enabled": true,
+                "isDefault": true
+              },
+              {
+                "id": "rhineland-rollout",
+                "label": "Rhineland rollout",
+                "enabled": true,
+                "isDefault": false
+              }
+            ],
+            "generatedAt": "2026-09-22T09:30:00.000Z"
+          }
+        },
+        {
+          "status": 403,
+          "schema": "ScopeMissing",
+          "when": "The credential lacks `read:context`.",
+          "codes": [
+            "scope-missing"
+          ],
+          "example": {
+            "error": "credential lacks the read:context scope",
+            "reason": "scope-missing"
+          }
+        },
+        {
+          "status": 404,
+          "schema": "ContextNotFound",
+          "when": "The workspace is not allowlisted, or does not exist. The two cases are indistinguishable.",
+          "codes": [],
+          "error": "not found",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 409,
+          "schema": "ContextWorkspaceDisabled",
+          "when": "The workspace is allowlisted but disabled.",
+          "codes": [
+            "workspace_disabled"
+          ],
+          "error": "workspace disabled",
+          "example": {
+            "error": "workspace disabled",
+            "code": "workspace_disabled"
+          }
+        },
+        {
+          "status": 401,
+          "schema": "InvalidCredential",
+          "when": "No usable credential, or the API is shut. One status and one body for all of these cases; see the uniform 401.",
+          "codes": [],
+          "error": "invalid or unauthorized credential",
+          "example": {
+            "error": "invalid or unauthorized credential"
+          }
+        },
+        {
+          "status": 429,
+          "schema": "CredentialRateLimited",
+          "when": "This credential has used its 30 requests in the last 60 seconds.",
+          "codes": [],
+          "error": "too many requests",
+          "example": {
+            "error": "too many requests",
+            "retryAfterSeconds": 42
+          }
+        },
+        {
+          "status": 429,
+          "schema": "FrameworkError",
+          "when": "This IP address has sent more than 120 requests to this route in one minute.",
+          "codes": [],
+          "example": {
+            "statusCode": 429,
+            "error": "Too Many Requests",
+            "message": "Rate limit exceeded, retry in 1 minute"
+          }
+        }
+      ]
+    },
+    {
+      "operationId": "listContextApps",
+      "method": "GET",
+      "url": "/api/inbound/v1/context/workspaces/:workspaceId/apps",
+      "scope": "read:context",
+      "responses": [
+        {
+          "status": 200,
+          "schema": "ContextAppsResponse",
+          "when": "The workspace is allowlisted and enabled.",
+          "example": {
+            "workspaceId": "te-ops",
+            "projectId": "general",
+            "apps": [
+              {
+                "id": "maps",
+                "label": "Maps",
+                "icon": "🗺️",
+                "path": "/console/apps/maps",
+                "visibleToRoles": [
+                  "hr_preparer",
+                  "hr_reviewer",
+                  "wc_liaison",
+                  "legal",
+                  "admin"
+                ]
+              }
+            ],
+            "generatedAt": "2026-09-22T09:30:00.000Z"
+          }
+        },
+        {
+          "status": 403,
+          "schema": "ScopeMissing",
+          "when": "The credential lacks `read:context`.",
+          "codes": [
+            "scope-missing"
+          ],
+          "example": {
+            "error": "credential lacks the read:context scope",
+            "reason": "scope-missing"
+          }
+        },
+        {
+          "status": 404,
+          "schema": "ContextNotFound",
+          "when": "The workspace is not allowlisted, or does not exist. The two cases are indistinguishable.",
+          "codes": [],
+          "error": "not found",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 409,
+          "schema": "ContextWorkspaceDisabled",
+          "when": "The workspace is allowlisted but disabled.",
+          "codes": [
+            "workspace_disabled"
+          ],
+          "error": "workspace disabled",
+          "example": {
+            "error": "workspace disabled",
+            "code": "workspace_disabled"
+          }
+        },
+        {
+          "status": 401,
+          "schema": "InvalidCredential",
+          "when": "No usable credential, or the API is shut. One status and one body for all of these cases; see the uniform 401.",
+          "codes": [],
+          "error": "invalid or unauthorized credential",
+          "example": {
+            "error": "invalid or unauthorized credential"
+          }
+        },
+        {
+          "status": 429,
+          "schema": "CredentialRateLimited",
+          "when": "This credential has used its 30 requests in the last 60 seconds.",
+          "codes": [],
+          "error": "too many requests",
+          "example": {
+            "error": "too many requests",
+            "retryAfterSeconds": 42
+          }
+        },
+        {
+          "status": 429,
+          "schema": "FrameworkError",
+          "when": "This IP address has sent more than 120 requests to this route in one minute.",
+          "codes": [],
+          "example": {
+            "statusCode": 429,
+            "error": "Too Many Requests",
+            "message": "Rate limit exceeded, retry in 1 minute"
+          }
+        }
+      ]
+    }
+  ],
+  "features": {
+    "advertisedOn": "GET /api/inbound/v1/whoami",
+    "rule": "Scoped to the calling credential's integration: a flag is true only when the feature is shipped, its env gate is \"true\", and the integration may file `project-onboarding`. A payload field whose flag is false is refused with 400 FEATURE_OFF naming it, never stripped. Read features before each send.",
+    "refusal": {
+      "status": 400,
+      "schema": "FeatureOff",
+      "code": "FEATURE_OFF"
+    },
+    "flags": {
+      "decisionNote": {
+        "envGate": "INBOUND_DECISION_NOTE_ENABLED",
+        "payloadField": null,
+        "shipped": false,
+        "builtBy": "onb-decision-note-os"
+      },
+      "supersedes": {
+        "envGate": "INBOUND_SUPERSEDES_ENABLED",
+        "payloadField": "supersedes",
+        "shipped": false,
+        "builtBy": "onb-resubmit-lineage-os"
+      },
+      "appDiscovery": {
+        "envGate": "INBOUND_APP_DISCOVERY_ENABLED",
+        "payloadField": null,
+        "shipped": false,
+        "builtBy": "onb-inbound-apps-discovery"
+      },
+      "requestedSubapps": {
+        "envGate": "INBOUND_REQUESTED_SUBAPPS_ENABLED",
+        "payloadField": "requestedSubapps",
+        "shipped": false,
+        "builtBy": "onb-payload-requested-subapps"
+      },
+      "aiAgents": {
+        "envGate": "INBOUND_AI_AGENTS_ENABLED",
+        "payloadField": "aiAgents",
+        "shipped": false,
+        "builtBy": "bedrock-onboarding-payload"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "SubmissionRequest": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "state-update",
+              "project-onboarding"
+            ]
+          },
+          "subject": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "payload": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "kind",
+          "subject",
+          "summary",
+          "payload"
+        ],
+        "additionalProperties": false
+      },
+      "ProjectOnboardingPayload": {
+        "type": "object",
+        "properties": {
+          "schema": {
+            "type": "string",
+            "const": "atlas-project-onboarding/1"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "atlasProjectId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "atlasRevision": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "installationId": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+          },
+          "requestedBy": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "workspaceId": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "projectId": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+              }
+            },
+            "required": [
+              "workspaceId",
+              "label"
+            ],
+            "additionalProperties": false
+          },
+          "profile": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string",
+                "maxLength": 1500
+              },
+              "successMeasure": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "functionArea": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "category": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "In progress",
+                  "Planning",
+                  "On hold",
+                  "Completed"
+                ]
+              },
+              "priority": {
+                "type": "string",
+                "enum": [
+                  "High",
+                  "Normal",
+                  "Low"
+                ]
+              },
+              "targetDate": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "site": {
+                "type": "string",
+                "maxLength": 100
+              }
+            },
+            "required": [
+              "summary",
+              "successMeasure",
+              "functionArea",
+              "category"
+            ],
+            "additionalProperties": false
+          },
+          "facts": {
+            "type": "object",
+            "properties": {
+              "countryCode": {
+                "type": "string",
+                "pattern": "^[A-Z]{2}$"
+              },
+              "legalEntity": {
+                "type": "string",
+                "maxLength": 120
+              },
+              "headcountBand": {
+                "type": "string",
+                "enum": [
+                  "<50",
+                  "50-249",
+                  "250+",
+                  "unknown"
+                ]
+              },
+              "worksCouncilRelevant": {
+                "type": "string",
+                "enum": [
+                  "yes",
+                  "no",
+                  "unknown"
+                ]
+              },
+              "ownerRoles": {
+                "type": "object",
+                "properties": {
+                  "process": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "data": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "support": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  }
+                },
+                "additionalProperties": false
+              },
+              "dataSources": {
+                "maxItems": 10,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                }
+              },
+              "accessRequested": {
+                "maxItems": 10,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "system": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80
+                    },
+                    "level": {
+                      "type": "string",
+                      "enum": [
+                        "read",
+                        "write",
+                        "admin"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "system",
+                    "level"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "countryCode",
+              "worksCouncilRelevant",
+              "ownerRoles",
+              "dataSources",
+              "accessRequested"
+            ],
+            "additionalProperties": false
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "done": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "total": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "done",
+                  "total"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cowork": {
+            "type": "object",
+            "properties": {
+              "requested": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "requested"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "schema",
+          "idempotencyKey",
+          "atlasProjectId",
+          "atlasRevision",
+          "installationId",
+          "requestedBy",
+          "target",
+          "profile",
+          "facts",
+          "progress",
+          "cowork"
+        ],
+        "additionalProperties": false
+      },
+      "WhoamiResponse": {
+        "type": "object",
+        "properties": {
+          "integrationId": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+            "description": "The integration the credential belongs to."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "submit:proposal",
+                "read:context"
+              ]
+            },
+            "description": "The scopes this credential carries."
+          },
+          "expiresAt": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+            "format": "date-time",
+            "description": "When the credential stops working."
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "maxPayloadBytes": {
+                "type": "number",
+                "const": 65536,
+                "description": "The largest serialized submission accepted."
+              },
+              "requestsPerMinute": {
+                "type": "number",
+                "const": 30,
+                "description": "The per-credential request budget."
+              }
+            },
+            "required": [
+              "maxPayloadBytes",
+              "requestsPerMinute"
+            ],
+            "additionalProperties": false
+          },
+          "features": {
+            "type": "object",
+            "properties": {
+              "decisionNote": {
+                "type": "boolean",
+                "description": "True only when this feature is built, `INBOUND_DECISION_NOTE_ENABLED` is on, and this credential's integration may file `project-onboarding`."
+              },
+              "supersedes": {
+                "type": "boolean",
+                "description": "True only when this feature is built, `INBOUND_SUPERSEDES_ENABLED` is on, and this credential's integration may file `project-onboarding`. While false, a payload carrying `supersedes` is refused with `FEATURE_OFF`."
+              },
+              "appDiscovery": {
+                "type": "boolean",
+                "description": "True only when this feature is built, `INBOUND_APP_DISCOVERY_ENABLED` is on, and this credential's integration may file `project-onboarding`."
+              },
+              "requestedSubapps": {
+                "type": "boolean",
+                "description": "True only when this feature is built, `INBOUND_REQUESTED_SUBAPPS_ENABLED` is on, and this credential's integration may file `project-onboarding`. While false, a payload carrying `requestedSubapps` is refused with `FEATURE_OFF`."
+              },
+              "aiAgents": {
+                "type": "boolean",
+                "description": "True only when this feature is built, `INBOUND_AI_AGENTS_ENABLED` is on, and this credential's integration may file `project-onboarding`. While false, a payload carrying `aiAgents` is refused with `FEATURE_OFF`."
+              }
+            },
+            "required": [
+              "decisionNote",
+              "supersedes",
+              "appDiscovery",
+              "requestedSubapps",
+              "aiAgents"
+            ],
+            "additionalProperties": false,
+            "description": "The optional project-onboarding features this credential's integration may use. Read them before sending; a missing route or a 400 is never a capability signal."
+          },
+          "bridgeMediaCrossOrigin": {
+            "type": "boolean",
+            "description": "Whether this OS serves bridge-page media to this credential's origin. Always false in this version."
+          }
+        },
+        "required": [
+          "integrationId",
+          "scopes",
+          "expiresAt",
+          "limits",
+          "features",
+          "bridgeMediaCrossOrigin"
+        ],
+        "additionalProperties": false
+      },
+      "SubmissionAccepted": {
+        "type": "object",
+        "properties": {
+          "submissionId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{24}$",
+            "description": "Use it to read the submission back."
+          },
+          "state": {
+            "type": "string",
+            "const": "filed"
+          },
+          "receivedAt": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+            "format": "date-time",
+            "description": "When the server accepted it."
+          },
+          "payloadSha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "sha256 of the stored submission document."
+          },
+          "payloadBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Size of the stored submission document."
+          },
+          "note": {
+            "type": "string",
+            "description": "A reminder that nothing was applied."
+          }
+        },
+        "required": [
+          "submissionId",
+          "state",
+          "receivedAt",
+          "payloadSha256",
+          "payloadBytes",
+          "note"
+        ],
+        "additionalProperties": false
+      },
+      "SubmissionDuplicate": {
+        "type": "object",
+        "properties": {
+          "submissionId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{24}$",
+            "description": "The id the first request with this idempotency key was given."
+          },
+          "duplicate": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "submissionId",
+          "duplicate"
+        ],
+        "additionalProperties": false
+      },
+      "SubmissionStatus": {
+        "type": "object",
+        "properties": {
+          "submissionId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{24}$"
+          },
+          "integrationId": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "state-update",
+              "project-onboarding"
+            ]
+          },
+          "subject": {
+            "type": "string"
+          },
+          "receivedAt": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+            "format": "date-time",
+            "description": "When the server accepted it."
+          },
+          "payloadSha256": {
+            "type": "string",
+            "description": "sha256 of the stored submission document."
+          },
+          "payloadBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "fieldNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The payload's top-level keys, sorted. Never the values."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "filed",
+              "promoted",
+              "rejected",
+              "promoted-or-withdrawn"
+            ],
+            "description": "`filed`: no human has decided yet (a promotion in progress still reads `filed`). `promoted` and `rejected`: only for `project-onboarding`, whose decision the OS records. `promoted-or-withdrawn`: a human acted on a `state-update`; the server does not record which way."
+          },
+          "outcome": {
+            "description": "`project-onboarding` only. On `rejected`, the reason code. On `promoted`, the project, unless `outcomeWithheld` says why not. Never the reviewer.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OnboardingPromotedOutcome"
+              },
+              {
+                "$ref": "#/components/schemas/OnboardingRejectedOutcome"
+              }
+            ]
+          },
+          "outcomeWithheld": {
+            "description": "Present on a `promoted` answer that carries no `outcome`. `scope`: the credential lacks `read:context`; re-mint it with both scopes. `workspace-not-shared`: the project's workspace is not on `inbound.api.readWorkspaces`.",
+            "type": "string",
+            "enum": [
+              "scope",
+              "workspace-not-shared"
+            ]
+          }
+        },
+        "required": [
+          "submissionId",
+          "integrationId",
+          "kind",
+          "subject",
+          "receivedAt",
+          "payloadSha256",
+          "payloadBytes",
+          "fieldNames",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingPromotedOutcome": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "The OS workspace the project was created in."
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The project id the OS assigned. Store it; it is how the OS names the project."
+          },
+          "setupState": {
+            "type": "string",
+            "enum": [
+              "none",
+              "awaiting-cowork",
+              "result-landed",
+              "complete"
+            ],
+            "description": "How far the project's setup has got in the OS. `none` until a human starts it."
+          }
+        },
+        "required": [
+          "workspaceId",
+          "projectId",
+          "setupState"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingRejectedOutcome": {
+        "type": "object",
+        "properties": {
+          "reasonCode": {
+            "type": "string",
+            "enum": [
+              "needs-more-info",
+              "duplicate",
+              "out-of-scope",
+              "other"
+            ],
+            "description": "Why, from a fixed list. Never free text."
+          }
+        },
+        "required": [
+          "reasonCode"
+        ],
+        "additionalProperties": false
+      },
+      "ContextItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The workspace or project id."
+          },
+          "label": {
+            "type": "string",
+            "description": "Its display label. Operator-typed free text."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "False for a disabled one. Disabled items are listed, not hidden."
+          },
+          "isDefault": {
+            "type": "boolean",
+            "description": "True for the instance's default workspace, or the default project."
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "enabled",
+          "isDefault"
+        ],
+        "additionalProperties": false
+      },
+      "ContextWorkspacesResponse": {
+        "type": "object",
+        "properties": {
+          "integrationId": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+          },
+          "instanceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "A stable id for this OS instance, generated once into the setting `instance.id`. No route writes it."
+          },
+          "workspaces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContextItem"
+            },
+            "description": "Default workspace first, then by label."
+          },
+          "generatedAt": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+            "format": "date-time",
+            "description": "When this list was read."
+          }
+        },
+        "required": [
+          "integrationId",
+          "instanceId",
+          "workspaces",
+          "generatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "ContextProjectsResponse": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string"
+          },
+          "projects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContextItem"
+            },
+            "description": "Default project first, then by label."
+          },
+          "generatedAt": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+            "format": "date-time",
+            "description": "When this list was read."
+          }
+        },
+        "required": [
+          "workspaceId",
+          "projects",
+          "generatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "ContextAppsResponse": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "The project whose enable state was read: the workspace's default project."
+          },
+          "apps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "The sub-app id."
+                },
+                "label": {
+                  "type": "string",
+                  "description": "The sub-app's display name, as its manifest states it."
+                },
+                "icon": {
+                  "type": "string",
+                  "description": "The glyph the OS navigation shows for it (an emoji)."
+                },
+                "path": {
+                  "type": "string",
+                  "description": "The console path that opens it, relative to the OS origin. Opening it still needs an OS sign-in and the OS's own role check."
+                },
+                "visibleToRoles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The workspace roles the OS shows it to. This route cannot filter by user."
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "icon",
+                "path",
+                "visibleToRoles"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The sub-apps enabled there, in manifest order."
+          },
+          "generatedAt": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+            "format": "date-time",
+            "description": "When this list was read."
+          }
+        },
+        "required": [
+          "workspaceId",
+          "projectId",
+          "apps",
+          "generatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "InvalidCredential": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "const": "invalid or unauthorized credential"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "ScopeMissing": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Names the missing scope."
+          },
+          "reason": {
+            "type": "string",
+            "const": "scope-missing"
+          }
+        },
+        "required": [
+          "error",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "CredentialRateLimited": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "const": "too many requests"
+          },
+          "retryAfterSeconds": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Same value as the `Retry-After` header."
+          }
+        },
+        "required": [
+          "error",
+          "retryAfterSeconds"
+        ],
+        "additionalProperties": false
+      },
+      "FrameworkError": {
+        "type": "object",
+        "properties": {
+          "statusCode": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "code": {
+            "description": "A Fastify error code, for example `FST_ERR_CTP_BODY_TOO_LARGE`.",
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "statusCode",
+          "error",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "InvalidSubmission": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "const": "invalid submission"
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  }
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "path",
+                "message"
+              ],
+              "additionalProperties": {}
+            },
+            "description": "Zod issues. They name paths and rules, never the submitted values."
+          }
+        },
+        "required": [
+          "error",
+          "issues"
+        ],
+        "additionalProperties": false
+      },
+      "ErrorMessage": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "SubmissionNotFound": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "const": "no such submission"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "ContextNotFound": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "const": "not found"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "ContextWorkspaceDisabled": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "const": "workspace disabled"
+          },
+          "code": {
+            "type": "string",
+            "const": "workspace_disabled"
+          }
+        },
+        "required": [
+          "error",
+          "code"
+        ],
+        "additionalProperties": false
+      },
+      "HeaderWorkspaceDisabled": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "const": "workspace_disabled"
+          },
+          "workspaceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "code",
+          "workspaceId"
+        ],
+        "additionalProperties": false
+      },
+      "HeaderProjectDisabled": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "const": "project_disabled"
+          },
+          "projectId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "code",
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "KindNotEnabled": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "const": "kind-not-enabled"
+          }
+        },
+        "required": [
+          "error",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "FeatureOff": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "const": "a payload field was sent for a feature that is off for this credential"
+          },
+          "code": {
+            "type": "string",
+            "const": "FEATURE_OFF"
+          },
+          "field": {
+            "type": "string",
+            "enum": [
+              "supersedes",
+              "requestedSubapps",
+              "aiAgents"
+            ],
+            "description": "The first payload field whose feature is off."
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "supersedes",
+                "requestedSubapps",
+                "aiAgents"
+              ]
+            },
+            "description": "Every such field, in the order of `features`. Remove them, or wait until `features` says true."
+          }
+        },
+        "required": [
+          "error",
+          "code",
+          "field",
+          "fields"
+        ],
+        "additionalProperties": false
+      },
+      "InvalidOnboardingPayload": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "const": "invalid project-onboarding submission"
+          },
+          "reason": {
+            "type": "string",
+            "const": "invalid-payload"
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  }
+                },
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "code"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Where, and which rule: the path and a Zod code. Never a key you sent, never a value."
+          }
+        },
+        "required": [
+          "error",
+          "reason",
+          "issues"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingAlreadySubmitted": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "const": "already_submitted"
+          },
+          "submissionId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{24}$",
+            "description": "The request that holds this Atlas project."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "filed",
+              "promoted"
+            ],
+            "description": "`filed`: still open. `promoted`: a project was created from it."
+          }
+        },
+        "required": [
+          "error",
+          "code",
+          "submissionId",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingConflict": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "idempotency_key_conflict",
+              "lock_unreadable"
+            ]
+          }
+        },
+        "required": [
+          "error",
+          "code"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}
