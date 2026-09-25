@@ -279,82 +279,135 @@ export function payloadLeafPaths(value: object, prefix = ""): string[] {
 }
 
 export type OnboardingTab = "basics" | "details" | "review";
-/** Required items, in the order the meter lists them. */
-export const READINESS_ITEMS = [
-  {
-    key: "label",
-    label: "Proposed OS project name",
-    tab: "basics",
-    field: "fd-label",
-  },
-  {
-    key: "destination",
-    label: "Destination workspace",
-    tab: "review",
-    field: "fd-destination",
-  },
-  {
-    key: "functionArea",
-    label: "Function area",
-    tab: "basics",
-    field: "fd-function",
-  },
-  { key: "category", label: "Category", tab: "basics", field: "fd-category" },
-  { key: "summary", label: "Summary", tab: "basics", field: "fd-summary" },
-  {
-    key: "successMeasure",
-    label: "Success measure",
-    tab: "basics",
-    field: "fd-success",
-  },
-  { key: "countryCode", label: "Country", tab: "details", field: "fd-country" },
-  {
-    key: "worksCouncilRelevant",
-    label: "Works council relevance",
-    tab: "details",
-    field: "fd-works-council",
-  },
-  {
-    key: "ready",
-    label: "Marked Ready for FlightDeck",
-    tab: "details",
-    field: "fd-ready",
-  },
-] as const satisfies readonly {
-  key: string;
+/** Who completes a requirement. The destination workspace is the Super
+ * Admin's: editors never see the workspace list (plan 2026-09-25 §7). */
+export type RequirementActor = "requester" | "superAdmin";
+export type ReadinessProject = Pick<
+  Project,
+  | "flightdeckDraft"
+  | "functionArea"
+  | "category"
+  | "description"
+  | "benefit"
+  | "onboarding"
+  | "onboardingStage"
+>;
+export type Requirement = {
+  id: string;
+  actor: RequirementActor;
+  /** Optional items are listed but never counted in 'n of N'. */
+  optional: boolean;
   label: string;
   tab: OnboardingTab;
   field: string;
-}[];
-export type ReadinessKey = (typeof READINESS_ITEMS)[number]["key"];
-export function readiness(
-  project: Pick<
-    Project,
-    | "flightdeckDraft"
-    | "functionArea"
-    | "category"
-    | "description"
-    | "benefit"
-    | "onboarding"
-    | "onboardingStage"
-  >,
+  check: (project: ReadinessProject, dest: string | null) => boolean;
+};
+/** The one requirement definition, in the order the meter lists it. Every
+ * count (the full Send gate and each actor's 'n of N for you') derives from
+ * it. AI agents and Apps are selections, never requirements. */
+export const REQUIREMENTS = [
+  {
+    id: "label",
+    actor: "requester",
+    optional: false,
+    label: "Proposed OS project name",
+    tab: "basics",
+    field: "fd-label",
+    check: (p) => !!clean(p.flightdeckDraft?.label),
+  },
+  {
+    id: "destination",
+    actor: "superAdmin",
+    optional: false,
+    label: "Destination workspace",
+    tab: "review",
+    field: "fd-destination",
+    check: (_p, dest) => !!dest,
+  },
+  {
+    id: "functionArea",
+    actor: "requester",
+    optional: false,
+    label: "Function area",
+    tab: "basics",
+    field: "fd-function",
+    check: (p) => !!clean(p.functionArea),
+  },
+  {
+    id: "category",
+    actor: "requester",
+    optional: false,
+    label: "Category",
+    tab: "basics",
+    field: "fd-category",
+    check: (p) => !!clean(p.category),
+  },
+  {
+    id: "summary",
+    actor: "requester",
+    optional: false,
+    label: "Summary",
+    tab: "basics",
+    field: "fd-summary",
+    check: (p) => !!clean(p.description),
+  },
+  {
+    id: "successMeasure",
+    actor: "requester",
+    optional: false,
+    label: "Success measure",
+    tab: "basics",
+    field: "fd-success",
+    check: (p) => !!clean(p.benefit),
+  },
+  {
+    id: "countryCode",
+    actor: "requester",
+    optional: false,
+    label: "Country",
+    tab: "details",
+    field: "fd-country",
+    check: (p) => !!p.onboarding?.countryCode,
+  },
+  {
+    id: "worksCouncilRelevant",
+    actor: "requester",
+    optional: false,
+    label: "Works council relevance",
+    tab: "details",
+    field: "fd-works-council",
+    check: (p) => !!p.onboarding?.worksCouncilRelevant,
+  },
+  {
+    id: "ready",
+    actor: "requester",
+    optional: false,
+    label: "Marked Ready for FlightDeck",
+    tab: "details",
+    field: "fd-ready",
+    check: (p) => p.onboardingStage === "Ready for FlightDeck",
+  },
+] as const satisfies readonly Requirement[];
+export type ReadinessKey = (typeof REQUIREMENTS)[number]["id"];
+/** Required items as the meter lists them, derived from REQUIREMENTS. */
+export const READINESS_ITEMS = REQUIREMENTS.map(
+  ({ id, label, tab, field }) => ({ key: id, label, tab, field }),
+);
+
+function tally<R extends Requirement>(
+  requirements: readonly R[],
+  project: ReadinessProject,
   destinationWorkspaceId: string | null,
 ) {
-  const done: Record<ReadinessKey, boolean> = {
-    label: !!clean(project.flightdeckDraft?.label),
-    destination: !!destinationWorkspaceId,
-    functionArea: !!clean(project.functionArea),
-    category: !!clean(project.category),
-    summary: !!clean(project.description),
-    successMeasure: !!clean(project.benefit),
-    countryCode: !!project.onboarding?.countryCode,
-    worksCouncilRelevant: !!project.onboarding?.worksCouncilRelevant,
-    ready: project.onboardingStage === "Ready for FlightDeck",
-  };
-  const items = READINESS_ITEMS.map((item) => ({
-    ...item,
-    done: done[item.key],
-  }));
+  const items = requirements
+    .filter((r) => !r.optional)
+    .map(({ id, label, tab, field, check }) => ({
+      key: id as R["id"],
+      label,
+      tab,
+      field,
+      done: check(project, destinationWorkspaceId),
+    }));
   const count = items.filter((i) => i.done).length;
   return {
     items,
@@ -362,6 +415,30 @@ export function readiness(
     total: items.length,
     ready: count === items.length,
   };
+}
+
+/** Every requirement, whoever owns it. Send is gated on `ready` here. */
+export function readiness(
+  project: ReadinessProject,
+  destinationWorkspaceId: string | null,
+) {
+  return tally(REQUIREMENTS, project, destinationWorkspaceId);
+}
+
+/** Only the viewing actor's non-optional items: 'n of N for you'. The
+ * `requirements` parameter exists so a new item needs no UI edit (and for
+ * tests); callers use the default. */
+export function readinessFor(
+  project: ReadinessProject,
+  destinationWorkspaceId: string | null,
+  actor: RequirementActor,
+  requirements: readonly Requirement[] = REQUIREMENTS,
+) {
+  return tally(
+    requirements.filter((r) => r.actor === actor),
+    project,
+    destinationWorkspaceId,
+  );
 }
 
 /** Everything Atlas holds that never travels to FlightDeck (plan §3). Only
