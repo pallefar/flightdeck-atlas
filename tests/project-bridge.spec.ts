@@ -2964,7 +2964,7 @@ test("onboarding drafts persist, export, and remove without creating an OS proje
     await page
       .getByLabel("Preferred workspace (optional)")
       .fill("Operations Europe");
-    await page.getByRole("button", { name: "Save onboarding draft" }).click();
+    await page.getByRole("button", { name: "Save now" }).click();
     await expect(
       row.getByText("Draft prepared", { exact: true }),
     ).toBeVisible();
@@ -3155,7 +3155,7 @@ test("the three-tab form prefills Basics, meters readiness, lists every field se
     const sendButton = row.getByRole("button", { name: "Send to FlightDeck" });
     // Unsaved edits are never what gets sent.
     await expect(sendButton).toBeDisabled();
-    await row.getByRole("button", { name: "Save onboarding draft" }).click();
+    await row.getByRole("button", { name: "Save now" }).click();
     await expect(
       page.getByRole("status").filter({ hasText: "Onboarding draft saved" }),
     ).toBeVisible();
@@ -3299,7 +3299,7 @@ test("a project FlightDeck has created reads as held, not as a draft under revie
     await row.getByRole("tab", { name: "Basics" }).click();
     await expect(row.getByLabel("Summary")).toBeDisabled();
     await expect(
-      row.getByRole("button", { name: "Save onboarding draft" }),
+      row.getByRole("button", { name: "Save now" }),
     ).toBeDisabled();
   } finally {
     await removeProject(page, project.id);
@@ -3339,7 +3339,7 @@ test("needs more info reopens the draft for editing and sending again", async ({
     ).toBeVisible();
     await expect(row.getByLabel("Summary")).toBeEnabled();
     await row.getByLabel("Summary").fill("Summary with the missing detail.");
-    await row.getByRole("button", { name: "Save onboarding draft" }).click();
+    await row.getByRole("button", { name: "Save now" }).click();
     await expect(
       page.getByRole("status").filter({ hasText: "Onboarding draft saved" }),
     ).toBeVisible();
@@ -3413,7 +3413,7 @@ test("the Super Admin can close an unconfirmed send from the form, and the draft
     await row.getByRole("button", { name: "Edit draft", exact: true }).click();
     // Locked while the send is unconfirmed; Retry is the normal way on.
     await expect(
-      row.getByRole("button", { name: "Save onboarding draft" }),
+      row.getByRole("button", { name: "Save now" }),
     ).toBeDisabled();
     await row.getByRole("tab", { name: "Review & send" }).click();
     await expect(row.getByRole("button", { name: "Retry send" })).toBeEnabled();
@@ -3450,7 +3450,7 @@ test("the Super Admin can close an unconfirmed send from the form, and the draft
       row.getByRole("button", { name: "Close this unconfirmed send" }),
     ).toHaveCount(0);
     await expect(
-      row.getByRole("button", { name: "Save onboarding draft" }),
+      row.getByRole("button", { name: "Save now" }),
     ).toBeEnabled();
     await expect(
       row.getByRole("region", { name: "What will be sent" }),
@@ -3888,8 +3888,9 @@ test("a save elsewhere while the form is open refreshes Review, and an edited dr
     });
     await row.getByRole("button", { name: "Edit draft", exact: true }).click();
 
-    // Edited here, then saved elsewhere: the edits stay, but they were made
-    // on revision 1, so neither Save nor Send may go ahead.
+    // Edited here, then saved elsewhere: the edits stay, both versions show
+    // side by side, and neither Save nor Send may go ahead until the viewer
+    // chooses Keep mine or Use theirs (onb-atlas-save-ux).
     await row.getByLabel("Summary").fill("My unsaved summary");
     const elsewhere = await updateProject(page, project, {
       description:
@@ -3897,32 +3898,27 @@ test("a save elsewhere while the form is open refreshes Review, and an edited dr
     });
     expect(elsewhere.revision).toBe(project.revision + 1);
     await reloadProjects();
-    const conflict = row.getByText(
-      new RegExp(
-        `saved elsewhere \\(now revision ${elsewhere.revision}\\) after you started editing revision ${project.revision}`,
-      ),
-    );
+    const conflict = row.getByRole("region", {
+      name: `Someone else saved revision ${elsewhere.revision}`,
+    });
     await expect(conflict).toBeVisible();
+    const summaryRow = conflict.getByRole("row", { name: /Summary/ });
+    await expect(summaryRow).toContainText("My unsaved summary");
+    await expect(summaryRow).toContainText("Changed by another editor");
     await expect(row.getByLabel("Summary")).toHaveValue("My unsaved summary");
-    await expect(
-      row.getByRole("button", { name: "Save onboarding draft" }),
-    ).toBeDisabled();
+    await expect(row.getByRole("button", { name: "Save now" })).toBeDisabled();
     await row.getByRole("tab", { name: "Review & send" }).click();
     await row.getByLabel("Destination workspace").selectOption("hr-de");
     const sendButton = row.getByRole("button", { name: "Send to FlightDeck" });
     await expect(sendButton).toBeDisabled();
     await expect(
-      row.getByText(/This project was saved elsewhere\. Load the latest/),
+      row.getByText(/This project was saved elsewhere\. Choose Keep mine or Use theirs/),
     ).toBeVisible();
     expect((await latest()).description).toBe(elsewhere.description);
 
-    // Loading the latest version shows exactly what the server would send,
-    // with the free-text warning for it.
-    await row
-      .getByRole("button", {
-        name: `Discard my edits and load revision ${elsewhere.revision}`,
-      })
-      .click();
+    // Use theirs loads the latest version: Review shows exactly what the
+    // server would send, with the free-text warning for it.
+    await conflict.getByRole("button", { name: "Use theirs" }).click();
     await expect(conflict).toHaveCount(0);
     const review = row.getByRole("region", { name: "What will be sent" });
     await expect(review).toContainText("Jane Doe");
@@ -4004,7 +4000,7 @@ test("Review warns about personal details in free text and blocks them in every 
         /Atlas will not send an email address or phone number here/,
       ),
     ).toBeVisible();
-    await row.getByRole("button", { name: "Save onboarding draft" }).click();
+    await row.getByRole("button", { name: "Save now" }).click();
     await expect(
       page.getByRole("status").filter({ hasText: "Onboarding draft saved" }),
     ).toBeVisible();
@@ -4313,7 +4309,7 @@ test("the form stays read-only until Atlas knows FlightDeck does not hold the dr
     });
     await row.getByRole("button", { name: "Edit draft", exact: true }).click();
     const name = row.getByLabel("Proposed OS project name");
-    const save = row.getByRole("button", { name: "Save onboarding draft" });
+    const save = row.getByRole("button", { name: "Save now" });
     // Still loading: FlightDeck may hold this draft, so nothing may change.
     await statusGate.reached;
     await expect(row.getByText("Checking FlightDeck status")).toBeVisible();

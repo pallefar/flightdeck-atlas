@@ -106,6 +106,35 @@ export const en = {
   // The Connections list row, before a project has a stage.
   "onb.row.draftPrepared": "Draft prepared",
   "onb.row.notPrepared": "Not prepared",
+  // The onboarding autosave (onb-atlas-save-ux): pill, leave guard, conflict.
+  "onb.autosave.label": "Autosave",
+  "onb.autosave.idle": "All changes saved (revision {revision})",
+  "onb.autosave.pending": "Changes not saved yet",
+  "onb.autosave.saving": "Saving…",
+  "onb.autosave.saved": "Saved {time} (revision {revision})",
+  "onb.autosave.retrying": "Not saved, retrying in {seconds} s",
+  "onb.autosave.conflict": "Not saved: someone else saved this draft",
+  "onb.autosave.locked":
+    "Not saved: FlightDeck may hold this draft, so it stays as it was sent",
+  "onb.autosave.refused": "Not saved: {error}",
+  "onb.autosave.basics": "Basics not saved yet: use Save now",
+  "onb.autosave.saveNow": "Save now",
+  "onb.autosave.leave":
+    "Some onboarding changes are not saved yet. Leave anyway and lose them?",
+  "onb.conflict.title": "Someone else saved revision {revision}",
+  "onb.conflict.recoveredTitle": "Unsaved changes from before the reload",
+  "onb.conflict.loading": "Loading the other version…",
+  "onb.conflict.unavailable":
+    "The other version could not be loaded. Your changes are kept here; Atlas tries again when you choose.",
+  "onb.conflict.intro":
+    "Your changes are kept in this browser tab until you choose. Keep mine puts your values back on top of revision {revision} and saves them; Use theirs discards your changes.",
+  "onb.conflict.field": "Field",
+  "onb.conflict.yours": "Yours",
+  "onb.conflict.theirs": "Theirs",
+  "onb.conflict.empty": "(empty)",
+  "onb.conflict.same": "Both versions hold the same values.",
+  "onb.conflict.keepMine": "Keep mine (re-apply on top)",
+  "onb.conflict.useTheirs": "Use theirs",
 } as const;
 
 export type MessageKey = keyof typeof en;

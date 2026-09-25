@@ -108,4 +108,36 @@ export const de: Record<MessageKey, string> = {
     "FlightDeck hat die Inbound-Zugangsdaten von Atlas abgelehnt. Es wird nichts angezeigt.",
   "onb.row.draftPrepared": "Entwurf vorbereitet",
   "onb.row.notPrepared": "Nicht vorbereitet",
+  "onb.autosave.label": "Automatisches Speichern",
+  "onb.autosave.idle": "Alle Änderungen gespeichert (Revision {revision})",
+  "onb.autosave.pending": "Änderungen noch nicht gespeichert",
+  "onb.autosave.saving": "Wird gespeichert…",
+  "onb.autosave.saved": "Gespeichert {time} (Revision {revision})",
+  "onb.autosave.retrying":
+    "Nicht gespeichert, neuer Versuch in {seconds} s",
+  "onb.autosave.conflict":
+    "Nicht gespeichert: Jemand anderes hat diesen Entwurf gespeichert",
+  "onb.autosave.locked":
+    "Nicht gespeichert: FlightDeck hält diesen Entwurf möglicherweise, daher bleibt er wie gesendet",
+  "onb.autosave.refused": "Nicht gespeichert: {error}",
+  "onb.autosave.basics":
+    "Grunddaten noch nicht gespeichert: Jetzt speichern verwenden",
+  "onb.autosave.saveNow": "Jetzt speichern",
+  "onb.autosave.leave":
+    "Einige Onboarding-Änderungen sind noch nicht gespeichert. Trotzdem verlassen und sie verlieren?",
+  "onb.conflict.title": "Jemand anderes hat Revision {revision} gespeichert",
+  "onb.conflict.recoveredTitle":
+    "Nicht gespeicherte Änderungen von vor dem Neuladen",
+  "onb.conflict.loading": "Die andere Version wird geladen…",
+  "onb.conflict.unavailable":
+    "Die andere Version konnte nicht geladen werden. Ihre Änderungen bleiben hier erhalten; Atlas versucht es erneut, wenn Sie wählen.",
+  "onb.conflict.intro":
+    "Ihre Änderungen bleiben in diesem Browser-Tab erhalten, bis Sie wählen. „Meine behalten“ setzt Ihre Werte wieder auf Revision {revision} und speichert sie; „Andere Version übernehmen“ verwirft Ihre Änderungen.",
+  "onb.conflict.field": "Feld",
+  "onb.conflict.yours": "Ihre Version",
+  "onb.conflict.theirs": "Andere Version",
+  "onb.conflict.empty": "(leer)",
+  "onb.conflict.same": "Beide Versionen enthalten dieselben Werte.",
+  "onb.conflict.keepMine": "Meine behalten (darüber anwenden)",
+  "onb.conflict.useTheirs": "Andere Version übernehmen",
 };
