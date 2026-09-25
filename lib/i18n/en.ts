@@ -203,6 +203,43 @@ export const en = {
   "onb.starter.applied": "Applied starter {name}, version {version}.",
   "onb.starter.undo": "Undo",
   "onb.card.rowLink": "FlightDeck card",
+  // Ask and send (onb-atlas-request-ui, plan 2026-09-25 J3).
+  "onb.ask.button": "Ask Super Admin to send revision {revision}",
+  "onb.ask.waiting": "Waiting for Super Admin (revision {revision})",
+  "onb.ask.waiting.text":
+    "You asked the Atlas Super Admin to send revision {revision}. They choose the destination and send it; nothing is sent until they do.",
+  "onb.ask.changed": "Changed since you asked: ask again",
+  "onb.ask.changed.text":
+    "The draft changed after you asked for revision {revision}. Ask again so the Super Admin sends what you see now.",
+  "onb.ask.withdraw": "Withdraw the request",
+  "onb.ask.theirs.text":
+    "{by} asked the Atlas Super Admin to send revision {revision}. Only {by} or the Super Admin can withdraw the request; nothing is sent until the Super Admin sends it.",
+  "onb.ask.theirs.changed": "Changed since {by} asked: ask again",
+  "onb.ask.theirs.changed.text":
+    "The draft changed after {by} asked for revision {revision}. Ask again so the Super Admin sends what you see now.",
+  "onb.ask.asked":
+    "Asked the Super Admin to send revision {revision}. Nothing has been sent to FlightDeck.",
+  "onb.ask.withdrawn":
+    "Request withdrawn. Nothing was sent to FlightDeck.",
+  "onb.ask.saveFirst":
+    "Save the draft first: the Super Admin sends the saved revision.",
+  "onb.ask.notReady":
+    "Complete your details first ({done} of {total} for you).",
+  "onb.ask.failed": "The request could not be saved. Try again.",
+  "onb.waiting.title": "Waiting for you ({count})",
+  "onb.waiting.row": "{by} asked to send revision {revision}",
+  "onb.waiting.changed": "Changed since asked",
+  "onb.waiting.review": "Review and send",
+  "onb.waiting.card": "Waiting for you: send revision {revision}",
+  "onb.diff.title": "Changed since revision {revision}",
+  "onb.diff.field": "Field",
+  "onb.diff.asked": "Asked (revision {revision})",
+  "onb.diff.now": "Now (revision {current})",
+  "onb.diff.none":
+    "No sent field differs from the asked revision; only the revision number moved.",
+  "onb.diff.unknown":
+    "Atlas kept no copy of revision {revision}, so it cannot list the changes. Review every field in What will be sent.",
+  "onb.diff.empty": "(empty)",
   // The waiting view (onb-atlas-status-timeline, plan 2026-09-25 J4).
   "onb.observed.aria": "What Atlas saw",
   "onb.observed.row": "{stage}: {seen}",

@@ -51,6 +51,7 @@ import {
   workWaitingForFlightDeck,
   type ConnectionView,
 } from "@/lib/flightdeck/connection";
+import { waitingForYou } from "@/lib/flightdeck/ask";
 /** The one connection line's source: the credential's whoami, through
  * /api/flightdeck/connection. Anything unreadable is "check_failed". */
 async function fetchConnection(fresh: boolean): Promise<ConnectionView> {
@@ -83,6 +84,8 @@ export default function FlightDeckConnection({
   onOpen,
   onSave,
   viewerId = "",
+  viewerEmail = "",
+  requesterRequests = false,
   onProjectSaved,
   onImported,
 }: {
@@ -98,6 +101,11 @@ export default function FlightDeckConnection({
   ) => Promise<Project | null>;
   /** Who is viewing (the onboarding form holds unsaved work per viewer). */
   viewerId?: string;
+  /** The signed-in email: only the asker is offered Withdraw on an ask. */
+  viewerEmail?: string;
+  /** ATLAS_REQUESTER_REQUESTS: editors may ask the Super Admin to send, so
+   * the Super Admin sees "Waiting for you (n)". Off: as before. */
+  requesterRequests?: boolean;
   /** The onboarding form's autosave landed. */
   onProjectSaved?: (project: Project) => void;
   onImported: () => Promise<void>;
@@ -191,6 +199,21 @@ export default function FlightDeckConnection({
   const local = projects.filter((p) => !p.archived && p.source === "atlas");
   const prepared = local.filter((p) => p.flightdeckDraft);
   const waiting = workWaitingForFlightDeck(local, onboarding.stages);
+  // The editors' open asks (plan J3): only the Super Admin is asked.
+  const asks = superAdmin
+    ? waitingForYou(local, onboarding.stages, requesterRequests)
+    : [];
+  function reviewAsk(id: string) {
+    if (editing && editing !== id && !confirmLeave()) return;
+    setQuery("");
+    setEditing(id);
+    setMessage("");
+    requestAnimationFrame(() =>
+      document
+        .getElementById(`fd-row-${id}`)
+        ?.scrollIntoView({ block: "start" }),
+    );
+  }
   // Latched during render (not in an effect): once work has waited, a
   // later stage load that shows it sent does not flip the page away.
   if (waiting && chosenTab === null) setTab("onboard");
@@ -374,6 +397,43 @@ export default function FlightDeckConnection({
               onChange={(e) => setQuery(e.target.value)}
             />
           </label>
+          {!!asks.length && (
+            <section
+              className="fd-waiting-you"
+              aria-labelledby="fd-waiting-you-title"
+            >
+              <h3 id="fd-waiting-you-title">
+                {t("onb.waiting.title", locale, { count: asks.length })}
+              </h3>
+              <ul>
+                {asks.map((a) => (
+                  <li key={a.project.id} className="bridge-row">
+                    <div>
+                      <strong>{a.project.name}</strong>
+                      <p>
+                        {t("onb.waiting.row", locale, {
+                          by: a.by,
+                          revision: a.revision,
+                        })}
+                        {a.stale && (
+                          <span className="status planning">
+                            {t("onb.waiting.changed", locale)}
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => reviewAsk(a.project.id)}
+                    >
+                      {t("onb.waiting.review", locale)}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           {!local.length && (
             <div className="hub-empty">
               <h3>Start with an Atlas project</h3>
@@ -410,7 +470,11 @@ export default function FlightDeckConnection({
                 : lockNote(stage);
             const reasonId = `fd-lock-${p.id}`;
             return (
-              <article className="bridge-project" key={p.id}>
+              <article
+                className="bridge-project"
+                key={p.id}
+                id={`fd-row-${p.id}`}
+              >
                 <div className="bridge-row">
                   <div>
                     <button
@@ -487,6 +551,8 @@ export default function FlightDeckConnection({
                     contextState={superAdmin ? context.state : null}
                     onSave={onSave}
                     viewerId={viewerId}
+                    viewerEmail={viewerEmail}
+                    requesterRequests={requesterRequests}
                     onAutosaved={onProjectSaved}
                     onClose={() => setEditing(null)}
                     onMessage={setMessage}

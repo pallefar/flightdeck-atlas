@@ -202,6 +202,44 @@ export const de: Record<MessageKey, string> = {
   "onb.starter.applied": "Vorlage {name}, Version {version} übernommen.",
   "onb.starter.undo": "Rückgängig",
   "onb.card.rowLink": "FlightDeck-Karte",
+  // Anfragen und Senden (onb-atlas-request-ui, Plan 2026-09-25 J3).
+  "onb.ask.button": "Super-Admin bitten, Revision {revision} zu senden",
+  "onb.ask.waiting": "Wartet auf den Super-Admin (Revision {revision})",
+  "onb.ask.waiting.text":
+    "Sie haben den Atlas-Super-Admin gebeten, Revision {revision} zu senden. Er wählt das Ziel und sendet; bis dahin wird nichts gesendet.",
+  "onb.ask.changed": "Seit Ihrer Anfrage geändert: erneut anfragen",
+  "onb.ask.changed.text":
+    "Der Entwurf wurde geändert, nachdem Sie Revision {revision} angefragt haben. Fragen Sie erneut an, damit der Super-Admin sendet, was Sie jetzt sehen.",
+  "onb.ask.withdraw": "Anfrage zurückziehen",
+  "onb.ask.theirs.text":
+    "{by} hat den Atlas-Super-Admin gebeten, Revision {revision} zu senden. Nur {by} oder der Super-Admin kann die Anfrage zurückziehen; bis der Super-Admin sendet, wird nichts gesendet.",
+  "onb.ask.theirs.changed": "Seit der Anfrage von {by} geändert: erneut anfragen",
+  "onb.ask.theirs.changed.text":
+    "Der Entwurf wurde geändert, nachdem {by} Revision {revision} angefragt hat. Fragen Sie erneut an, damit der Super-Admin sendet, was Sie jetzt sehen.",
+  "onb.ask.asked":
+    "Der Super-Admin wurde gebeten, Revision {revision} zu senden. An FlightDeck wurde nichts gesendet.",
+  "onb.ask.withdrawn":
+    "Anfrage zurückgezogen. An FlightDeck wurde nichts gesendet.",
+  "onb.ask.saveFirst":
+    "Speichern Sie zuerst den Entwurf: Der Super-Admin sendet die gespeicherte Revision.",
+  "onb.ask.notReady":
+    "Vervollständigen Sie zuerst Ihre Angaben ({done} von {total} für Sie).",
+  "onb.ask.failed":
+    "Die Anfrage konnte nicht gespeichert werden. Versuchen Sie es erneut.",
+  "onb.waiting.title": "Wartet auf Sie ({count})",
+  "onb.waiting.row": "{by} bittet, Revision {revision} zu senden",
+  "onb.waiting.changed": "Seit der Anfrage geändert",
+  "onb.waiting.review": "Prüfen und senden",
+  "onb.waiting.card": "Wartet auf Sie: Revision {revision} senden",
+  "onb.diff.title": "Geändert seit Revision {revision}",
+  "onb.diff.field": "Feld",
+  "onb.diff.asked": "Angefragt (Revision {revision})",
+  "onb.diff.now": "Jetzt (Revision {current})",
+  "onb.diff.none":
+    "Kein gesendetes Feld weicht von der angefragten Revision ab; nur die Revisionsnummer hat sich geändert.",
+  "onb.diff.unknown":
+    "Atlas hat keine Kopie von Revision {revision} behalten und kann die Änderungen nicht auflisten. Prüfen Sie jedes Feld unter „What will be sent“.",
+  "onb.diff.empty": "(leer)",
   // Die Warteansicht (onb-atlas-status-timeline, Plan 2026-09-25 J4).
   "onb.observed.aria": "Was Atlas gesehen hat",
   "onb.observed.row": "{stage}: {seen}",

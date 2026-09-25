@@ -21,6 +21,7 @@ import {
   onboardingMetricsEnabled,
 } from "@/lib/server-projects";
 import { recordDraftSave } from "@/lib/flightdeck/metrics";
+import { askSnapshot } from "@/lib/flightdeck/ask";
 import { projectFor, activeProjectPeople } from "@/lib/project-access";
 import {
   DRAFT_NOT_HELD_SQL,
@@ -446,6 +447,10 @@ async function sendRequestActionRoute(
       canEdit: authorized.rights.edit,
       held: await draftHeld(db, id),
       at: updatedAt,
+      // The asked revision's sent fields, so a later change shows the Super
+      // Admin a field diff before Send (onb-atlas-request-ui). Only an ask
+      // for the current revision is written, so this is that revision.
+      ...(action === "ask" ? { fields: askSnapshot(previous) } : {}),
     });
     if (!outcome.ok)
       return json(

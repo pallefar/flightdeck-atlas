@@ -3,6 +3,7 @@
 // state follows the project's draft and the approved status projection
 // (projectStatus in onboard-route.ts), never a raw OS status. Pure, so the
 // rules are tested without a browser; app/flightdeck-project-card.tsx renders it.
+import { requesterAsk } from "./ask";
 import {
   readinessFor,
   type OnboardingStage,
@@ -47,6 +48,14 @@ export type CardView =
       stage: OnboardingStage;
       reasonCode: string | null;
       checkedAt: string | null;
+    }
+  | {
+      /** An editor's open ask to the Super Admin (ATLAS_REQUESTER_REQUESTS
+       * on): 'Waiting for Super Admin', or 'Changed since you asked' once the
+       * draft changed after it. */
+      kind: "asked";
+      revision: number;
+      stale: boolean;
     }
   | { kind: "fix"; reasonCode: string | null }
   | { kind: "created"; stage: OnboardingStage; openHref: string | null };
@@ -93,6 +102,9 @@ export function projectCardView(input: {
   failed: boolean;
   superAdmin: boolean;
   osOrigin: string;
+  /** ATLAS_REQUESTER_REQUESTS: off, an ask never shows (the card is as
+   * before the flag existed). */
+  requesterRequests?: boolean;
 }): CardView {
   const { project, status } = input;
   if (!status) return { kind: input.failed ? "unavailable" : "checking" };
@@ -119,6 +131,11 @@ export function projectCardView(input: {
         openHref: openInFlightDeckHref(status, input.superAdmin, input.osOrigin),
       };
   }
+  const ask = input.requesterRequests
+    ? requesterAsk(project.onboarding, stage)
+    : ({ kind: "none" } as const);
+  if (ask.kind !== "none")
+    return { kind: "asked", revision: ask.revision, stale: ask.kind === "changed" };
   if (!project.flightdeckDraft) return { kind: "prepare" };
   // 'n of N for you': the requester's items. The destination is the Super
   // Admin's and is chosen at Send, so it is not counted on the card.
