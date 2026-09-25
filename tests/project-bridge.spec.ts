@@ -3575,7 +3575,9 @@ test("the stepper counts an editor's own items, Next stops with a focused error 
   await page.route(/\/api\/projects(\?.*)?$/, async (route) => {
     if (route.request().method() !== "GET") return route.fallback();
     const response = await route.fetch();
-    const body = (await response.json()) as { access?: { superAdmin: boolean } };
+    const body = (await response.json()) as {
+      access?: { superAdmin: boolean };
+    };
     return route.fulfill({
       response,
       json: {
@@ -3764,9 +3766,7 @@ test("a project FlightDeck has created reads as held, not as a draft under revie
     ).toBeVisible();
     await stepButton(row, "Basics").click();
     await expect(row.getByLabel("Summary")).toBeDisabled();
-    await expect(
-      row.getByRole("button", { name: "Save now" }),
-    ).toBeDisabled();
+    await expect(row.getByRole("button", { name: "Save now" })).toBeDisabled();
   } finally {
     await removeProject(page, project.id);
   }
@@ -3878,9 +3878,7 @@ test("the Super Admin can close an unconfirmed send from the form, and the draft
     });
     await row.getByRole("button", { name: "Edit draft", exact: true }).click();
     // Locked while the send is unconfirmed; Retry is the normal way on.
-    await expect(
-      row.getByRole("button", { name: "Save now" }),
-    ).toBeDisabled();
+    await expect(row.getByRole("button", { name: "Save now" })).toBeDisabled();
     await stepButton(row, "Review & send").click();
     await expect(row.getByRole("button", { name: "Retry send" })).toBeEnabled();
     // Closing asks first and says what it means.
@@ -3915,9 +3913,7 @@ test("the Super Admin can close an unconfirmed send from the form, and the draft
     await expect(
       row.getByRole("button", { name: "Close this unconfirmed send" }),
     ).toHaveCount(0);
-    await expect(
-      row.getByRole("button", { name: "Save now" }),
-    ).toBeEnabled();
+    await expect(row.getByRole("button", { name: "Save now" })).toBeEnabled();
     await expect(
       row.getByRole("region", { name: "What will be sent" }),
     ).toBeVisible();
@@ -4380,7 +4376,9 @@ test("a save elsewhere while the form is open refreshes Review, and an edited dr
     const sendButton = row.getByRole("button", { name: "Send to FlightDeck" });
     await expect(sendButton).toBeDisabled();
     await expect(
-      row.getByText(/This project was saved elsewhere\. Choose Keep mine or Use theirs/),
+      row.getByText(
+        /This project was saved elsewhere\. Choose Keep mine or Use theirs/,
+      ),
     ).toBeVisible();
     expect((await latest()).description).toBe(elsewhere.description);
 
@@ -5017,10 +5015,33 @@ test("an onboarding-scoped save changes only the onboarding field, merges over o
   }
 });
 
-// onb-atlas-ask-persistence. The flag is read from this process's
-// environment, which is the one the dev server under test was started with
-// (run both with or without ATLAS_REQUESTER_REQUESTS=true).
-test("the send request marker: refused 400 on both save paths while ATLAS_REQUESTER_REQUESTS is off; stored, kept and marked stale in the same write while it is on", async ({
+// onb-atlas-ask-persistence + onb-atlas-ask-withdraw. The flag is read from
+// this process's environment, which is the one the dev server under test was
+// started with (run both with or without ATLAS_REQUESTER_REQUESTS=true).
+type MarkerReply = {
+  status: number;
+  body: { project?: Project; code?: string; revision?: number };
+};
+const projectPut = (page: Page, id: string, body: Record<string, unknown>) =>
+  page.evaluate(
+    async ({ id, body }) => {
+      const r = await fetch(`/api/projects/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return { status: r.status, body: await r.json() } as MarkerReply;
+    },
+    { id, body },
+  );
+const askAction = (
+  page: Page,
+  id: string,
+  action: "ask" | "withdraw",
+  revision: number,
+) => projectPut(page, id, { scope: "onboarding", action, revision });
+
+test("the send request marker: saves never write it (400 while the flag is off, send_request_action while on); a save keeps it and marks it stale in the same write", async ({
   page,
 }) => {
   const on = process.env.ATLAS_REQUESTER_REQUESTS?.trim() === "true";
@@ -5030,45 +5051,28 @@ test("the send request marker: refused 400 on both save paths while ATLAS_REQUES
     onboarding: { countryCode: "DE" },
   });
   const put = (body: Record<string, unknown>) =>
-    page.evaluate(
-      async ({ id, body }) => {
-        const r = await fetch(`/api/projects/${id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        return {
-          status: r.status,
-          body: (await r.json()) as {
-            project?: Project;
-            code?: string;
-          },
-        };
-      },
-      { id: created.id, body },
-    );
+    projectPut(page, created.id, body);
   const ask = {
     revision: 1,
     by: "seedy@sites.test",
     at: "2026-09-25T10:00:00.000Z",
   };
+  const refusal = on ? "send_request_action" : "requester_requests_off";
   try {
+    const scoped = await put({
+      scope: "onboarding",
+      baseRevision: 1,
+      onboarding: { countryCode: "DE", sendRequest: ask },
+    });
+    expect(scoped).toMatchObject({ status: 400, body: { code: refusal } });
+    const whole = await put({
+      ...created,
+      activity: undefined,
+      onboarding: { countryCode: "DE", sendRequest: ask },
+    });
+    expect(whole).toMatchObject({ status: 400, body: { code: refusal } });
     if (!on) {
-      const scoped = await put({
-        scope: "onboarding",
-        baseRevision: 1,
-        onboarding: { countryCode: "DE", sendRequest: ask },
-      });
-      expect(scoped).toMatchObject({
-        status: 400,
-        body: { code: "requester_requests_off" },
-      });
-      const whole = await put({
-        ...created,
-        activity: undefined,
-        onboarding: { countryCode: "DE", sendRequest: ask },
-      });
-      expect(whole).toMatchObject({
+      expect(await askAction(page, created.id, "ask", 1)).toMatchObject({
         status: 400,
         body: { code: "requester_requests_off" },
       });
@@ -5082,26 +5086,11 @@ test("the send request marker: refused 400 on both save paths while ATLAS_REQUES
       expect(after.body.project?.onboarding?.sendRequest).toBeUndefined();
       return;
     }
-    // Asking in someone else's name is refused.
-    expect(
-      (
-        await put({
-          scope: "onboarding",
-          baseRevision: 1,
-          onboarding: {
-            countryCode: "DE",
-            sendRequest: { ...ask, by: "someone@else.test" },
-          },
-        })
-      ).body.code,
-    ).toBe("send_request_actor");
-    const asked = await put({
-      scope: "onboarding",
-      baseRevision: 1,
-      onboarding: { countryCode: "DE", sendRequest: { ...ask, stale: true } },
-    });
+    const asked = await askAction(page, created.id, "ask", 1);
     expect(asked.status).toBe(200);
-    expect(asked.body.project?.onboarding?.sendRequest).toEqual(ask);
+    const marker = asked.body.project!.onboarding!.sendRequest!;
+    expect(marker).toMatchObject({ revision: 1, by: "seedy@sites.test" });
+    expect(marker.stale).toBeUndefined();
     // A later onboarding-scoped save that omits the marker keeps it and
     // marks it stale in the same write.
     const edited = await put({
@@ -5112,18 +5101,156 @@ test("the send request marker: refused 400 on both save paths while ATLAS_REQUES
     expect(edited.status).toBe(200);
     expect(edited.body.project?.onboarding).toEqual({
       countryCode: "FR",
-      sendRequest: { ...ask, stale: true },
+      sendRequest: { ...marker, stale: true },
     });
   } finally {
     await removeProject(page, created.id);
   }
 });
 
-// onb-atlas-ask-persistence, fix round 2: creating a project applies the
-// same marker rules as a save (flag, asker, server-owned stale), and a
+// onb-atlas-ask-withdraw: the revision-bound ask and withdraw actions on the
+// onboarding-scoped PUT. The dev server's signed-in user is the Super Admin
+// (ATLAS_SUPERADMIN_EMAIL), so "another editor gets 403" is proven in
+// flightdeck-send-request.spec.ts, where the rights are inputs.
+test("ask binds to the revision the asker saw, asking again replaces a stale ask, withdraw names the ask, and a locked draft refuses both", async ({
+  page,
+}) => {
+  test.skip(
+    process.env.ATLAS_REQUESTER_REQUESTS?.trim() !== "true",
+    "Needs ATLAS_REQUESTER_REQUESTS=true on the server under test.",
+  );
+  await page.goto("/");
+  const created = await createProject(page, {
+    name: qa("Ask Withdraw"),
+    onboarding: { countryCode: "DE" },
+  });
+  try {
+    // Only the action and its revision ride along.
+    expect(
+      (
+        await projectPut(page, created.id, {
+          scope: "onboarding",
+          action: "ask",
+          revision: 1,
+          onboarding: { countryCode: "FR" },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await projectPut(page, created.id, {
+          scope: "onboarding",
+          action: "send",
+          revision: 1,
+        })
+      ).status,
+    ).toBe(400);
+    // Not the revision the project is at: 409 with the current one.
+    expect(await askAction(page, created.id, "ask", 2)).toMatchObject({
+      status: 409,
+      body: { code: "revision_changed", revision: 1 },
+    });
+    // Nothing open to withdraw yet.
+    expect(await askAction(page, created.id, "withdraw", 1)).toMatchObject({
+      status: 409,
+      body: { code: "send_request_none" },
+    });
+    const asked = await askAction(page, created.id, "ask", 1);
+    expect(asked.status).toBe(200);
+    expect(asked.body.project).toMatchObject({
+      revision: 2,
+      onboarding: {
+        countryCode: "DE",
+        sendRequest: { revision: 1, by: "seedy@sites.test" },
+      },
+    });
+    // An edit after the ask marks it stale; asking again about the edited
+    // revision replaces the marker with a fresh one.
+    const edited = await projectPut(page, created.id, {
+      scope: "onboarding",
+      baseRevision: 2,
+      onboarding: { countryCode: "FR" },
+    });
+    expect(edited.body.project?.onboarding?.sendRequest?.stale).toBe(true);
+    expect(await askAction(page, created.id, "ask", 2)).toMatchObject({
+      status: 409,
+      body: { code: "revision_changed", revision: 3 },
+    });
+    const again = await askAction(page, created.id, "ask", 3);
+    expect(again.status).toBe(200);
+    const fresh = again.body.project!.onboarding!.sendRequest!;
+    expect(fresh).toMatchObject({ revision: 3, by: "seedy@sites.test" });
+    expect(fresh.stale).toBeUndefined();
+    // An onboarding-scoped save based on a revision before the ask is
+    // refused, so an old copy cannot merge over the marker.
+    expect(
+      (
+        await projectPut(page, created.id, {
+          scope: "onboarding",
+          baseRevision: 3,
+          onboarding: { countryCode: "AT" },
+        })
+      ).status,
+    ).toBe(409);
+    // Withdraw names the open ask's revision.
+    expect(await askAction(page, created.id, "withdraw", 1)).toMatchObject({
+      status: 409,
+      body: { code: "revision_changed", revision: 3 },
+    });
+    const withdrawn = await askAction(page, created.id, "withdraw", 3);
+    expect(withdrawn.status).toBe(200);
+    expect(withdrawn.body.project?.onboarding?.sendRequest).toMatchObject({
+      revision: 3,
+      withdrawnAt: expect.any(String),
+    });
+    expect(await askAction(page, created.id, "withdraw", 3)).toMatchObject({
+      status: 409,
+      body: { code: "send_request_none" },
+    });
+    // A draft FlightDeck may hold (a send in flight or done) refuses both.
+    const at = withdrawn.body.project!.revision;
+    const reasked = await askAction(page, created.id, "ask", at);
+    expect(reasked.status).toBe(200);
+    devDb((db) =>
+      db
+        .prepare(
+          "INSERT INTO atlas_flightdeck_operations (id,atlas_project_id,atlas_revision,idempotency_key,destination_workspace_id,proposed_label,state,setup_state,created_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        )
+        .run(
+          `op-${created.id}`,
+          created.id,
+          at,
+          crypto.randomUUID(),
+          "hr-de",
+          qa("Ask Withdraw"),
+          "linked",
+          "complete",
+          "qa",
+          new Date().toISOString(),
+        ),
+    );
+    expect(
+      await askAction(page, created.id, "ask", reasked.body.project!.revision),
+    ).toMatchObject({ status: 409, body: { code: "draft_locked" } });
+    expect(await askAction(page, created.id, "withdraw", at)).toMatchObject({
+      status: 409,
+      body: { code: "draft_locked" },
+    });
+  } finally {
+    devDb((db) =>
+      db
+        .prepare("DELETE FROM atlas_flightdeck_operations WHERE id=?")
+        .run(`op-${created.id}`),
+    );
+    await removeProject(page, created.id);
+  }
+});
+
+// onb-atlas-ask-persistence, fix round 2 (+ onb-atlas-ask-withdraw): a new
+// project cannot carry a marker (asking is its own action), and a
 // whole-project save that changes only the FlightDeck draft label marks an
 // open ask stale.
-test("the send request marker on project creation follows the save rules, and a label-only whole save marks the ask stale", async ({
+test("the send request marker on project creation is refused, and a label-only whole save marks the ask stale", async ({
   page,
 }) => {
   const on = process.env.ATLAS_REQUESTER_REQUESTS?.trim() === "true";
@@ -5150,58 +5277,32 @@ test("the send request marker on project creation follows the save rules, and a 
     );
   const made: string[] = [];
   try {
-    if (!on) {
-      const refused = await post({
-        onboarding: { countryCode: "DE", sendRequest: ask },
-      });
-      if (refused.body.project) made.push(refused.body.project.id);
-      expect(refused).toMatchObject({
-        status: 400,
-        body: { code: "requester_requests_off" },
-      });
-      return;
-    }
-    const impersonated = await post({
-      onboarding: {
-        countryCode: "DE",
-        sendRequest: { ...ask, by: "someone@else.test" },
-      },
+    const refused = await post({
+      onboarding: { countryCode: "DE", sendRequest: ask },
     });
-    if (impersonated.body.project) made.push(impersonated.body.project.id);
-    expect(impersonated).toMatchObject({
+    if (refused.body.project) made.push(refused.body.project.id);
+    expect(refused).toMatchObject({
       status: 400,
-      body: { code: "send_request_actor" },
+      body: { code: on ? "send_request_action" : "requester_requests_off" },
     });
+    if (!on) return;
     const created = await post({
       flightdeckDraft: { label: "Acme rollout", workspaceHint: "acme" },
-      onboarding: { countryCode: "DE", sendRequest: { ...ask, stale: true } },
+      onboarding: { countryCode: "DE" },
     });
     if (created.body.project) made.push(created.body.project.id);
     expect(created.status).toBe(201);
-    // `stale` is the server's: a client-sent value is dropped on create.
-    expect(created.body.project?.onboarding?.sendRequest).toEqual(ask);
-    const project = created.body.project!;
-    const relabelled = await page.evaluate(
-      async (body) => {
-        const r = await fetch(`/api/projects/${body.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        return {
-          status: r.status,
-          body: (await r.json()) as { project?: Project },
-        };
-      },
-      {
-        ...project,
-        activity: undefined,
-        flightdeckDraft: { label: "Acme rollout 2", workspaceHint: "acme" },
-      },
-    );
+    const asked = await askAction(page, created.body.project!.id, "ask", 1);
+    expect(asked.status).toBe(200);
+    const project = asked.body.project!;
+    const relabelled = await projectPut(page, project.id, {
+      ...project,
+      activity: undefined,
+      flightdeckDraft: { label: "Acme rollout 2", workspaceHint: "acme" },
+    });
     expect(relabelled.status).toBe(200);
     expect(relabelled.body.project?.onboarding?.sendRequest).toEqual({
-      ...ask,
+      ...project.onboarding!.sendRequest!,
       stale: true,
     });
   } finally {
@@ -5217,44 +5318,32 @@ test("a whole-project save that changes only a sent profile field marks the ask 
     "Needs ATLAS_REQUESTER_REQUESTS=true on the server under test.",
   );
   await page.goto("/");
-  const ask = {
-    revision: 1,
-    by: "seedy@sites.test",
-    at: "2026-09-25T10:00:00.000Z",
-  };
-  const project = await createProject(page, {
+  const created = await createProject(page, {
     name: qa("Send Request Profile"),
     description: "Summary",
     benefit: "Measure",
     functionArea: "HR",
     flightdeckDraft: { label: "Acme rollout", workspaceHint: "acme" },
-    onboarding: { countryCode: "DE", sendRequest: ask },
+    onboarding: { countryCode: "DE" },
   });
   try {
-    expect(project.onboarding?.sendRequest).toEqual(ask);
+    const asked = await askAction(page, created.id, "ask", created.revision);
+    expect(asked.status).toBe(200);
+    const project = asked.body.project!;
     // buildOnboardingPayload sends description as profile.summary: the
     // onboarding details and the FlightDeck draft stay exactly as they were.
-    const saved = await page.evaluate(
-      async (body) => {
-        const r = await fetch(`/api/projects/${body.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        return {
-          status: r.status,
-          body: (await r.json()) as { project?: Project },
-        };
-      },
-      { ...project, activity: undefined, description: "Summary, rewritten" },
-    );
+    const saved = await projectPut(page, project.id, {
+      ...project,
+      activity: undefined,
+      description: "Summary, rewritten",
+    });
     expect(saved.status).toBe(200);
     expect(saved.body.project?.onboarding?.sendRequest).toEqual({
-      ...ask,
+      ...project.onboarding!.sendRequest!,
       stale: true,
     });
   } finally {
-    await removeProject(page, project.id);
+    await removeProject(page, created.id);
   }
 });
 
