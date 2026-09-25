@@ -173,6 +173,8 @@ export const en = {
   "onb.card.open": "Open in FlightDeck",
   "onb.card.view": "View status",
   "onb.card.close": "Close",
+  "onb.prefill.checklist": "Suggested from the onboarding checklist",
+  "onb.prefill.atlas-project": "Taken from the Atlas project",
   "onb.card.rowLink": "FlightDeck card",
 } as const;
 

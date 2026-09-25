@@ -50,6 +50,7 @@ import {
   NEVER_SENT,
   accessLevels,
   buildOnboardingPayload,
+  applyChecklistSuggestions,
   checklistSuggestions,
   countryName,
   fieldLabel,
@@ -68,6 +69,8 @@ import {
   stepErrors,
   timelineSteps,
   type OnboardingDraft,
+  type SuggestionField,
+  withoutPrefill,
   type OnboardingStage,
   type OnboardingStatus,
   type OnboardingStep,
@@ -178,6 +181,9 @@ function cleanOnboarding(o: OnboardingDraft): OnboardingDraft {
       ? { accessRequested: o.accessRequested }
       : {}),
     ...(o.coworkRequested ? { coworkRequested: true } : {}),
+    ...(o.prefill && Object.keys(o.prefill).length
+      ? { prefill: o.prefill }
+      : {}),
   };
 }
 /** Keeps an optional field absent when it was absent and is still empty,
@@ -1068,7 +1074,31 @@ export function OnboardingEditor({
     value: OnboardingDraft[K],
   ) => editOnboarding({ ...draft.onboarding, [key]: value });
   const setRole = (role: "process" | "data" | "support", value: string) =>
-    setDetail("ownerRoles", { ...draft.onboarding.ownerRoles, [role]: value });
+    editOnboarding({
+      ...withoutPrefill(draft.onboarding, `ownerRoles.${role}`),
+      ownerRoles: { ...draft.onboarding.ownerRoles, [role]: value },
+    });
+  /** A user edit of a field Atlas may prefill: the value is theirs now, so
+   * its provenance chip goes with it. */
+  const setPrefillable = (
+    key: "functionArea" | "description" | "benefit",
+    field: SuggestionField,
+    value: string,
+  ) => {
+    set(key, value);
+    if (draft.onboarding.prefill?.[field])
+      editOnboarding(withoutPrefill(draft.onboarding, field));
+  };
+  /** Where a prefilled value came from, shown while the field holds the
+   * text the prefill put there. */
+  const source = (field: SuggestionField, value: string | undefined) => {
+    const from = draft.onboarding.prefill?.[field];
+    return from && value?.trim() && from.value?.trim() === value.trim() ? (
+      <span className="fd-hint" data-prefill={from.source}>
+        {t(`onb.prefill.${from.source}`, locale)}
+      </span>
+    ) : null;
+  };
   function step(next: OnboardingStep) {
     setSummaryStep(null);
     stepChanged.current = true;
@@ -1097,32 +1127,14 @@ export function OnboardingEditor({
     step(nextStep);
   }
   function applySuggestions() {
-    const next = {
-      ...draft,
-      onboarding: {
-        ...draft.onboarding,
-        ownerRoles: { ...draft.onboarding.ownerRoles },
-      },
-    };
-    let basics = false,
-      roles = false;
-    for (const s of suggestions) {
-      if (s.field === "functionArea") next.functionArea = s.value;
-      else if (s.field === "summary") next.description = s.value;
-      else if (s.field === "successMeasure") next.benefit = s.value;
-      else {
-        next.onboarding.ownerRoles[
-          s.field.slice("ownerRoles.".length) as
-            "process" | "data" | "support"
-        ] = s.value;
-        roles = true;
-        continue;
-      }
-      basics = true;
-    }
+    const next = applyChecklistSuggestions(
+      draft,
+      suggestions,
+      new Date().toISOString(),
+    );
     setDraft(next);
-    if (basics) setBasicsDirty(true);
-    if (roles) editOnboarding(next.onboarding);
+    if (basicsDiffer(next, draft)) setBasicsDirty(true);
+    editOnboarding(next.onboarding);
   }
   /** Keep mine: their version with this form's changes put back on top,
    * saved at once. */
@@ -1697,9 +1709,14 @@ export function OnboardingEditor({
                 list="fd-functions"
                 maxLength={80}
                 value={draft.functionArea}
-                onChange={(e) => set("functionArea", e.target.value)}
+                onChange={(e) =>
+                  setPrefillable("functionArea", "functionArea", e.target.value)
+                }
               />,
-              <Hint text={draft.functionArea} strict />,
+              <>
+                <Hint text={draft.functionArea} strict />
+                {source("functionArea", draft.functionArea)}
+              </>,
             )}
             <datalist id="fd-functions">
               {functions.map((f) => (
@@ -1726,13 +1743,16 @@ export function OnboardingEditor({
                 maxLength={1500}
                 rows={4}
                 value={draft.description}
-                onChange={(e) => set("description", e.target.value)}
+                onChange={(e) =>
+                  setPrefillable("description", "summary", e.target.value)
+                }
               />,
               <>
                 <span className="fd-hint">
                   Context for the OS reviewer. Never put into a prompt.
                 </span>
                 <Hint text={draft.description} />
+                {source("summary", draft.description)}
               </>,
               true,
             )}
@@ -1744,9 +1764,14 @@ export function OnboardingEditor({
                 maxLength={500}
                 rows={2}
                 value={draft.benefit}
-                onChange={(e) => set("benefit", e.target.value)}
+                onChange={(e) =>
+                  setPrefillable("benefit", "successMeasure", e.target.value)
+                }
               />,
-              <Hint text={draft.benefit} />,
+              <>
+                <Hint text={draft.benefit} />
+                {source("successMeasure", draft.benefit)}
+              </>,
               true,
             )}
             {field(
@@ -1934,10 +1959,16 @@ export function OnboardingEditor({
                   value={draft.onboarding.ownerRoles?.[role] ?? ""}
                   onChange={(e) => setRole(role, e.target.value)}
                 />,
-                <Hint
-                  text={draft.onboarding.ownerRoles?.[role] ?? ""}
-                  strict
-                />,
+                <>
+                  <Hint
+                    text={draft.onboarding.ownerRoles?.[role] ?? ""}
+                    strict
+                  />
+                  {source(
+                    `ownerRoles.${role}`,
+                    draft.onboarding.ownerRoles?.[role],
+                  )}
+                </>,
               ),
             )}
             <div className="fd-field fd-wide">

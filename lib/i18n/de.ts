@@ -177,5 +177,7 @@ export const de: Record<MessageKey, string> = {
   "onb.card.open": "In FlightDeck öffnen",
   "onb.card.view": "Status anzeigen",
   "onb.card.close": "Schließen",
+  "onb.prefill.checklist": "Vorschlag aus der Onboarding-Checkliste",
+  "onb.prefill.atlas-project": "Aus dem Atlas-Projekt übernommen",
   "onb.card.rowLink": "FlightDeck-Karte",
 };
