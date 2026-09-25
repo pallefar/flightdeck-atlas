@@ -330,3 +330,52 @@ test("a whole-project save that changes only the FlightDeck draft label marks th
     }),
   ).toEqual({ ok: true, onboarding: previous });
 });
+
+test("a whole-project save that changes a sent profile field marks the ask stale", () => {
+  // buildOnboardingPayload sends description, benefit, functionArea and
+  // category as profile.summary, successMeasure, functionArea and category,
+  // so a change to any of them changes what the Super Admin would send.
+  const previous: OnboardingDraft = { countryCode: "DE", sendRequest: ask };
+  const profile = {
+    description: "Roll out Atlas to the Berlin site.",
+    benefit: "Fewer manual handovers.",
+    functionArea: "Operations",
+    category: "Rollout",
+  };
+  for (const field of Object.keys(profile) as (keyof typeof profile)[])
+    expect(
+      resolveSendRequest({
+        previous,
+        next: { countryCode: "DE", sendRequest: ask },
+        enabled: true,
+        actor: EDITOR,
+        profile: {
+          before: profile,
+          after: { ...profile, [field]: `${profile[field]} (changed)` },
+        },
+      }),
+      field,
+    ).toEqual({
+      ok: true,
+      onboarding: { countryCode: "DE", sendRequest: { ...ask, stale: true } },
+    });
+  // Surrounding whitespace is trimmed before sending, so it is no change;
+  // neither is key order.
+  expect(
+    resolveSendRequest({
+      previous,
+      next: { countryCode: "DE", sendRequest: ask },
+      enabled: true,
+      actor: EDITOR,
+      profile: {
+        before: profile,
+        after: {
+          category: "Rollout ",
+          functionArea: " Operations",
+          benefit: profile.benefit,
+          description: profile.description,
+        },
+      },
+    }),
+  ).toEqual({ ok: true, onboarding: previous });
+});

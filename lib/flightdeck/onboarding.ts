@@ -131,8 +131,11 @@ export type SendRequestOutcome =
  * - `stale` belongs to the server: it sticks for the same ask, and a save
  *   that changes the draft marks an open ask stale in that same write. The
  *   draft is the onboarding details plus the project's `flightdeckDraft`
- *   (its label is sent as target.label), so a whole-project save passes
- *   both copies of it; draftEdited() counts the same two fields.
+ *   (its label is sent as target.label) and its sent profile (description,
+ *   benefit, functionArea and category, see sentProfile()), so a
+ *   whole-project save passes both copies of each. Board fields (status,
+ *   priority, due date, location) are sent as they stand at send time and
+ *   do not stale an ask, just as the lock (draftEdited()) lets them move.
  * - Project creation passes `previous: undefined`: any marker it carries is
  *   a new ask, under the same flag and asker rules. */
 export function resolveSendRequest(input: {
@@ -141,6 +144,7 @@ export function resolveSendRequest(input: {
   enabled: boolean;
   actor: string;
   flightdeckDraft?: { before: unknown; after: unknown };
+  profile?: { before: SentProfileFields; after: SentProfileFields };
 }): SendRequestOutcome {
   const { previous, next, enabled } = input;
   if (!next) return { ok: true, onboarding: next };
@@ -196,7 +200,10 @@ export function resolveSendRequest(input: {
       (draftChanged(draftBefore, draftAfter) ||
         (!!input.flightdeckDraft &&
           canonical(input.flightdeckDraft.before) !==
-            canonical(input.flightdeckDraft.after)))
+            canonical(input.flightdeckDraft.after)) ||
+        (!!input.profile &&
+          canonical(sentProfile(input.profile.before)) !==
+            canonical(sentProfile(input.profile.after))))
     )
       marker.stale = true;
   }
@@ -204,6 +211,18 @@ export function resolveSendRequest(input: {
   if (marker) onboarding.sendRequest = marker;
   return { ok: true, onboarding };
 }
+
+type SentProfileFields = Partial<
+  Pick<Project, "description" | "benefit" | "functionArea" | "category">
+>;
+/** The project fields buildOnboardingPayload sends as the profile's summary,
+ * success measure, function area and category, trimmed as they are sent. */
+const sentProfile = (p: SentProfileFields) => ({
+  description: (p.description ?? "").trim(),
+  benefit: (p.benefit ?? "").trim(),
+  functionArea: (p.functionArea ?? "").trim(),
+  category: (p.category ?? "").trim(),
+});
 
 const canonical = (value: unknown) =>
   JSON.stringify(value ?? null, (_, v: unknown) =>

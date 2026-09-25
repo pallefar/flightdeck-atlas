@@ -149,6 +149,7 @@ export async function PUT(
         before: previous.flightdeckDraft,
         after: fields.flightdeckDraft,
       },
+      profile: { before: previous, after: fields },
     });
     if (!marker.ok)
       return json({ error: marker.error, code: marker.code }, marker.status);

@@ -4745,6 +4745,55 @@ test("the send request marker on project creation follows the save rules, and a 
   }
 });
 
+test("a whole-project save that changes only a sent profile field marks the ask stale", async ({
+  page,
+}) => {
+  test.skip(
+    process.env.ATLAS_REQUESTER_REQUESTS?.trim() !== "true",
+    "Needs ATLAS_REQUESTER_REQUESTS=true on the server under test.",
+  );
+  await page.goto("/");
+  const ask = {
+    revision: 1,
+    by: "seedy@sites.test",
+    at: "2026-09-25T10:00:00.000Z",
+  };
+  const project = await createProject(page, {
+    name: qa("Send Request Profile"),
+    description: "Summary",
+    benefit: "Measure",
+    functionArea: "HR",
+    flightdeckDraft: { label: "Acme rollout", workspaceHint: "acme" },
+    onboarding: { countryCode: "DE", sendRequest: ask },
+  });
+  try {
+    expect(project.onboarding?.sendRequest).toEqual(ask);
+    // buildOnboardingPayload sends description as profile.summary: the
+    // onboarding details and the FlightDeck draft stay exactly as they were.
+    const saved = await page.evaluate(
+      async (body) => {
+        const r = await fetch(`/api/projects/${body.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        return {
+          status: r.status,
+          body: (await r.json()) as { project?: Project },
+        };
+      },
+      { ...project, activity: undefined, description: "Summary, rewritten" },
+    );
+    expect(saved.status).toBe(200);
+    expect(saved.body.project?.onboarding?.sendRequest).toEqual({
+      ...ask,
+      stale: true,
+    });
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
 test("the timeline shows an answered request, every tab's aria-controls names a panel in the page, and Review & send states the open Legal question", async ({
   page,
 }) => {
