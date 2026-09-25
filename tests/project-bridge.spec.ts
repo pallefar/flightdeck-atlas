@@ -4553,6 +4553,108 @@ test("an onboarding-scoped save changes only the onboarding field, merges over o
   }
 });
 
+// onb-atlas-ask-persistence. The flag is read from this process's
+// environment, which is the one the dev server under test was started with
+// (run both with or without ATLAS_REQUESTER_REQUESTS=true).
+test("the send request marker: refused 400 on both save paths while ATLAS_REQUESTER_REQUESTS is off; stored, kept and marked stale in the same write while it is on", async ({
+  page,
+}) => {
+  const on = process.env.ATLAS_REQUESTER_REQUESTS?.trim() === "true";
+  await page.goto("/");
+  const created = await createProject(page, {
+    name: qa("Send Request"),
+    onboarding: { countryCode: "DE" },
+  });
+  const put = (body: Record<string, unknown>) =>
+    page.evaluate(
+      async ({ id, body }) => {
+        const r = await fetch(`/api/projects/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        return {
+          status: r.status,
+          body: (await r.json()) as {
+            project?: Project;
+            code?: string;
+          },
+        };
+      },
+      { id: created.id, body },
+    );
+  const ask = {
+    revision: 1,
+    by: "seedy@sites.test",
+    at: "2026-09-25T10:00:00.000Z",
+  };
+  try {
+    if (!on) {
+      const scoped = await put({
+        scope: "onboarding",
+        baseRevision: 1,
+        onboarding: { countryCode: "DE", sendRequest: ask },
+      });
+      expect(scoped).toMatchObject({
+        status: 400,
+        body: { code: "requester_requests_off" },
+      });
+      const whole = await put({
+        ...created,
+        activity: undefined,
+        onboarding: { countryCode: "DE", sendRequest: ask },
+      });
+      expect(whole).toMatchObject({
+        status: 400,
+        body: { code: "requester_requests_off" },
+      });
+      // Nothing was written.
+      const after = await put({
+        scope: "onboarding",
+        baseRevision: 1,
+        onboarding: { countryCode: "DE" },
+      });
+      expect(after.status).toBe(200);
+      expect(after.body.project?.onboarding?.sendRequest).toBeUndefined();
+      return;
+    }
+    // Asking in someone else's name is refused.
+    expect(
+      (
+        await put({
+          scope: "onboarding",
+          baseRevision: 1,
+          onboarding: {
+            countryCode: "DE",
+            sendRequest: { ...ask, by: "someone@else.test" },
+          },
+        })
+      ).body.code,
+    ).toBe("send_request_actor");
+    const asked = await put({
+      scope: "onboarding",
+      baseRevision: 1,
+      onboarding: { countryCode: "DE", sendRequest: { ...ask, stale: true } },
+    });
+    expect(asked.status).toBe(200);
+    expect(asked.body.project?.onboarding?.sendRequest).toEqual(ask);
+    // A later onboarding-scoped save that omits the marker keeps it and
+    // marks it stale in the same write.
+    const edited = await put({
+      scope: "onboarding",
+      baseRevision: asked.body.project!.revision,
+      onboarding: { countryCode: "FR" },
+    });
+    expect(edited.status).toBe(200);
+    expect(edited.body.project?.onboarding).toEqual({
+      countryCode: "FR",
+      sendRequest: { ...ask, stale: true },
+    });
+  } finally {
+    await removeProject(page, created.id);
+  }
+});
+
 test("the timeline shows an answered request, every tab's aria-controls names a panel in the page, and Review & send states the open Legal question", async ({
   page,
 }) => {

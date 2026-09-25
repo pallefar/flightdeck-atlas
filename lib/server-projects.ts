@@ -6,7 +6,13 @@ import {
   type ProjectFields,
   type ProjectEvent,
 } from "./projects";
-import { onboardingSchema } from "./flightdeck/onboarding";
+import {
+  onboardingSchema,
+  requesterRequestsEnabled,
+} from "./flightdeck/onboarding";
+/** ATLAS_REQUESTER_REQUESTS, read per request: off unless exactly "true". */
+export const requesterRequestsOn = () =>
+  requesterRequestsEnabled(env.ATLAS_REQUESTER_REQUESTS);
 export function database() {
   if (!env.DB)
     throw new Error(
