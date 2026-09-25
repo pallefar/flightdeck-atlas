@@ -71,23 +71,31 @@ export type SendRequest = z.infer<typeof sendRequestSchema>;
 
 /** The fields Atlas may prefill, and where a prefill came from. Only these:
  * works council relevance, legal entity, headcount band and access requests
- * are facts for a human and are never prefilled. */
+ * are facts for a human and are never prefilled. `category` is filled only
+ * by an owner-approved starter (lib/flightdeck/starters.ts). */
 export const prefillFields = [
   "functionArea",
   "summary",
   "successMeasure",
+  "category",
   "ownerRoles.process",
   "ownerRoles.data",
   "ownerRoles.support",
 ] as const;
 export const prefillSources = ["atlas-project", "checklist"] as const;
+/** An owner-approved starter's provenance: `starter:<id>@<version>`. */
+export const STARTER_SOURCE_RE =
+  /^starter:[a-z0-9][a-z0-9-]{0,62}@[1-9][0-9]{0,5}$/;
 /** `value` is the text the prefill put in the field. A save keeps the entry
  * only while the field still holds exactly that text, so the label can never
  * attach to words the user wrote, even when the entry was saved ahead of its
  * value (the onboarding autosave) and the value never followed. */
 export const provenanceSchema = z
   .object({
-    source: z.enum(prefillSources),
+    source: z.union([
+      z.enum(prefillSources),
+      z.string().regex(STARTER_SOURCE_RE),
+    ]),
     at: isoSchema,
     value: z.string().trim().min(1).max(1500).optional(),
   })
@@ -1223,7 +1231,10 @@ export function checklistSuggestions(
 }
 
 type PrefillTarget = Partial<
-  Pick<Project, "functionArea" | "description" | "benefit" | "onboarding">
+  Pick<
+    Project,
+    "functionArea" | "description" | "benefit" | "category" | "onboarding"
+  >
 >;
 const ROLE_PREFIX = "ownerRoles.";
 const prefilledValue = (t: PrefillTarget, field: SuggestionField) =>
@@ -1233,7 +1244,9 @@ const prefilledValue = (t: PrefillTarget, field: SuggestionField) =>
       ? t.description
       : field === "successMeasure"
         ? t.benefit
-        : t.onboarding?.ownerRoles?.[
+        : field === "category"
+          ? t.category
+          : t.onboarding?.ownerRoles?.[
             field.slice(ROLE_PREFIX.length) as "process" | "data" | "support"
           ];
 /** Applies checklist suggestions and records each one's provenance. A field
@@ -1255,6 +1268,7 @@ export function applyChecklistSuggestions<T extends PrefillTarget>(
     if (s.field === "functionArea") next.functionArea = s.value;
     else if (s.field === "summary") next.description = s.value;
     else if (s.field === "successMeasure") next.benefit = s.value;
+    else if (s.field === "category") next.category = s.value;
     else
       onboarding.ownerRoles![
         s.field.slice(ROLE_PREFIX.length) as "process" | "data" | "support"

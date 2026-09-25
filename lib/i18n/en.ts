@@ -190,6 +190,18 @@ export const en = {
   "onb.card.close": "Close",
   "onb.prefill.checklist": "Suggested from the onboarding checklist",
   "onb.prefill.atlas-project": "Taken from the Atlas project",
+  "onb.prefill.starter": "From starter {id}, version {version}",
+  // Starter choice (onb-starter-choice-machinery): shown only once the owner
+  // approves a starter; the shipped list is empty.
+  "onb.starter.title": "Start from",
+  "onb.starter.blank": "Start blank",
+  "onb.starter.meta": "{owner} · version {version} · approved {date}",
+  "onb.starter.preview": "Applying fills these fields:",
+  "onb.starter.nothing":
+    "Every field this starter fills already has a value, so nothing changes.",
+  "onb.starter.apply": "Apply starter",
+  "onb.starter.applied": "Applied starter {name}, version {version}.",
+  "onb.starter.undo": "Undo",
   "onb.card.rowLink": "FlightDeck card",
   // The waiting view (onb-atlas-status-timeline, plan 2026-09-25 J4).
   "onb.observed.aria": "What Atlas saw",
