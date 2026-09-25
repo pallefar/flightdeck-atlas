@@ -79,6 +79,15 @@ import {
   AI_AGENT_PREREQUISITES,
 } from "@/lib/flightdeck/onboarding";
 import { waitingView } from "@/lib/flightdeck/waiting";
+import {
+  applyStarter,
+  approvedStarters,
+  prefillLabel,
+  undoStarter,
+  type AppliedStarter,
+  type Starter,
+} from "@/lib/flightdeck/starters";
+import { StarterChoice } from "./flightdeck-starter-choice";
 import { t, type Locale, type MessageKey } from "@/lib/i18n";
 import { en } from "@/lib/i18n/en";
 import { useLocale } from "@/lib/i18n/react";
@@ -1040,6 +1049,8 @@ export function OnboardingEditor({
    * where it was; a step change moves it to the new step's heading. */
   const stepChanged = useRef(false);
   const [stepMoved, setStepMoved] = useState(false);
+  /** The starter just applied, kept for its Undo. */
+  const [applied, setApplied] = useState<AppliedStarter | null>(null);
   const { status, show, failed, load } = useOnboardingStatus(
     project.id,
     superAdmin,
@@ -1153,7 +1164,7 @@ export function OnboardingEditor({
   /** A user edit of a field Atlas may prefill: the value is theirs now, so
    * its provenance chip goes with it. */
   const setPrefillable = (
-    key: "functionArea" | "description" | "benefit",
+    key: "functionArea" | "description" | "benefit" | "category",
     field: SuggestionField,
     value: string,
   ) => {
@@ -1167,7 +1178,7 @@ export function OnboardingEditor({
     const from = draft.onboarding.prefill?.[field];
     return from && value?.trim() && from.value?.trim() === value.trim() ? (
       <span className="fd-hint" data-prefill={from.source}>
-        {t(`onb.prefill.${from.source}`, locale)}
+        {prefillLabel(from.source, locale)}
       </span>
     ) : null;
   };
@@ -1207,6 +1218,22 @@ export function OnboardingEditor({
     setDraft(next);
     if (basicsDiffer(next, draft)) setBasicsDirty(true);
     editOnboarding(next.onboarding);
+  }
+  /** A starter's fields and their provenance, as one autosaved edit. */
+  function adoptStarterEdit(next: Draft) {
+    setDraft(next);
+    if (basicsDiffer(next, draft)) setBasicsDirty(true);
+    editOnboarding(next.onboarding);
+  }
+  function chooseStarter(starter: Starter) {
+    const done = applyStarter(draft, starter, new Date().toISOString());
+    adoptStarterEdit(done.next);
+    setApplied(done.applied);
+  }
+  function undoChosenStarter() {
+    if (!applied) return;
+    adoptStarterEdit(undoStarter(draft, applied));
+    setApplied(null);
   }
   /** Keep mine: their version with this form's changes put back on top,
    * saved at once. */
@@ -1735,6 +1762,16 @@ export function OnboardingEditor({
           </ul>
         </div>
       )}
+      {!frozen && tab === "basics" && (
+        <StarterChoice
+          starters={approvedStarters}
+          target={draft}
+          locale={locale}
+          onApply={chooseStarter}
+          onUndo={undoChosenStarter}
+          applied={applied}
+        />
+      )}
       {!!suggestions.length && (
         <div className="fd-suggest">
           <p>
@@ -1844,9 +1881,14 @@ export function OnboardingEditor({
                 required
                 maxLength={60}
                 value={draft.category}
-                onChange={(e) => set("category", e.target.value)}
+                onChange={(e) =>
+                  setPrefillable("category", "category", e.target.value)
+                }
               />,
-              <Hint text={draft.category} strict />,
+              <>
+                <Hint text={draft.category} strict />
+                {source("category", draft.category)}
+              </>,
             )}
             {field(
               "fd-summary",

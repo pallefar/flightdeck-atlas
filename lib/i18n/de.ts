@@ -191,6 +191,16 @@ export const de: Record<MessageKey, string> = {
   "onb.card.close": "Schließen",
   "onb.prefill.checklist": "Vorschlag aus der Onboarding-Checkliste",
   "onb.prefill.atlas-project": "Aus dem Atlas-Projekt übernommen",
+  "onb.prefill.starter": "Aus Vorlage {id}, Version {version}",
+  "onb.starter.title": "Beginnen mit",
+  "onb.starter.blank": "Leer beginnen",
+  "onb.starter.meta": "{owner} · Version {version} · freigegeben {date}",
+  "onb.starter.preview": "Übernehmen füllt diese Felder:",
+  "onb.starter.nothing":
+    "Jedes Feld, das diese Vorlage füllt, hat bereits einen Wert; es ändert sich nichts.",
+  "onb.starter.apply": "Vorlage übernehmen",
+  "onb.starter.applied": "Vorlage {name}, Version {version} übernommen.",
+  "onb.starter.undo": "Rückgängig",
   "onb.card.rowLink": "FlightDeck-Karte",
   // Die Warteansicht (onb-atlas-status-timeline, Plan 2026-09-25 J4).
   "onb.observed.aria": "Was Atlas gesehen hat",
