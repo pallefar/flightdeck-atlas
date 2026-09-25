@@ -200,6 +200,21 @@ export const flightdeckOperations = sqliteTable(
     /** When the first of those failed read-backs happened; null once
      * FlightDeck answers again. The status shows it from the third. */
     unreachableSince: text("unreachable_since"),
+    /** onb-resubmit-atlas: a sha256 per reviewer-pointable field of what
+     * this send carried (JSON), never the values, so 'Fix and resubmit'
+     * can tell whether a field the reviewer named changed. */
+    fieldDigests: text("field_digests"),
+    /** The earlier needs-more-info send this one resubmits (Atlas's own
+     * link, kept whether or not FlightDeck links them). */
+    supersedesSendId: text("supersedes_send_id"),
+    /** The earlier request's FlightDeck id this send named in
+     * payload.supersedes; null when FlightDeck was not asked to link. */
+    supersedesSubmissionId: text("supersedes_submission_id"),
+    /** The reviewer's field pointers (JSON) this resubmission was compared
+     * against; null when none were named. Kept apart from the note, which
+     * the send clears, so a refused attempt leaves the next one gated by
+     * the same fields. */
+    compareFields: text("compare_fields"),
   },
   (t) => [
     index("idx_atlas_fd_operations_project").on(t.atlasProjectId, t.updatedAt),

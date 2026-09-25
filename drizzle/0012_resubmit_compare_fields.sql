@@ -1,0 +1,1 @@
+ALTER TABLE `atlas_flightdeck_operations` ADD `compare_fields` text;

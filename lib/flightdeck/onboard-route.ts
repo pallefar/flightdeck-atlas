@@ -31,6 +31,11 @@ import {
 } from "./context-client";
 import {
   buildOnboardingPayload,
+  fieldDigests,
+  FIELD_POINTERS,
+  type FieldPointer,
+  fieldDigestsSchema,
+  type FieldDigests,
   lockedStates,
   onboardingEnvelope,
   onboardingEnvelopeSchema,
@@ -38,6 +43,7 @@ import {
   personalDataIn,
   projectOnboardingPayloadSchema,
   readiness,
+  resubmitChanged,
   type OnboardingEnvelope,
   stageFor,
   type OnboardingStage,
@@ -135,6 +141,16 @@ type OperationRow = {
   check_failures?: number;
   /** When the first of those failed. */
   unreachable_since?: string | null;
+  /** A sha256 per reviewer-pointable field sent (JSON); null when Atlas
+   * adopted FlightDeck's request or the send predates it. */
+  field_digests?: string | null;
+  /** The earlier needs-more-info send this one resubmits. */
+  supersedes_send_id?: string | null;
+  /** That send's FlightDeck id, when this send named it in supersedes. */
+  supersedes_submission_id?: string | null;
+  /** The reviewer's pointers this resubmission was compared against
+   * (JSON); null when none were named. */
+  compare_fields?: string | null;
 };
 type LinkRow = {
   installation_id: string;
@@ -324,6 +340,70 @@ async function latestOperation(db: OnboardDb, atlasProjectId: string) {
     .bind(atlasProjectId)
     .first<OperationRow>();
 }
+/** Reason codes of a resubmission FlightDeck would not link to its
+ * predecessor: the next one goes as a new request linked in Atlas only. */
+const LINEAGE_REFUSED = ["already_superseded", "supersedes_refused"];
+/** 'Fix and resubmit' (onb-resubmit-atlas): the project's latest send that
+ * FlightDeck may have filed (refused attempts filed nothing), when
+ * FlightDeck answered it needs-more-info; and whether FlightDeck already
+ * refused to link a resubmission to it. */
+async function resubmitTarget(db: OnboardDb, atlasProjectId: string) {
+  const pred = await db
+    .prepare(
+      "SELECT * FROM atlas_flightdeck_operations WHERE atlas_project_id=? AND state<>'refused' ORDER BY updated_at DESC, rowid DESC LIMIT 1",
+    )
+    .bind(atlasProjectId)
+    .first<OperationRow>();
+  if (
+    !pred ||
+    pred.state !== "rejected" ||
+    pred.reason_code !== "needs-more-info"
+  )
+    return null;
+  const refused = await db
+    .prepare(
+      `SELECT 1 AS refused FROM atlas_flightdeck_operations WHERE supersedes_send_id=? AND state='refused' AND reason_code IN (${LINEAGE_REFUSED.map(() => "?").join(",")}) LIMIT 1`,
+    )
+    .bind(pred.id, ...LINEAGE_REFUSED)
+    .first();
+  return { pred, linkRefused: !!refused, named: await namedFieldsOf(db, pred) };
+}
+/** The fields the reviewer named for send `pred`. Its note carries them
+ * until a resubmission is reserved (clearProjectNotes then deletes the
+ * note); after that, the latest resubmission of it kept them
+ * (compare_fields), so a refused attempt never relaxes the gate. */
+async function namedFieldsOf(
+  db: OnboardDb,
+  pred: OperationRow,
+): Promise<FieldPointer[] | undefined> {
+  const fromNote = (await decisionNoteOf(db, pred.id)).fields;
+  if (fromNote?.length) return fromNote;
+  const kept = await db
+    .prepare(
+      "SELECT compare_fields FROM atlas_flightdeck_operations WHERE supersedes_send_id=? ORDER BY rowid DESC LIMIT 1",
+    )
+    .bind(pred.id)
+    .first<{ compare_fields: string | null }>();
+  if (!kept?.compare_fields) return undefined;
+  try {
+    const parsed = z
+      .array(z.enum(FIELD_POINTERS))
+      .safeParse(JSON.parse(kept.compare_fields));
+    return parsed.success && parsed.data.length ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+/** The digests a send stored, or null when it has none it can vouch for. */
+function sentDigestsOf(op: OperationRow): FieldDigests | null {
+  if (!op.field_digests || op.adopted) return null;
+  try {
+    const parsed = fieldDigestsSchema.safeParse(JSON.parse(op.field_digests));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 /** The unconfirmed send that must be resolved before its project may be
  * deleted, or null. `reserved` is the only state that still holds
  * `request_body` — the exact envelope, free text and all — so deleting the
@@ -496,6 +576,8 @@ export function projectStatus(
     waiting?: WaitingFacts;
     /** The send's needs-more-info note (transitions.decisionNoteOf). */
     decision?: DecisionNote;
+    /** The earlier send this one resubmits (onb-resubmit-atlas). */
+    resubmissionOf?: ResubmissionOf;
   },
   notice: string | null = null,
   retryAfter: number | null = null,
@@ -504,7 +586,14 @@ export function projectStatus(
   const op = send.operation ?? null;
   if (viewer.superAdmin)
     return {
-      ...statusBody(op, send.link ?? null, notice, retryAfter, send.decision),
+      ...statusBody(
+        op,
+        send.link ?? null,
+        notice,
+        retryAfter,
+        send.decision,
+        send.resubmissionOf,
+      ),
       ...waitingFields(op, send.waiting),
     };
   const stage = op
@@ -535,6 +624,9 @@ export function projectStatus(
             updatedAt: op.updated_at,
             checkedAt: op.checked_at,
             ...noteFor(stage, send.decision),
+            ...(send.resubmissionOf
+              ? { resubmissionOf: send.resubmissionOf }
+              : {}),
           }
         : null,
     link: null,
@@ -596,6 +688,9 @@ function noteFor(
   };
 }
 
+type ResubmissionOf = NonNullable<
+  NonNullable<OnboardingStatus["operation"]>["resubmissionOf"]
+>;
 /** The Atlas Super Admin's status body (projectStatus). */
 function statusBody(
   op: OperationRow | null,
@@ -603,7 +698,17 @@ function statusBody(
   notice: string | null,
   retryAfter: number | null,
   decision?: DecisionNote,
+  resubmissionOf?: ResubmissionOf,
 ): OnboardingStatus {
+  const sent =
+    op &&
+    stageFor({
+      state: op.state,
+      reasonCode: op.reason_code,
+      setupState: op.setup_state,
+    }) === "needs-more-info"
+      ? sentDigestsOf(op)
+      : null;
   const stage = op
     ? stageFor({
         state: op.state,
@@ -629,6 +734,8 @@ function statusBody(
           updatedAt: op.updated_at,
           checkedAt: op.checked_at,
           ...noteFor(stage!, decision),
+          ...(sent ? { sentDigests: sent } : {}),
+          ...(resubmissionOf ? { resubmissionOf } : {}),
         }
       : null,
     link: link
@@ -789,11 +896,35 @@ export function createOnboardRoute<A extends OnboardAccess>(
       ),
       responsePolicyDays: deps.responsePolicyDays?.() ?? null,
     };
+    // The earlier send this one resubmits: its revision only.
+    const pred = operation?.supersedes_send_id
+      ? await db
+          .prepare(
+            "SELECT atlas_revision,adopted FROM atlas_flightdeck_operations WHERE id=?",
+          )
+          .bind(operation.supersedes_send_id)
+          .first<Pick<OperationRow, "atlas_revision" | "adopted">>()
+      : null;
+    // Lineage is claimed only once FlightDeck filed this send: a reserved
+    // attempt has no answer yet, and a refused one (ALREADY_SUPERSEDED,
+    // SUPERSEDES_WRONG_STATE, ...) filed nothing, though it still records
+    // the supersedes Atlas asked for.
+    const filed =
+      !!operation &&
+      (SENT.includes(operation.state) || operation.state === "rejected");
+    const resubmissionOf: ResubmissionOf | undefined = pred
+      ? {
+          revision: pred.adopted ? null : pred.atlas_revision,
+          linkedInFlightDeck: filed && !!operation?.supersedes_submission_id,
+          filed,
+        }
+      : undefined;
     // An editor's projection never shows the link, so it is not read.
     return projectStatus(
       { superAdmin },
       {
         operation,
+        resubmissionOf,
         decision:
           operation?.state === "rejected"
             ? await decisionNoteOf(db, operation.id)
@@ -869,6 +1000,8 @@ export function createOnboardRoute<A extends OnboardAccess>(
                 reason_code: null,
                 request_body: null,
                 adopted: 1,
+                field_digests: null,
+                supersedes_submission_id: null,
                 updated_at: stamp,
                 checked_at: stamp,
               },
@@ -906,6 +1039,33 @@ export function createOnboardRoute<A extends OnboardAccess>(
           { status: await status() },
         );
       }
+      case "already_superseded":
+      case "supersedes_refused":
+        // FlightDeck refused the link to the earlier request, before filing
+        // anything: another resubmission of it already exists (one successor
+        // per request), or it no longer takes this one as its successor.
+        // The OS resolves an idempotency key it holds before it judges the
+        // predecessor, so this holds for a retry too. Close it: the next
+        // resubmission is a new request linked in Atlas only.
+        await patch(
+          db,
+          op.id,
+          {
+            state: "refused",
+            reason_code: result.state,
+            request_body: null,
+            updated_at: stamp,
+          },
+          ["reserved"],
+        );
+        return refuse(
+          409,
+          result.state,
+          result.state === "already_superseded"
+            ? "Already resubmitted: FlightDeck already holds a resubmission of the earlier request. Nothing was sent. The status has been reloaded."
+            : "FlightDeck would not link this resubmission to the earlier request. Nothing was sent. Send again: it goes as a new request, linked in Atlas.",
+          { status: await status() },
+        );
       case "lock_unreadable":
         // FlightDeck cannot read its own lock for this request, so it cannot
         // say whether it holds it: keep the reservation, and a retry reuses
@@ -1079,6 +1239,12 @@ export function createOnboardRoute<A extends OnboardAccess>(
         );
       const reuse = existing?.state === "reserved" ? existing : null;
       let envelope: OnboardingEnvelope;
+      let digests: FieldDigests | null = null;
+      let resubmits: {
+        sendId: string;
+        submissionId: string | null;
+        named: FieldPointer[] | null;
+      } | null = null;
       if (reuse) {
         // A retry resends the reserved request byte for byte: same key,
         // destination, revision, requester and text, whatever the project
@@ -1138,6 +1304,18 @@ export function createOnboardRoute<A extends OnboardAccess>(
         } catch {
           features = NO_FEATURES;
         }
+        // 'Fix and resubmit' (onb-resubmit-atlas, plan J6): after a
+        // needs-more-info answer the next send is its successor. FlightDeck
+        // links the two only while features.supersedes is on and it has not
+        // refused that link already; Atlas links them either way.
+        const target = await resubmitTarget(db, project.id);
+        const supersedes =
+          target &&
+          !target.linkRefused &&
+          target.pred.submission_id &&
+          features.supersedes
+            ? target.pred.submission_id
+            : null;
         const built = projectOnboardingPayloadSchema.safeParse(
           buildOnboardingPayload({
             project,
@@ -1146,6 +1324,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
             installationId,
             requestedBy: await sha256Hex(access.userId),
             features,
+            gated: supersedes ? { supersedes } : undefined,
           }),
         );
         if (!built.success)
@@ -1166,6 +1345,31 @@ export function createOnboardRoute<A extends OnboardAccess>(
             "Remove the email address or phone number from these fields: FlightDeck receives role titles and system names, not personal details. Nothing was sent.",
             { fields },
           );
+        digests = await fieldDigests(built.data);
+        if (target) {
+          // Enabled once a field the reviewer named changed (any field when
+          // it named none). A send without digests (older, or adopted) needs
+          // at least a later revision. Refused before anything is reserved.
+          const named = target.named;
+          const sent = sentDigestsOf(target.pred);
+          const changed = sent
+            ? resubmitChanged(sent, digests, named)
+            : project.revision > target.pred.atlas_revision;
+          if (!changed)
+            return refuse(
+              409,
+              "nothing_changed",
+              named?.length
+                ? "Change a field the reviewer named before you resubmit. Nothing was sent."
+                : "Change the draft before you resubmit: FlightDeck asked for more information. Nothing was sent.",
+              named?.length ? { fields: named } : {},
+            );
+          resubmits = {
+            sendId: target.pred.id,
+            submissionId: supersedes,
+            named: named?.length ? named : null,
+          };
+        }
         envelope = onboardingEnvelope(built.data);
         // The destination comes from this request only, never from saved
         // preferences or the planning note, and is re-checked against fresh
@@ -1223,6 +1427,12 @@ export function createOnboardRoute<A extends OnboardAccess>(
           checked_at: null,
           request_body: JSON.stringify(envelope),
           adopted: 0,
+          field_digests: digests ? JSON.stringify(digests) : null,
+          supersedes_send_id: resubmits?.sendId ?? null,
+          supersedes_submission_id: resubmits?.submissionId ?? null,
+          compare_fields: resubmits?.named
+            ? JSON.stringify(resubmits.named)
+            : null,
         };
         // Reserved BEFORE the remote call. The partial unique index allows
         // one open send per project, so a second tab loses here. And only

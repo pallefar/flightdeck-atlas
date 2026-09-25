@@ -56,6 +56,10 @@ import {
   settlePrefill,
   withoutPrefill,
   type OnboardingStatus,
+  FIELD_POINTERS,
+  fieldDigests,
+  resubmitChanged,
+  resubmissionNote,
 } from "../lib/flightdeck/onboarding";
 import {
   DRAFT_NOT_HELD_SQL,
@@ -3051,7 +3055,10 @@ test("needs more info reopens the draft, and the next send uses a fresh key", as
       duplicate: false,
     },
   });
-  expect((await h.route.POST(sendTo("te-ops"), ATLAS_ID)).status).toBe(202);
+  // 'Fix and resubmit' needs a change (onb-resubmit-atlas): the reviewer
+  // named no field here, so any change to what is sent will do.
+  h.setProject(readyProject({ revision: 8, location: "Berlin, Germany" }));
+  expect((await h.route.POST(sendTo("te-ops", 8), ATLAS_ID)).status).toBe(202);
   const [first, second] = h.store.ops();
   expect(first).toMatchObject({ state: "rejected" });
   expect(second).toMatchObject({
@@ -3061,6 +3068,375 @@ test("needs more info reopens the draft, and the next send uses a fresh key", as
   });
   expect(second.idempotency_key).not.toBe(first.idempotency_key);
   expect(h.fake.submits[1].payload.idempotencyKey).toBe(second.idempotency_key);
+});
+
+// onb-resubmit-atlas (plan 2026-09-25 J6, D-035): 'Fix and resubmit' after a
+// needs-more-info answer is enabled once a field the reviewer named changed,
+// goes through the ask/send enforcement again, and sends a successor linked
+// to the earlier send: in FlightDeck (payload.supersedes) only while
+// features.supersedes is on, in Atlas always.
+const resubmitFeatures = (supersedes: boolean) => async () => ({
+  ...NO_FEATURES,
+  supersedes,
+});
+const filedAs = (submissionId: string) => async (): Promise<SubmitResult> => ({
+  state: "ok",
+  data: {
+    submissionId,
+    receivedAt: os.receivedAt,
+    payloadSha256: os.payloadSha256,
+    duplicate: false,
+  },
+});
+
+test("Fix and resubmit waits for a named field to change, then sends a fresh key linked to the earlier send (Atlas-only link while features.supersedes is off)", async () => {
+  const h = harness({ features: resubmitFeatures(false) });
+  expect((await h.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  withNote(h, ["site"]);
+  h.tick(61_000);
+  const answered = await h.status();
+  expect(answered.operation).toMatchObject({
+    stage: "needs-more-info",
+    fields: ["site"],
+  });
+  // The Super Admin's form compares against what was sent, field by field:
+  // every pointable field plus the proposed project name and id.
+  expect(Object.keys(answered.operation!.sentDigests ?? {}).sort()).toEqual(
+    [...FIELD_POINTERS, "targetLabel", "targetProjectId"].sort(),
+  );
+  const digests = await fieldDigests(h.fake.submits[0].payload);
+  expect(answered.operation!.sentDigests).toEqual(digests);
+  // An editor's projection carries no digests.
+  h.as("user-2", false);
+  expect((await h.status(false)).operation).not.toHaveProperty("sentDigests");
+  h.as("user-1", true);
+
+  // Unchanged, or changed only where the reviewer did not point: refused
+  // before anything is reserved or sent.
+  for (const [revision, edit] of [
+    [7, {}],
+    [8, { priority: "Normal" as const }],
+  ] as const) {
+    h.setProject(readyProject({ revision, ...edit }));
+    const refused = await h.route.POST(sendTo("hr-de", revision), ATLAS_ID);
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({
+      code: "nothing_changed",
+      fields: ["site"],
+    });
+  }
+  expect(h.fake.submits).toHaveLength(1);
+  expect(h.store.ops()).toHaveLength(1);
+
+  // The named field changed: it goes, with a fresh key, and no supersedes
+  // while FlightDeck does not link resubmissions for this credential.
+  h.fake.onSubmit = filedAs(os.otherSubmissionId);
+  h.setProject(readyProject({ revision: 9, location: "Berlin, Germany" }));
+  expect((await h.route.POST(sendTo("hr-de", 9), ATLAS_ID)).status).toBe(202);
+  const [first, second] = h.store.ops();
+  expect(h.fake.submits[1].payload).not.toHaveProperty("supersedes");
+  expect(second.idempotency_key).not.toBe(first.idempotency_key);
+  expect(second).toMatchObject({
+    state: "filed",
+    supersedes_send_id: first.id,
+    supersedes_submission_id: null,
+  });
+  const resubmitted = await h.status(false);
+  expect(resubmitted.operation).toMatchObject({
+    atlasRevision: 9,
+    resubmissionOf: { revision: 7, linkedInFlightDeck: false, filed: true },
+  });
+  // History shows both: the earlier send with its answer.
+  expect(resubmitted.history).toMatchObject([
+    { revision: 7, stage: "needs-more-info" },
+  ]);
+});
+
+test("Fix and resubmit still goes through the ask/send enforcement", async () => {
+  const h = harness({ features: resubmitFeatures(false) });
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  withNote(h, ["site"]);
+  h.tick(61_000);
+  await h.status();
+  // A stale ask is refused unless the Super Admin confirms the diff.
+  h.setProject(
+    readyProject({
+      revision: 9,
+      location: "Berlin, Germany",
+      onboarding: {
+        ...readyProject().onboarding,
+        sendRequest: {
+          revision: 8,
+          by: "editor@example.com",
+          at: "2026-09-25T10:00:00.000Z",
+          stale: true,
+        },
+      },
+    }),
+  );
+  const stale = await h.route.POST(sendTo("hr-de", 9), ATLAS_ID);
+  expect(stale.status).toBe(409);
+  expect(await stale.json()).toMatchObject({ code: "changed_since_ask" });
+  // A revision other than the one reviewed is refused.
+  h.setProject(readyProject({ revision: 10, location: "Berlin, Germany" }));
+  const moved = await h.route.POST(sendTo("hr-de", 9), ATLAS_ID);
+  expect(await moved.json()).toMatchObject({ code: "project_changed" });
+  expect(h.fake.submits).toHaveLength(1);
+});
+
+test("with features.supersedes on, the resubmission names the earlier submission; ALREADY_SUPERSEDED says Already resubmitted and the next one is linked in Atlas only", async () => {
+  const h = harness({ features: resubmitFeatures(true) });
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  // The first send supersedes nothing.
+  expect(h.fake.submits[0].payload).not.toHaveProperty("supersedes");
+  // No field named: any change to what is sent enables the resubmission.
+  withNote(h, []);
+  h.tick(61_000);
+  await h.status();
+  const unchanged = await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  expect(await unchanged.json()).toMatchObject({ code: "nothing_changed" });
+  // Another tab (or another Atlas) resubmitted first.
+  h.fake.onSubmit = async () => ({
+    state: "already_superseded",
+    submissionId: os.otherSubmissionId,
+  });
+  h.setProject(readyProject({ revision: 8, benefit: "Approvals in a day." }));
+  const lost = await h.route.POST(sendTo("hr-de", 8), ATLAS_ID);
+  expect(lost.status).toBe(409);
+  const body = (await lost.json()) as {
+    error: string;
+    status: OnboardingStatus;
+  };
+  expect(body).toMatchObject({ code: "already_superseded" });
+  expect(body.error).toMatch(/^Already resubmitted/);
+  expect(h.fake.submits[1].payload.supersedes).toBe(os.submissionId);
+  const [first, second] = h.store.ops();
+  expect(second).toMatchObject({
+    state: "refused",
+    reason_code: "already_superseded",
+    request_body: null,
+    supersedes_send_id: first.id,
+    supersedes_submission_id: os.submissionId,
+  });
+  // The status to reload with.
+  expect(body.status.canSend).toBe(true);
+  // FlightDeck keeps one successor per request, so the next resubmission is
+  // a new request linked in Atlas only, with yet another key.
+  h.fake.onSubmit = filedAs("aabbccddeeff001122334455");
+  expect((await h.route.POST(sendTo("hr-de", 8), ATLAS_ID)).status).toBe(202);
+  const third = h.store.ops()[2];
+  expect(h.fake.submits[2].payload).not.toHaveProperty("supersedes");
+  expect(third).toMatchObject({
+    state: "filed",
+    supersedes_send_id: first.id,
+    supersedes_submission_id: null,
+  });
+  expect(new Set(h.store.ops().map((op) => op.idempotency_key)).size).toBe(3);
+});
+
+test("with no field named, a change to only the proposed project name or id enables Fix and resubmit (both travel under target)", async () => {
+  for (const edit of [
+    {
+      flightdeckDraft: {
+        label: "Payroll approvals",
+        workspaceHint: "Hint Workspace te-ops",
+      },
+    },
+    {
+      onboarding: {
+        ...readyProject().onboarding,
+        proposedProjectId: "payroll-approvals",
+      },
+    },
+  ] as const) {
+    const h = harness({ features: resubmitFeatures(false) });
+    await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+    withNote(h, []);
+    h.tick(61_000);
+    const answered = await h.status();
+    // The form compares the same fields the server does.
+    const before = await fieldDigests(h.fake.submits[0].payload);
+    expect(answered.operation!.sentDigests).toEqual(before);
+    h.fake.onSubmit = filedAs(os.otherSubmissionId);
+    h.setProject(readyProject({ revision: 8, ...edit }));
+    const sent = await h.route.POST(sendTo("hr-de", 8), ATLAS_ID);
+    expect(sent.status).toBe(202);
+    expect(
+      resubmitChanged(
+        answered.operation!.sentDigests!,
+        await fieldDigests(h.fake.submits[1].payload),
+        undefined,
+      ),
+    ).toBe(true);
+  }
+});
+
+test("the reviewer's named fields still gate the next resubmission after FlightDeck refused to link one", async () => {
+  const h = harness({ features: resubmitFeatures(true) });
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  withNote(h, ["site"]);
+  h.tick(61_000);
+  await h.status();
+  h.fake.onSubmit = async () => ({
+    state: "already_superseded",
+    submissionId: os.otherSubmissionId,
+  });
+  h.setProject(readyProject({ revision: 8, location: "Berlin, Germany" }));
+  expect((await h.route.POST(sendTo("hr-de", 8), ATLAS_ID)).status).toBe(409);
+  // The refused attempt cleared the reviewer's note; the site correction is
+  // reverted and only a field the reviewer did not name changed.
+  h.fake.onSubmit = filedAs("aabbccddeeff001122334455");
+  h.setProject(readyProject({ revision: 9, priority: "Normal" }));
+  const unnamed = await h.route.POST(sendTo("hr-de", 9), ATLAS_ID);
+  expect(unnamed.status).toBe(409);
+  expect(await unnamed.json()).toMatchObject({
+    code: "nothing_changed",
+    fields: ["site"],
+  });
+  expect(h.fake.submits).toHaveLength(2);
+  // The named field changed: the next resubmission goes (Atlas link only).
+  h.setProject(readyProject({ revision: 10, location: "Hamburg, Germany" }));
+  expect((await h.route.POST(sendTo("hr-de", 10), ATLAS_ID)).status).toBe(202);
+  expect(h.store.ops()[2]).toMatchObject({
+    state: "filed",
+    supersedes_send_id: h.store.ops()[0].id,
+  });
+});
+
+test("a resubmission FlightDeck links carries supersedes and reads back as linked in FlightDeck", async () => {
+  const h = harness({ features: resubmitFeatures(true) });
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  withNote(h, ["site"]);
+  h.tick(61_000);
+  await h.status();
+  h.fake.onSubmit = filedAs(os.otherSubmissionId);
+  h.setProject(readyProject({ revision: 8, location: "Berlin, Germany" }));
+  expect((await h.route.POST(sendTo("hr-de", 8), ATLAS_ID)).status).toBe(202);
+  expect(h.fake.submits[1].payload.supersedes).toBe(os.submissionId);
+  expect((await h.status(false)).operation).toMatchObject({
+    resubmissionOf: { revision: 7, linkedInFlightDeck: true, filed: true },
+  });
+});
+
+test("the resubmission's lineage reads as linked only once FlightDeck filed it: a refused or unconfirmed attempt claims no link and no receipt", async () => {
+  for (const answer of [
+    { state: "already_superseded", submissionId: os.otherSubmissionId },
+    { state: "supersedes_refused" },
+    { state: "os_unreachable" },
+  ] as const) {
+    const h = harness({ features: resubmitFeatures(true) });
+    await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+    withNote(h, ["site"]);
+    h.tick(61_000);
+    await h.status();
+    h.fake.onSubmit = async () => answer;
+    h.setProject(readyProject({ revision: 8, location: "Berlin, Germany" }));
+    await h.route.POST(sendTo("hr-de", 8), ATLAS_ID);
+    // Atlas asked FlightDeck to link it...
+    expect(h.fake.submits[1].payload.supersedes).toBe(os.submissionId);
+    // ...but FlightDeck filed nothing (refused) or has not said (reserved).
+    const { operation } = await h.status(false);
+    expect(operation!.state).toBe(
+      answer.state === "os_unreachable" ? "reserved" : "refused",
+    );
+    expect(operation!.resubmissionOf).toEqual({
+      revision: 7,
+      linkedInFlightDeck: false,
+      filed: false,
+    });
+    const note = resubmissionNote(operation!)!;
+    expect(note).not.toMatch(/FlightDeck links it|FlightDeck received it/);
+    expect(note).toMatch(
+      answer.state === "os_unreachable"
+        ? /FlightDeck has not confirmed/
+        : /FlightDeck filed nothing/,
+    );
+  }
+});
+
+test("resubmissionNote says who links a filed resubmission, and nothing for a first send", () => {
+  const filed = (linkedInFlightDeck: boolean, revision: number | null = 7) =>
+    resubmissionNote({
+      state: "filed",
+      resubmissionOf: { revision, linkedInFlightDeck, filed: true },
+    });
+  expect(filed(true)).toBe(
+    "Resubmission of revision 7. FlightDeck links it to the earlier request.",
+  );
+  expect(filed(false, null)).toBe(
+    "Resubmission of an earlier request. Atlas links it to the earlier request; FlightDeck received it as a new request.",
+  );
+  expect(resubmissionNote({ state: "filed" })).toBeNull();
+});
+
+test("submit() maps FlightDeck's lineage refusals: ALREADY_SUPERSEDED, SUPERSEDES_NOT_FOUND and SUPERSEDES_WRONG_STATE", async () => {
+  let reply: () => Response = () => jsonResponse(500, {});
+  const client = createSubmissionClient(config, {
+    fetch: async () => reply(),
+    timeoutMs: 50,
+  });
+  const envelope = onboardingEnvelope({
+    ...payloadFor(),
+    supersedes: os.submissionId,
+  });
+  reply = () =>
+    jsonResponse(409, {
+      error: "the request this one supersedes already has a successor",
+      code: "ALREADY_SUPERSEDED",
+      submissionId: os.otherSubmissionId,
+    });
+  expect(await client.submit(envelope)).toEqual({
+    state: "already_superseded",
+    submissionId: os.otherSubmissionId,
+  });
+  reply = () =>
+    jsonResponse(404, {
+      error:
+        "supersedes names no request this integration filed for this Atlas project",
+      code: "SUPERSEDES_NOT_FOUND",
+    });
+  expect(await client.submit(envelope)).toEqual({
+    state: "supersedes_refused",
+  });
+  reply = () =>
+    jsonResponse(409, {
+      error: "only a request answered 'needs more info' can be superseded",
+      code: "SUPERSEDES_WRONG_STATE",
+    });
+  expect(await client.submit(envelope)).toEqual({
+    state: "supersedes_refused",
+  });
+  // A malformed supersedes never leaves Atlas.
+  expect(
+    projectOnboardingPayloadSchema.safeParse({
+      ...payloadFor(),
+      supersedes: "not-a-submission",
+    }).success,
+  ).toBe(false);
+});
+
+test("a lineage refusal closes the send, and the next resubmission is linked in Atlas only", async () => {
+  const h = harness({ features: resubmitFeatures(true) });
+  await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  withNote(h, ["site"]);
+  h.tick(61_000);
+  await h.status();
+  h.fake.onSubmit = async () => ({ state: "supersedes_refused" });
+  h.setProject(readyProject({ revision: 8, location: "Berlin, Germany" }));
+  const refused = await h.route.POST(sendTo("hr-de", 8), ATLAS_ID);
+  expect(refused.status).toBe(409);
+  expect(await refused.json()).toMatchObject({ code: "supersedes_refused" });
+  expect(h.store.ops()[1]).toMatchObject({
+    state: "refused",
+    reason_code: "supersedes_refused",
+    request_body: null,
+  });
+  h.fake.onSubmit = filedAs(os.otherSubmissionId);
+  expect((await h.route.POST(sendTo("hr-de", 8), ATLAS_ID)).status).toBe(202);
+  expect(h.fake.submits[2].payload).not.toHaveProperty("supersedes");
+  expect(h.store.ops()[2]).toMatchObject({
+    supersedes_send_id: h.store.ops()[0].id,
+  });
 });
 
 // The reviewer note (D-037 item 5, DPO signed off; onb-atlas-decision-note).
@@ -3164,7 +3540,11 @@ test("the note goes with its send: a new send of the project, a later stage of t
       duplicate: false,
     },
   });
-  expect((await resent.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  // The corrected request: the named field changed (onb-resubmit-atlas).
+  resent.setProject(readyProject({ revision: 8, description: "Corrected." }));
+  expect((await resent.route.POST(sendTo("hr-de", 8), ATLAS_ID)).status).toBe(
+    202,
+  );
   expect(noteRows(resent.store)).toEqual([]);
   expect(everything(resent.store)).not.toContain("name the");
   expect((await resent.status(false)).operation).not.toHaveProperty("note");
@@ -3195,9 +3575,9 @@ test("the note goes with its send: a new send of the project, a later stage of t
   gone.tick(61_000);
   await gone.status();
   expect(noteRows(gone.store)).toHaveLength(1);
-  expect(await deleteProject(gone.store.db, ATLAS_ID, readyProject().revision)).toBe(
-    "deleted",
-  );
+  expect(
+    await deleteProject(gone.store.db, ATLAS_ID, readyProject().revision),
+  ).toBe("deleted");
   expect(everything(gone.store)).not.toContain("name the");
 });
 
@@ -4098,7 +4478,9 @@ test("the stepper counts an editor's own items, Next stops with a focused error 
     await expect(agents.getByRole("listitem")).toHaveCount(7);
     await expect(agents.getByText("Open", { exact: true })).toHaveCount(7);
     await expect(agents.getByText("Owner: Works council")).toBeVisible();
-    await expect(agents.locator("input, select, textarea, button")).toHaveCount(0);
+    await expect(agents.locator("input, select, textarea, button")).toHaveCount(
+      0,
+    );
     await expect(meter).toHaveAttribute("aria-valuetext", "8 of 8 for you");
     await next.click();
     await expect(stepButton(row, "Review & send")).toHaveAttribute(
@@ -4197,7 +4579,7 @@ test("a project FlightDeck has created reads as held, not as a draft under revie
   }
 });
 
-test("needs more info reopens the draft for editing and sending again", async ({
+test("needs more info reopens the draft; Fix and resubmit waits for a named field to change, and Already resubmitted reloads the status", async ({
   page,
 }) => {
   await mockContext(page);
@@ -4211,13 +4593,38 @@ test("needs more info reopens the draft for editing and sending again", async ({
     flightdeckDraft: { label: qa("Reopen"), workspaceHint: "" },
     onboarding: { countryCode: "DE", worksCouncilRelevant: "no" },
   });
-  await page.route(`**/api/flightdeck/onboard/${project.id}**`, (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(statusBody("needs-more-info")),
+  // What FlightDeck was sent: this project as created, field by field.
+  const sentDigests = await fieldDigests(
+    buildOnboardingPayload({
+      project,
+      destinationWorkspaceId: "hr-de",
+      idempotencyKey: KEY,
+      installationId: "atlas-test",
+      requestedBy: HASH,
     }),
   );
+  const body = statusBody("needs-more-info");
+  body.operation = { ...body.operation!, fields: ["summary"], sentDigests };
+  const reads: string[] = [];
+  await page.route(`**/api/flightdeck/onboard/${project.id}**`, (route) => {
+    if (route.request().method() === "POST")
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error:
+            "Already resubmitted: FlightDeck already holds a resubmission of the earlier request. Nothing was sent. The status has been reloaded.",
+          code: "already_superseded",
+          status: body,
+        }),
+      });
+    reads.push(route.request().url());
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+  });
   try {
     await page.reload();
     await openToFlightDeck(page);
@@ -4229,16 +4636,52 @@ test("needs more info reopens the draft for editing and sending again", async ({
       row.getByText("FlightDeck asked for more information", { exact: false }),
     ).toBeVisible();
     await expect(row.getByLabel("Summary")).toBeEnabled();
-    await row.getByLabel("Summary").fill("Summary with the missing detail.");
+    await stepButton(row, "Review & send").click();
+    await row.getByLabel("Destination workspace").selectOption("hr-de");
+    const resubmit = row.getByRole("button", { name: "Fix and resubmit" });
+    // Nothing changed yet.
+    await expect(resubmit).toBeDisabled();
+    await expect(
+      row.getByText("Change a field the reviewer named first (Summary)", {
+        exact: false,
+      }),
+    ).toBeVisible();
+    // A field the reviewer did not name is not enough.
+    // The Basics step is badged, so the reviewer's pointer opens it.
+    await row
+      .getByRole("note", { name: "Reviewer's note" })
+      .getByRole("button", { name: "Summary" })
+      .click();
+    await row.getByLabel("Success measure").fill("Measure, in days.");
     await row.getByRole("button", { name: "Save now" }).click();
     await expect(
       page.getByRole("status").filter({ hasText: "Onboarding draft saved" }),
     ).toBeVisible();
     await stepButton(row, "Review & send").click();
-    await row.getByLabel("Destination workspace").selectOption("hr-de");
+    await expect(resubmit).toBeDisabled();
+    // The named field changed: Fix and resubmit is enabled.
+    // The Basics step is badged, so the reviewer's pointer opens it.
+    await row
+      .getByRole("note", { name: "Reviewer's note" })
+      .getByRole("button", { name: "Summary" })
+      .click();
+    await row.getByLabel("Summary").fill("Summary with the missing detail.");
+    await row.getByRole("button", { name: "Save now" }).click();
     await expect(
-      row.getByRole("button", { name: "Send to FlightDeck" }),
-    ).toBeEnabled();
+      page
+        .getByRole("status")
+        .filter({ hasText: "Onboarding draft saved" })
+        .last(),
+    ).toBeVisible();
+    await stepButton(row, "Review & send").click();
+    await row.getByLabel("Destination workspace").selectOption("hr-de");
+    await expect(resubmit).toBeEnabled();
+    // Another resubmission won: the form says so and reloads the status.
+    const before = reads.length;
+    await resubmit.click();
+    await expect(row.getByRole("alert")).toContainText("Already resubmitted");
+    await expect.poll(() => reads.length).toBeGreaterThan(before);
+    await row.screenshot({ path: shot("fix-and-resubmit-1440.png") });
   } finally {
     await removeProject(page, project.id);
   }
@@ -4284,10 +4727,15 @@ test("needs more info shows the reviewer note as plain text, outlines the pointe
     await expect(callout).toContainText("Please name the <b>site</b>.");
     await expect(callout.locator("b")).toHaveCount(0);
     await expect(
-      callout.getByRole("list", { name: "Fields to check" }).getByRole("button"),
+      callout
+        .getByRole("list", { name: "Fields to check" })
+        .getByRole("button"),
     ).toHaveText(["Site", "Country"]);
     // The pointed field is outlined and marked invalid; others are not.
-    await expect(row.locator("#fd-site")).toHaveAttribute("aria-invalid", "true");
+    await expect(row.locator("#fd-site")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
     await expect(row.locator("#fd-summary")).not.toHaveAttribute(
       "aria-invalid",
       "true",
@@ -4299,12 +4747,10 @@ test("needs more info shows the reviewer note as plain text, outlines the pointe
     // Each step holding a pointed field is badged, the others are not.
     const steps = row.getByRole("navigation", { name: "Onboarding steps" });
     await expect(steps.locator(".fd-step-flag")).toHaveCount(2);
-    await expect(
-      steps.locator("#fd-step-basics .fd-step-flag"),
-    ).toHaveCount(1);
-    await expect(
-      steps.locator("#fd-step-details .fd-step-flag"),
-    ).toHaveCount(1);
+    await expect(steps.locator("#fd-step-basics .fd-step-flag")).toHaveCount(1);
+    await expect(steps.locator("#fd-step-details .fd-step-flag")).toHaveCount(
+      1,
+    );
     await expect(steps.locator("#fd-step-apps .fd-step-flag")).toHaveCount(0);
     // A field in the list opens its step and focuses it.
     await callout.getByRole("button", { name: "Country" }).click();
@@ -6006,8 +6452,9 @@ test("the timeline shows an answered request, every step labels the panel it sho
     await expect(legal).toContainText("decision 6");
     await expect(legal).toContainText("Summary and Success measure");
     await expect(legal).toContainText(/not answered/i);
+    // An answered request is sent again as 'Fix and resubmit'.
     await expect(
-      row.getByRole("button", { name: "Send to FlightDeck" }),
+      row.getByRole("button", { name: "Fix and resubmit" }),
     ).toHaveAccessibleDescription(/decision 6/);
     await legal.scrollIntoViewIfNeeded();
     await page.screenshot({ path: shot("review-legal-1440.png") });
