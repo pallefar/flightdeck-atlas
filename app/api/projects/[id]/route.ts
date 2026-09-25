@@ -145,6 +145,10 @@ export async function PUT(
       next: fields.onboarding,
       enabled: requesterRequestsOn(),
       actor: auth.access.email,
+      flightdeckDraft: {
+        before: previous.flightdeckDraft,
+        after: fields.flightdeckDraft,
+      },
     });
     if (!marker.ok)
       return json({ error: marker.error, code: marker.code }, marker.status);

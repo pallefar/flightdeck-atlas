@@ -129,12 +129,18 @@ export type SendRequestOutcome =
  *   whole onboarding draft removes it. A withdrawal cannot be undone except
  *   by asking again.
  * - `stale` belongs to the server: it sticks for the same ask, and a save
- *   that changes the draft marks an open ask stale in that same write. */
+ *   that changes the draft marks an open ask stale in that same write. The
+ *   draft is the onboarding details plus the project's `flightdeckDraft`
+ *   (its label is sent as target.label), so a whole-project save passes
+ *   both copies of it; draftEdited() counts the same two fields.
+ * - Project creation passes `previous: undefined`: any marker it carries is
+ *   a new ask, under the same flag and asker rules. */
 export function resolveSendRequest(input: {
   previous: OnboardingDraft | undefined;
   next: OnboardingDraft | undefined;
   enabled: boolean;
   actor: string;
+  flightdeckDraft?: { before: unknown; after: unknown };
 }): SendRequestOutcome {
   const { previous, next, enabled } = input;
   if (!next) return { ok: true, onboarding: next };
@@ -187,7 +193,10 @@ export function resolveSendRequest(input: {
     if (
       !marker.withdrawnAt &&
       !marker.stale &&
-      draftChanged(draftBefore, draftAfter)
+      (draftChanged(draftBefore, draftAfter) ||
+        (!!input.flightdeckDraft &&
+          canonical(input.flightdeckDraft.before) !==
+            canonical(input.flightdeckDraft.after)))
     )
       marker.stale = true;
   }

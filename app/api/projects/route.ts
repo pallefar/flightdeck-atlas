@@ -13,7 +13,9 @@ import {
   readFields,
   fromRow,
   newProject,
+  requesterRequestsOn,
 } from "@/lib/server-projects";
+import { resolveSendRequest } from "@/lib/flightdeck/onboarding";
 import { visibleProjects } from "@/lib/project-access";
 import { stampTimeEntries } from "@/lib/work-management";
 export const dynamic = "force-dynamic";
@@ -46,6 +48,18 @@ export async function POST(request: Request) {
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
+  // A new project may carry a send request marker only under the same rules
+  // as a save: refused while ATLAS_REQUESTER_REQUESTS is off, made only in
+  // the creator's own name, and with no client-sent `stale`.
+  const marker = resolveSendRequest({
+    previous: undefined,
+    next: fields.onboarding,
+    enabled: requesterRequestsOn(),
+    actor: auth.access.email,
+  });
+  if (!marker.ok)
+    return json({ error: marker.error, code: marker.code }, marker.status);
+  fields = { ...fields, onboarding: marker.onboarding };
   try {
     if (
       fields.tasks.some(

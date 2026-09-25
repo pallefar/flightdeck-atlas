@@ -4655,6 +4655,96 @@ test("the send request marker: refused 400 on both save paths while ATLAS_REQUES
   }
 });
 
+// onb-atlas-ask-persistence, fix round 2: creating a project applies the
+// same marker rules as a save (flag, asker, server-owned stale), and a
+// whole-project save that changes only the FlightDeck draft label marks an
+// open ask stale.
+test("the send request marker on project creation follows the save rules, and a label-only whole save marks the ask stale", async ({
+  page,
+}) => {
+  const on = process.env.ATLAS_REQUESTER_REQUESTS?.trim() === "true";
+  await page.goto("/");
+  const ask = {
+    revision: 1,
+    by: "seedy@sites.test",
+    at: "2026-09-25T10:00:00.000Z",
+  };
+  const post = (fields: Partial<Project>) =>
+    page.evaluate(
+      async (body) => {
+        const r = await fetch("/api/projects", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        return {
+          status: r.status,
+          body: (await r.json()) as { project?: Project; code?: string },
+        };
+      },
+      { ...examples[0], tasks: [], name: qa("Send Request Create"), ...fields },
+    );
+  const made: string[] = [];
+  try {
+    if (!on) {
+      const refused = await post({
+        onboarding: { countryCode: "DE", sendRequest: ask },
+      });
+      if (refused.body.project) made.push(refused.body.project.id);
+      expect(refused).toMatchObject({
+        status: 400,
+        body: { code: "requester_requests_off" },
+      });
+      return;
+    }
+    const impersonated = await post({
+      onboarding: {
+        countryCode: "DE",
+        sendRequest: { ...ask, by: "someone@else.test" },
+      },
+    });
+    if (impersonated.body.project) made.push(impersonated.body.project.id);
+    expect(impersonated).toMatchObject({
+      status: 400,
+      body: { code: "send_request_actor" },
+    });
+    const created = await post({
+      flightdeckDraft: { label: "Acme rollout", workspaceHint: "acme" },
+      onboarding: { countryCode: "DE", sendRequest: { ...ask, stale: true } },
+    });
+    if (created.body.project) made.push(created.body.project.id);
+    expect(created.status).toBe(201);
+    // `stale` is the server's: a client-sent value is dropped on create.
+    expect(created.body.project?.onboarding?.sendRequest).toEqual(ask);
+    const project = created.body.project!;
+    const relabelled = await page.evaluate(
+      async (body) => {
+        const r = await fetch(`/api/projects/${body.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        return {
+          status: r.status,
+          body: (await r.json()) as { project?: Project },
+        };
+      },
+      {
+        ...project,
+        activity: undefined,
+        flightdeckDraft: { label: "Acme rollout 2", workspaceHint: "acme" },
+      },
+    );
+    expect(relabelled.status).toBe(200);
+    expect(relabelled.body.project?.onboarding?.sendRequest).toEqual({
+      ...ask,
+      stale: true,
+    });
+  } finally {
+    for (const id of made) await removeProject(page, id);
+  }
+});
+
 test("the timeline shows an answered request, every tab's aria-controls names a panel in the page, and Review & send states the open Legal question", async ({
   page,
 }) => {

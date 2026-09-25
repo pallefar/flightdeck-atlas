@@ -285,3 +285,48 @@ test("the marker never travels to FlightDeck: the payload is built without it", 
   expect(bytes).not.toContain("sendRequest");
   expect(bytes).not.toContain(EDITOR);
 });
+
+test("a whole-project save that changes only the FlightDeck draft label marks the ask stale", () => {
+  const previous: OnboardingDraft = { countryCode: "DE", sendRequest: ask };
+  const draft = { label: "Acme rollout", workspaceHint: "acme" };
+  // The onboarding details are echoed unchanged; only the requested label
+  // moves, and buildOnboardingPayload sends that label as target.label.
+  expect(
+    resolveSendRequest({
+      previous,
+      next: { countryCode: "DE", sendRequest: ask },
+      enabled: true,
+      actor: EDITOR,
+      flightdeckDraft: {
+        before: draft,
+        after: { ...draft, label: "Acme rollout 2" },
+      },
+    }),
+  ).toEqual({
+    ok: true,
+    onboarding: { countryCode: "DE", sendRequest: { ...ask, stale: true } },
+  });
+  // Clearing the draft (null) is a change too.
+  expect(
+    resolveSendRequest({
+      previous,
+      next: { countryCode: "DE", sendRequest: ask },
+      enabled: false,
+      actor: EDITOR,
+      flightdeckDraft: { before: draft, after: null },
+    }),
+  ).toMatchObject({ ok: true, onboarding: { sendRequest: { stale: true } } });
+  // An unchanged draft (key order aside) leaves a fresh ask fresh.
+  expect(
+    resolveSendRequest({
+      previous,
+      next: { countryCode: "DE", sendRequest: ask },
+      enabled: true,
+      actor: EDITOR,
+      flightdeckDraft: {
+        before: draft,
+        after: { workspaceHint: "acme", label: "Acme rollout" },
+      },
+    }),
+  ).toEqual({ ok: true, onboarding: previous });
+});
