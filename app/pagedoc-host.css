@@ -35,6 +35,21 @@
   --pd-surface-strong: var(--primary);
   --pd-fg-strong: var(--primary-foreground);
 }
+/* Contrast (tests/pagedoc-conformance.spec.ts, >= 4.5:1): on the orange
+   strong surface, secondary text and links take its foreground, not the
+   page's muted grey (1.96:1 light, 1.31:1 dark) or orange on orange. */
+.pd-root[data-pd-theme="accent"] .pd-emphasis-strong {
+  --pd-muted: var(--primary-foreground);
+  --pd-link: var(--primary-foreground);
+}
+/* Atlas's orange is 2.5:1 on its light background, and Atlas has no darker
+   orange token, so in light mode accent links keep Atlas's link colour. */
+:root[data-theme="light"] .pd-root[data-pd-theme="accent"] {
+  --pd-link: var(--blue);
+}
+:root[data-theme="light"] .pd-root[data-pd-theme="accent"] .pd-emphasis-strong {
+  --pd-link: var(--primary-foreground);
+}
 
 /* Host reset, not a token: Atlas loads Tailwind's preflight (app/globals.css),
    which strips list markers and padding from every ul/ol. Rich-text lists
