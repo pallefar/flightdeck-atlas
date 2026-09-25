@@ -26,6 +26,20 @@ const eslintConfig = defineConfig([
       "react-hooks/set-state-in-effect": "off",
     },
   },
+  {
+    // lib/pagedoc is a byte-for-byte mirror of the OS PageDoc tree
+    // (scripts/check-pagedoc-mirror.mjs refuses any edit here), linted where
+    // it is written, in the OS. Atlas's lint adds two React Compiler rules the
+    // OS's does not run; each is switched off only in the one file and only
+    // for the one rule it reports, as lib/motion/useMotion.ts does for
+    // react-hooks/refs. Any other finding in the mirror still fails lint.
+    files: ["lib/pagedoc/render/blocks/media.ts"],
+    rules: { "react-hooks/set-state-in-effect": "off" },
+  },
+  {
+    files: ["lib/pagedoc/render/blocks/tabs.ts"],
+    rules: { "react-hooks/refs": "off" },
+  },
 ]);
 
 export default eslintConfig;

@@ -11,6 +11,8 @@ import "./suite.css";
 import "./work-management.css";
 import "./work-studio.css";
 import "./navigation.css";
+import "../lib/pagedoc/pagedoc.css";
+import "./pagedoc-host.css";
 import { headers } from "next/headers";
 import ThemeProvider from "./theme-provider";
 import { resolveRequestLocale } from "@/lib/i18n/server";

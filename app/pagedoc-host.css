@@ -1,0 +1,36 @@
+/* The PageDoc token adapter (pages-atlas-mirror-contract). lib/pagedoc/pagedoc.css,
+   mirrored from the OS, reads only --pd-* colour properties and owns no colour;
+   each host maps them to its own tokens. This file maps them to Atlas's EXISTING
+   tokens (app/globals.css, re-set per theme in app/te-theme.css) and adds none,
+   so a rendered page follows Atlas's light and dark themes.
+   tests/pagedoc-mirror.spec.ts pins that every --pd-* property pagedoc.css reads
+   is mapped here, and that every value here reads an Atlas token. */
+.pd-root {
+  --pd-fg: var(--foreground);
+  --pd-bg: var(--background);
+  --pd-muted: var(--muted-foreground);
+  --pd-border: var(--border);
+  --pd-link: var(--blue);
+  --pd-surface-subtle: var(--card);
+  --pd-surface-strong: var(--secondary);
+  --pd-fg-strong: var(--secondary-foreground);
+  --pd-code-bg: var(--muted);
+  --pd-error-fg: var(--destructive);
+  --pd-error-bg: var(--card);
+  --pd-button-bg: var(--primary);
+  --pd-button-fg: var(--primary-foreground);
+  --pd-focus: var(--ring);
+}
+
+/* calm: the quieter surface Atlas uses for cards */
+.pd-root[data-pd-theme="calm"] {
+  --pd-bg: var(--card);
+  --pd-surface-subtle: var(--muted);
+}
+
+/* accent: Atlas's orange carries the strong sections and links */
+.pd-root[data-pd-theme="accent"] {
+  --pd-link: var(--orange);
+  --pd-surface-strong: var(--primary);
+  --pd-fg-strong: var(--primary-foreground);
+}

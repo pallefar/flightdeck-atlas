@@ -236,4 +236,6 @@ export const de: Record<MessageKey, string> = {
     "Als Nächstes: Beheben, was FlightDeck abgelehnt hat, dann erneut senden.",
   "onb.next.closed":
     "Als Nächstes: Der Entwurf ist wieder offen und kann erneut gesendet werden.",
+  "pages.doc.tooNew": "Diese Seite braucht ein Atlas-Update",
+  "pages.doc.unreadable": "Diese Seite kann nicht angezeigt werden",
 };

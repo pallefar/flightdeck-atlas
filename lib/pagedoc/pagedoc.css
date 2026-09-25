@@ -1,0 +1,378 @@
+/* MIRROR of FlightDeck OS flightdeck/pagedoc/pagedoc.css at commit 3a0b1994affddd11d907bf030f8fa6f2e7d02bd8 (pallefar FlightDeck OS, branch integration/unified-2026-09-22). Byte-identical below this line; lib/pagedoc/MANIFEST.json holds its sha256. Change the OS copy first, never this one. */
+/* PageDoc stylesheet. PORTABLE: mirrored byte for byte into Atlas lib/pagedoc.
+ * Only --pd-* custom properties (scripts/check-pagedoc-portable.mjs): each host
+ * maps --pd-* to its own tokens in its own stylesheet, never here. The
+ * fallbacks are system colours, so an unmapped host still reads.
+ *
+ * Structure only. Every colour is a --pd-* property:
+ *   --pd-fg, --pd-bg                   text and page background
+ *   --pd-muted                         secondary text (hero subheading)
+ *   --pd-border                        dividers
+ *   --pd-link                          link text
+ *   --pd-surface-subtle, --pd-surface-strong, --pd-fg-strong
+ *                                      section emphasis backgrounds and the
+ *                                      text on the strong one
+ *   --pd-code-bg                       inline code
+ *   --pd-error-fg, --pd-error-bg       a block that failed to render
+ *   --pd-button-bg, --pd-button-fg     a primary button
+ *   --pd-focus                         the keyboard focus ring (tabs, buttons)
+ * A host selects per theme with .pd-root[data-pd-theme="calm" | "accent"].
+ *
+ * Never reorder: no `order`, no *-reverse, no grid placement. DOM order is
+ * reading order on every width (WCAG 1.3.2). */
+.pd-root {
+  container-type: inline-size;
+  color: var(--pd-fg, CanvasText);
+  background: var(--pd-bg, Canvas);
+  font: inherit;
+  line-height: 1.5;
+}
+
+.pd-root *,
+.pd-root *::before,
+.pd-root *::after {
+  box-sizing: border-box;
+}
+
+/* sections and columns */
+.pd-section {
+  padding: 2rem 1rem;
+}
+.pd-spacing-compact {
+  padding-block: 1rem;
+}
+.pd-spacing-spacious {
+  padding-block: 4rem;
+}
+.pd-emphasis-subtle {
+  background: var(--pd-surface-subtle, transparent);
+}
+.pd-emphasis-strong {
+  background: var(--pd-surface-strong, transparent);
+  color: var(--pd-fg-strong, inherit);
+}
+
+.pd-columns {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: minmax(0, 1fr);
+}
+.pd-layout-1-1 > .pd-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.pd-layout-2-1 > .pd-columns {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+}
+.pd-layout-1-2 > .pd-columns {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+}
+.pd-layout-1-1-1 > .pd-columns {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pd-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+/* phone: one column in document order; 'hide-second' drops the second */
+@container (max-width: 40rem) {
+  .pd-section > .pd-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pd-phone-hide-second .pd-column-phone-hidden {
+    display: none;
+  }
+}
+
+/* blocks */
+.pd-block {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pd-hero-heading {
+  font-size: 2rem;
+  line-height: 1.2;
+  margin: 0 0 0.5rem;
+}
+.pd-hero-subheading {
+  color: var(--pd-muted, inherit);
+  font-size: 1.125rem;
+  margin: 0 0 1rem;
+}
+.pd-hero-media {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.pd-rich-text > :first-child {
+  margin-top: 0;
+}
+.pd-rich-text > :last-child {
+  margin-bottom: 0;
+}
+.pd-rich-text a {
+  color: var(--pd-link, LinkText);
+}
+.pd-rich-text code {
+  background: var(--pd-code-bg, transparent);
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+}
+
+.pd-divider {
+  border: 0;
+  border-top: 1px solid var(--pd-border, GrayText);
+  margin: 0.5rem 0;
+}
+
+/* shared headings, lists and buttons of the content blocks */
+.pd-block-heading {
+  font-size: 1.5rem;
+  line-height: 1.25;
+  margin: 0 0 1rem;
+}
+.pd-feature-list,
+.pd-benefit-list,
+.pd-gallery,
+.pd-app-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1rem;
+  /* min(): in a column narrower than 12rem an item takes the full width instead of overflowing */
+  grid-template-columns: repeat(auto-fill, minmax(min(12rem, 100%), 1fr));
+}
+.pd-benefit-list {
+  grid-template-columns: minmax(0, 1fr);
+}
+.pd-feature-title,
+.pd-benefit-title,
+.pd-app-card-name {
+  font-size: 1.125rem;
+  margin: 0 0 0.25rem;
+}
+.pd-feature-text,
+.pd-benefit-text,
+.pd-app-card-tagline,
+.pd-cta-text {
+  color: var(--pd-muted, inherit);
+  margin: 0 0 0.75rem;
+}
+.pd-app-card {
+  border: 1px solid var(--pd-border, GrayText);
+  padding: 1rem;
+}
+.pd-button {
+  display: inline-block;
+  font: inherit;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--pd-border, ButtonBorder);
+  background: transparent;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.pd-button-primary {
+  background: var(--pd-button-bg, ButtonFace);
+  color: var(--pd-button-fg, ButtonText);
+}
+.pd-button-disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.pd-hero-actions {
+  margin-top: 1rem;
+}
+.pd-root :focus-visible {
+  outline: 2px solid var(--pd-focus, Highlight);
+  outline-offset: 2px;
+}
+
+/* media: images, the focal point, video, and the not-ready states */
+.pd-media,
+.pd-gallery-figure {
+  margin: 0;
+}
+.pd-media-img,
+.pd-gallery-img,
+.pd-feature-img,
+.pd-video-poster,
+.pd-video-el {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.pd-gallery-img {
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+.pd-focal {
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  object-position: var(--pd-fx, 50%) var(--pd-fy, 50%);
+}
+.pd-fx-0 {
+  --pd-fx: 0%;
+}
+.pd-fx-10 {
+  --pd-fx: 10%;
+}
+.pd-fx-20 {
+  --pd-fx: 20%;
+}
+.pd-fx-30 {
+  --pd-fx: 30%;
+}
+.pd-fx-40 {
+  --pd-fx: 40%;
+}
+.pd-fx-50 {
+  --pd-fx: 50%;
+}
+.pd-fx-60 {
+  --pd-fx: 60%;
+}
+.pd-fx-70 {
+  --pd-fx: 70%;
+}
+.pd-fx-80 {
+  --pd-fx: 80%;
+}
+.pd-fx-90 {
+  --pd-fx: 90%;
+}
+.pd-fx-100 {
+  --pd-fx: 100%;
+}
+.pd-fy-0 {
+  --pd-fy: 0%;
+}
+.pd-fy-10 {
+  --pd-fy: 10%;
+}
+.pd-fy-20 {
+  --pd-fy: 20%;
+}
+.pd-fy-30 {
+  --pd-fy: 30%;
+}
+.pd-fy-40 {
+  --pd-fy: 40%;
+}
+.pd-fy-50 {
+  --pd-fy: 50%;
+}
+.pd-fy-60 {
+  --pd-fy: 60%;
+}
+.pd-fy-70 {
+  --pd-fy: 70%;
+}
+.pd-fy-80 {
+  --pd-fy: 80%;
+}
+.pd-fy-90 {
+  --pd-fy: 90%;
+}
+.pd-fy-100 {
+  --pd-fy: 100%;
+}
+.pd-media-caption {
+  color: var(--pd-muted, inherit);
+  font-size: 0.875rem;
+  margin-top: 0.5rem;
+}
+.pd-media-status {
+  border: 1px dashed var(--pd-border, GrayText);
+  color: var(--pd-muted, inherit);
+  padding: 1.5rem 1rem;
+  text-align: center;
+}
+.pd-media-status[aria-hidden="true"] {
+  display: none;
+}
+/* lazy media not yet near the viewport: holds its place without a fetch */
+.pd-media-deferred {
+  display: block;
+  min-height: 8rem;
+  background: var(--pd-border, transparent);
+  opacity: 0.25;
+}
+.pd-video {
+  position: relative;
+}
+.pd-video-play {
+  margin-top: 0.5rem;
+  font: inherit;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+
+/* FAQ: native disclosure */
+.pd-faq-item {
+  border-top: 1px solid var(--pd-border, GrayText);
+  padding: 0.75rem 0;
+}
+.pd-faq-q {
+  cursor: pointer;
+  font-weight: 600;
+}
+.pd-faq-a {
+  margin-top: 0.5rem;
+}
+
+/* tabs */
+.pd-tablist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--pd-border, GrayText);
+}
+.pd-tab {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+}
+.pd-tab[aria-selected="true"] {
+  border-bottom-color: var(--pd-link, LinkText);
+  font-weight: 600;
+}
+.pd-tabpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-top: 1rem;
+}
+.pd-tabpanel[hidden] {
+  display: none;
+}
+
+/* widget */
+.pd-widget-notice,
+.pd-app-cards-empty {
+  color: var(--pd-muted, inherit);
+  margin: 0;
+}
+
+.pd-block-error {
+  border: 1px dashed var(--pd-error-fg, GrayText);
+  background: var(--pd-error-bg, transparent);
+  color: var(--pd-error-fg, inherit);
+  padding: 0.75rem 1rem;
+}
+
+[data-pd-editing] a {
+  cursor: default;
+  /* editor anchors have no href (no :any-link), so keep them looking like links */
+  text-decoration: underline;
+}
