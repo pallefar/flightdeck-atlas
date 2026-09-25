@@ -54,17 +54,27 @@ export default function FlightDeckProjectCard(props: {
 }
 
 function Card({
-  project,
+  project: given,
   superAdmin,
+  requesterRequests,
   busy,
   onSave,
 }: {
   project: Project;
   superAdmin: boolean;
+  requesterRequests: boolean;
   busy: boolean;
   onSave: SaveFn;
 }) {
   const locale = useLocale();
+  // The form's own saves (an autosave, an ask, a withdraw) answer with the
+  // saved project; the card follows the newest version it has seen, so it
+  // reads "Waiting for Super Admin" as soon as the ask lands.
+  const [saved, setSaved] = useState<Project | null>(null);
+  const project =
+    saved && saved.id === given.id && saved.revision > given.revision
+      ? saved
+      : given;
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [failed, setFailed] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -136,6 +146,7 @@ function Card({
     failed,
     superAdmin,
     osOrigin,
+    requesterRequests,
   });
   let title = "",
     text = "",
@@ -186,6 +197,30 @@ function Card({
       warn = view.on === "superAdmin";
       action = t("onb.card.view", locale);
       break;
+    case "asked":
+      // The editor waits on the Super Admin; the Super Admin is the one
+      // asked. A stale ask asks the editor to look again.
+      title = superAdmin
+        ? t("onb.waiting.card", locale, { revision: view.revision })
+        : view.stale
+          ? t("onb.ask.changed", locale)
+          : t("onb.ask.waiting", locale, { revision: view.revision });
+      text = superAdmin
+        ? view.stale
+          ? t("onb.waiting.changed", locale)
+          : t("onb.card.continue.text", locale)
+        : t(
+            view.stale ? "onb.ask.changed.text" : "onb.ask.waiting.text",
+            locale,
+            { revision: view.revision },
+          );
+      warn = view.stale;
+      action = superAdmin
+        ? t("onb.waiting.review", locale)
+        : view.stale
+          ? t("onb.ask.changed", locale)
+          : t("onb.card.view", locale);
+      break;
     case "fix":
       title = t("onb.card.fix", locale);
       text = t("onb.card.fix.text", locale);
@@ -222,7 +257,10 @@ function Card({
         </div>
         {/* Next step, outage, response policy and freshness; the log and
             the earlier sends are in the form behind View status. */}
-        {!editing && status && view.kind !== "continue" && (
+        {!editing &&
+          status &&
+          view.kind !== "continue" &&
+          view.kind !== "asked" && (
           <WaitingDetails status={status} superAdmin={superAdmin} compact />
         )}
         {message && (
@@ -260,8 +298,10 @@ function Card({
           <CardEditor
             project={project}
             superAdmin={superAdmin}
+            requesterRequests={requesterRequests}
             busy={busy}
             onSave={onSave}
+            onSaved={setSaved}
             onMessage={setMessage}
             onClose={onClose}
             onStage={onStage}
@@ -277,16 +317,20 @@ function Card({
 function CardEditor({
   project,
   superAdmin,
+  requesterRequests,
   busy,
   onSave,
+  onSaved,
   onMessage,
   onClose,
   onStage,
 }: {
   project: Project;
   superAdmin: boolean;
+  requesterRequests: boolean;
   busy: boolean;
   onSave: SaveFn;
+  onSaved: (project: Project) => void;
   onMessage: (message: string) => void;
   onClose: () => void;
   onStage: (id: string, stage: OnboardingStage | null) => void;
@@ -299,7 +343,9 @@ function CardEditor({
       busy={busy}
       workspaces={superAdmin ? context.workspaces : []}
       contextState={superAdmin ? context.state : null}
+      requesterRequests={requesterRequests}
       onSave={onSave}
+      onAutosaved={onSaved}
       onClose={onClose}
       onMessage={onMessage}
       onStage={onStage}

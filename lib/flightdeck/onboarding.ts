@@ -57,7 +57,11 @@ export type RejectionReason = (typeof rejectionReasons)[number];
  * of it travels to FlightDeck, and it never sends anything: only the Super
  * Admin presses Send (D-033 decision 7). `by` is the asker's Atlas sign-in,
  * checked against the saving session; `stale` is kept by the server
- * (resolveSendRequest) and set when the draft changes after the ask. */
+ * (resolveSendRequest) and set when the draft changes after the ask.
+ * `fields` is the server's copy of the asked revision's sent fields as
+ * Review words them (askSnapshot in ask.ts, onb-atlas-request-ui), so the
+ * Super Admin sees a field diff when the draft changed after the ask. It is
+ * the same project's own text, kept on the same row, and never sent. */
 export const sendRequestSchema = z
   .object({
     revision: z.number().int().positive(),
@@ -65,6 +69,10 @@ export const sendRequestSchema = z
     at: isoSchema,
     withdrawnAt: isoSchema.optional(),
     stale: z.boolean().optional(),
+    fields: z
+      .record(z.string().max(64), z.string().max(4000))
+      .refine((f) => Object.keys(f).length <= 40, "Too many asked fields.")
+      .optional(),
   })
   .strict();
 export type SendRequest = z.infer<typeof sendRequestSchema>;
@@ -290,6 +298,8 @@ export function sendRequestAction(input: {
   canEdit: boolean;
   held: boolean;
   at: string;
+  /** The asked revision's sent fields (askSnapshot), stored with an ask. */
+  fields?: Record<string, string>;
 }): SendRequestActionOutcome {
   if (!input.enabled)
     return {
@@ -328,7 +338,12 @@ export function sendRequestAction(input: {
       ok: true,
       onboarding: {
         ...draft,
-        sendRequest: { revision: input.revision, by: actor, at: input.at },
+        sendRequest: {
+          revision: input.revision,
+          by: actor,
+          at: input.at,
+          ...(input.fields ? { fields: input.fields } : {}),
+        },
       },
     };
   }

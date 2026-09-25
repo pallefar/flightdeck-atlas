@@ -908,6 +908,7 @@ export default function Atlas() {
                 onOpen={openProject}
                 onSave={save}
                 viewerId={access?.userId ?? ""}
+                requesterRequests={requesterRequests}
                 onProjectSaved={(saved) =>
                   setProjects((prev) =>
                     prev.map((p) =>

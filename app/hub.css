@@ -1344,8 +1344,67 @@
   align-items: center;
   gap: 10px 14px;
 }
-.fd-send > p {
+.fd-send > p,
+.fd-send > section {
   flex-basis: 100%;
+}
+/* The editor's ask and the Super Admin's view of a stale ask
+   (onb-atlas-request-ui). */
+.fd-ask {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.fd-diff {
+  width: 100%;
+  margin: 8px 0;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+  color: var(--foreground);
+}
+.fd-diff caption {
+  margin-bottom: 6px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--orange);
+}
+.fd-diff th,
+.fd-diff td {
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.fd-diff thead th {
+  border-top: 0;
+  color: var(--muted-foreground);
+  font-weight: 500;
+}
+.fd-diff del {
+  color: var(--muted-foreground);
+}
+.fd-diff ins {
+  text-decoration: none;
+  font-weight: 600;
+}
+.fd-waiting-you {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.fd-waiting-you ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fd-waiting-you .status {
+  margin-left: 8px;
 }
 .fd-close,
 .fd-close > [role="group"] {

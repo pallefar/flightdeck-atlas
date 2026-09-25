@@ -67,6 +67,7 @@ import {
   ONBOARDING_STEPS,
   meterFor,
   readiness,
+  readinessFor,
   reviewRows,
   stepErrors,
   timelineSteps,
@@ -79,6 +80,7 @@ import {
   AI_AGENT_PREREQUISITES,
 } from "@/lib/flightdeck/onboarding";
 import { waitingView } from "@/lib/flightdeck/waiting";
+import { askDiff, askSnapshot, requesterAsk } from "@/lib/flightdeck/ask";
 import {
   applyStarter,
   approvedStarters,
@@ -859,6 +861,7 @@ export function OnboardingEditor({
   workspaces,
   contextState,
   viewerId = "",
+  requesterRequests = false,
   onSave,
   onAutosaved,
   onClose,
@@ -870,6 +873,9 @@ export function OnboardingEditor({
   busy: boolean;
   workspaces: OsContextEntry[];
   contextState: string | null;
+  /** ATLAS_REQUESTER_REQUESTS: an editor may ask the Super Admin to send
+   * (onb-atlas-request-ui). Off: Review is as before the flag existed. */
+  requesterRequests?: boolean;
   /** Who is viewing: the held copy of unsaved work is kept per viewer. */
   viewerId?: string;
   onSave: (
@@ -1036,6 +1042,8 @@ export function OnboardingEditor({
   const savingRef = useRef(false);
   const [closing, setClosing] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
+  /** An ask or withdraw is on its way to the server. */
+  const [asking, setAsking] = useState(false);
   /** The revision the Super Admin confirmed against a stale ask (the
    * draft changed after the editor asked). Tied to that revision, so a newer
    * save needs a new confirmation. */
@@ -1420,6 +1428,76 @@ export function OnboardingEditor({
       ? askOpen
       : null;
   const diffConfirmed = !!staleAsk && confirmedRevision === server.revision;
+  // What changed since the asked revision, field by field: the server kept
+  // the asked fields with the ask (askSnapshot). null: no copy was kept.
+  const staleDiff = staleAsk
+    ? askDiff(staleAsk.fields, askSnapshot(preview))
+    : null;
+  // The editor's own ask (ATLAS_REQUESTER_REQUESTS on, never the Super
+  // Admin's form): Ask Super Admin to send revision r, then Waiting for
+  // Super Admin, or Changed since you asked once the draft moved on.
+  const askUi = requesterRequests && !superAdmin && !locked;
+  const myAsk = askUi
+    ? requesterAsk(server.onboarding, op?.stage)
+    : ({ kind: "none" } as const);
+  const mine = readinessFor(preview, null, "requester");
+  const askBlocked = !askUi
+    ? ""
+    : unknown
+      ? "Atlas has not loaded this project's FlightDeck status yet."
+      : held || unsaved
+        ? t("onb.ask.saveFirst", locale)
+        : mine.done < mine.total
+          ? t("onb.ask.notReady", locale, { done: mine.done, total: mine.total })
+          : "";
+  /** Ask the Super Admin to send the revision this form shows, or withdraw
+   * the open ask. The server decides (sendRequestAction): it binds the ask
+   * to that revision and refuses one nobody saw. Nothing is sent. */
+  async function askAction(action: "ask" | "withdraw") {
+    const revision =
+      action === "ask"
+        ? server.revision
+        : server.onboarding?.sendRequest?.revision;
+    if (!revision) return;
+    setAsking(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(project.id)}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scope: "onboarding", action, revision }),
+        },
+      );
+      const body = (await response.json().catch(() => null)) as {
+        project?: Project;
+        error?: string;
+      } | null;
+      if (!response.ok || !body?.project) {
+        setError(body?.error || t("onb.ask.failed", locale));
+        return;
+      }
+      const saved = body.project;
+      // The ask is a save of the onboarding part: the form moves onto the
+      // revision it made, so the next autosave is based on it.
+      setServer(saved);
+      setDraft(draftFrom(saved));
+      setOnboardingBase(draftFrom(saved).onboarding);
+      setAutosave(startAutosave(saved.revision));
+      setRefreshedTo(null);
+      onAutosavedRef.current?.(saved);
+      onMessage(
+        action === "ask"
+          ? t("onb.ask.asked", locale, { revision })
+          : t("onb.ask.withdrawn", locale),
+      );
+    } catch {
+      setError(t("onb.ask.failed", locale));
+    } finally {
+      setAsking(false);
+    }
+  }
   async function send() {
     if (!target) return;
     setSending(true);
@@ -2500,6 +2578,65 @@ export function OnboardingEditor({
             </strong>{" "}
             <span id={`fd-legal-${project.id}`}>{LEGAL_OPEN_NOTE}</span>
           </p>
+          {askUi && (
+            <section
+              className={`fd-ask${myAsk.kind === "changed" ? " fd-warn" : ""}`}
+              aria-label={t("onb.ask.button", locale, {
+                revision: server.revision,
+              })}
+            >
+              {myAsk.kind !== "none" && (
+                <p role="status">
+                  <strong>
+                    {myAsk.kind === "waiting"
+                      ? t("onb.ask.waiting", locale, {
+                          revision: myAsk.revision,
+                        })
+                      : t("onb.ask.changed", locale)}
+                  </strong>{" "}
+                  {t(
+                    myAsk.kind === "waiting"
+                      ? "onb.ask.waiting.text"
+                      : "onb.ask.changed.text",
+                    locale,
+                    { revision: myAsk.revision },
+                  )}
+                </p>
+              )}
+              <div className="bridge-actions">
+                {myAsk.kind !== "waiting" && (
+                  <Button
+                    type="button"
+                    disabled={!!askBlocked || asking || saving || busy}
+                    aria-describedby={
+                      askBlocked ? `fd-ask-blocked-${project.id}` : undefined
+                    }
+                    onClick={() => void askAction("ask")}
+                  >
+                    <Send size={14} />
+                    {t("onb.ask.button", locale, {
+                      revision: server.revision,
+                    })}
+                  </Button>
+                )}
+                {myAsk.kind !== "none" && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={asking || busy}
+                    onClick={() => void askAction("withdraw")}
+                  >
+                    {t("onb.ask.withdraw", locale)}
+                  </Button>
+                )}
+              </div>
+              {askBlocked && myAsk.kind !== "waiting" && (
+                <span className="fd-hint" id={`fd-ask-blocked-${project.id}`}>
+                  {askBlocked}
+                </span>
+              )}
+            </section>
+          )}
           {superAdmin && staleAsk && (
             <section
               className="fd-warn"
@@ -2511,6 +2648,51 @@ export function OnboardingEditor({
                 revision, {server.revision}, and that is the revision Send
                 sends once you confirm you reviewed it.
               </p>
+              {staleDiff === null ? (
+                <p>
+                  {t("onb.diff.unknown", locale, {
+                    revision: staleAsk.revision,
+                  })}
+                </p>
+              ) : !staleDiff.length ? (
+                <p>{t("onb.diff.none", locale)}</p>
+              ) : (
+                <table className="fd-diff">
+                  <caption>
+                    {t("onb.diff.title", locale, {
+                      revision: staleAsk.revision,
+                    })}
+                  </caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">{t("onb.diff.field", locale)}</th>
+                      <th scope="col">
+                        {t("onb.diff.asked", locale, {
+                          revision: staleAsk.revision,
+                        })}
+                      </th>
+                      <th scope="col">
+                        {t("onb.diff.now", locale, {
+                          current: server.revision,
+                        })}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {staleDiff.map((row) => (
+                      <tr key={row.path}>
+                        <th scope="row">{row.label}</th>
+                        <td>
+                          <del>{row.asked || t("onb.diff.empty", locale)}</del>
+                        </td>
+                        <td>
+                          <ins>{row.now || t("onb.diff.empty", locale)}</ins>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
               <label>
                 <input
                   type="checkbox"
@@ -2541,7 +2723,9 @@ export function OnboardingEditor({
                   : "Send to FlightDeck"}
             </Button>
           )}
-          {sendBlocked && <span className="fd-hint">{sendBlocked}</span>}
+          {sendBlocked && !askUi && (
+            <span className="fd-hint">{sendBlocked}</span>
+          )}
         </div>
       )}
       {tab === "review" && superAdmin && status?.canClose && (
