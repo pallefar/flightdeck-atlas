@@ -15,5 +15,8 @@ declare namespace Cloudflare {
      * request marker); only the Super Admin sends. Default off (D-037
      * item 4). */
     ATLAS_REQUESTER_REQUESTS?: string;
+    /** Onboarding measures (hashes and moments only, no values). Off unless
+     * exactly "true". */
+    ONB_METRICS_ENABLED?: string;
   }
 }

@@ -10,6 +10,7 @@ import {
   onboardingSchema,
   requesterRequestsEnabled,
 } from "./flightdeck/onboarding";
+import { metricsFlagOn } from "./flightdeck/metrics";
 /** ATLAS_REQUESTER_REQUESTS, read per request: off unless exactly "true". */
 export const requesterRequestsOn = () =>
   requesterRequestsEnabled(env.ATLAS_REQUESTER_REQUESTS);
@@ -20,6 +21,10 @@ export function database() {
     );
   return env.DB;
 }
+/** ONB_METRICS_ENABLED: onboarding measures, off unless exactly "true"
+ * (lib/flightdeck/metrics.ts). Read on every call. */
+export const onboardingMetricsEnabled = () =>
+  metricsFlagOn(env.ONB_METRICS_ENABLED);
 export async function owner() {
   const user = await getChatGPTUser();
   return user?.userId || null;

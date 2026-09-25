@@ -14,8 +14,10 @@ import {
   fromRow,
   newProject,
   requesterRequestsOn,
+  onboardingMetricsEnabled,
 } from "@/lib/server-projects";
 import { resolveSendRequest } from "@/lib/flightdeck/onboarding";
+import { recordDraftSave } from "@/lib/flightdeck/metrics";
 import { visibleProjects } from "@/lib/project-access";
 import { stampTimeEntries } from "@/lib/work-management";
 import { env } from "cloudflare:workers";
@@ -133,6 +135,16 @@ export async function POST(request: Request) {
         { error: "A dependency changed. Retry creating this project." },
         409,
       );
+    // Measure (default off): a project created with onboarding details is
+    // its draft's first save.
+    await recordDraftSave(
+      db,
+      onboardingMetricsEnabled(),
+      project.id,
+      {},
+      fields,
+      project.updatedAt,
+    );
     return json(
       {
         project: {
