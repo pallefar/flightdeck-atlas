@@ -17,6 +17,18 @@ export const en = {
   "onb.tab.basics": "Basics",
   "onb.tab.details": "FlightDeck details",
   "onb.tab.review": "Review & send",
+  "onb.step.aria": "Onboarding steps",
+  "onb.step.apps": "Apps (optional)",
+  "onb.step.agents": "AI agents (locked)",
+  "onb.step.apps.note":
+    "Choosing apps for this project is not available yet. It is optional and never counted as a required detail.",
+  "onb.step.agents.note":
+    "AI agents are locked: they cannot be requested yet. Nothing on this step is sent or counted.",
+  "onb.step.back": "Back",
+  "onb.step.next": "Next",
+  "onb.meter.forYou": "{done} of {total} for you",
+  "onb.meter.required": "{done} of {total} required",
+  "onb.errors.title": "Complete these details before going on:",
   "onb.check.last": "Last checked with FlightDeck: {when}",
   "onb.check.never": "Not checked with FlightDeck yet",
   "onb.check.note":

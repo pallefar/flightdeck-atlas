@@ -19,6 +19,19 @@ export const de: Record<MessageKey, string> = {
   "onb.tab.basics": "Grundlagen",
   "onb.tab.details": "FlightDeck-Details",
   "onb.tab.review": "Prüfen & senden",
+  "onb.step.aria": "Onboarding-Schritte",
+  "onb.step.apps": "Apps (optional)",
+  "onb.step.agents": "KI-Agenten (gesperrt)",
+  "onb.step.apps.note":
+    "Apps für dieses Projekt können noch nicht ausgewählt werden. Der Schritt ist optional und zählt nie als Pflichtangabe.",
+  "onb.step.agents.note":
+    "KI-Agenten sind gesperrt und können noch nicht angefragt werden. Nichts in diesem Schritt wird gesendet oder gezählt.",
+  "onb.step.back": "Zurück",
+  "onb.step.next": "Weiter",
+  "onb.meter.forYou": "{done} von {total} für Sie",
+  "onb.meter.required": "{done} von {total} erforderlich",
+  "onb.errors.title":
+    "Bitte vervollständigen Sie diese Angaben, bevor Sie weitergehen:",
   "onb.check.last": "Zuletzt bei FlightDeck geprüft: {when}",
   "onb.check.never": "Noch nicht bei FlightDeck geprüft",
   "onb.check.note":

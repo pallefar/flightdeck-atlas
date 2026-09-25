@@ -16,6 +16,11 @@ test.describe.configure({ timeout: 90_000 });
 const QA_MARK = " QA-AUTOSAVE ";
 const RUN = `${Date.now().toString(36)}-${process.pid.toString(36)}`;
 const qa = (name: string) => `${name}${QA_MARK}${RUN}`;
+/** The onboarding stepper's step button (the guided stepper replaced tabs). */
+const stepButton = (row: ReturnType<Page["locator"]>, name: string) =>
+  row
+    .getByRole("navigation", { name: "Onboarding steps" })
+    .getByRole("button", { name, exact: true });
 
 async function sweep(browser: Browser) {
   const page = await browser.newPage();
@@ -108,11 +113,11 @@ async function openEditor(page: Page, name: string, open = "Edit draft") {
     await row
       .getByRole("button", { name: open, exact: true })
       .click({ timeout: 2_000 });
-    await expect(row.getByRole("tab", { name: "FlightDeck details" })).toBeVisible({
+    await expect(stepButton(row, "FlightDeck details")).toBeVisible({
       timeout: 2_000,
     });
   }).toPass({ timeout: 45_000 });
-  await row.getByRole("tab", { name: "FlightDeck details" }).click();
+  await stepButton(row, "FlightDeck details").click();
   // The draft opens once the status has loaded.
   await expect(row.getByLabel("Country")).toBeEnabled();
   return row;
@@ -396,9 +401,9 @@ test("Save now freezes the form until the whole save is done, so no edit is lost
     await route.fallback();
   });
   const row = await openEditor(page, name);
-  await row.getByRole("tab", { name: "Basics" }).click();
+  await stepButton(row, "Basics").click();
   await row.getByLabel("Proposed OS project name").fill(`${name} renamed`);
-  await row.getByRole("tab", { name: "FlightDeck details" }).click();
+  await stepButton(row, "FlightDeck details").click();
   const legal = row.getByLabel("Legal entity (optional)");
   await legal.fill("First GmbH");
   await row.getByRole("button", { name: "Save now" }).click();

@@ -2876,6 +2876,11 @@ async function removeProject(page: Page, id: string) {
       });
   }, id);
 }
+/** The onboarding form's named step (the guided stepper). */
+const stepButton = (row: ReturnType<Page["locator"]>, name: string) =>
+  row
+    .getByRole("navigation", { name: "Onboarding steps" })
+    .getByRole("button", { name, exact: true });
 /** Answers the sidebar and Review's destination list with the fixture. */
 async function mockContext(page: Page) {
   await page.route("**/api/flightdeck/context", (route) =>
@@ -3081,7 +3086,7 @@ test("onboarding drafts persist, export, and remove without creating an OS proje
   }
 });
 
-test("the three-tab form prefills Basics, meters readiness, lists every field sent and follows the status", async ({
+test("the guided stepper prefills Basics, meters readiness, lists every field sent and follows the status", async ({
   page,
 }) => {
   await page.clock.install();
@@ -3138,16 +3143,19 @@ test("the three-tab form prefills Basics, meters readiness, lists every field se
     await row
       .getByRole("button", { name: "Prepare onboarding", exact: true })
       .click();
-    const tabs = row.getByRole("tablist", { name: "FlightDeck onboarding" });
-    await expect(tabs.getByRole("tab")).toHaveText([
-      "Basics",
-      "FlightDeck details",
-      "Review & send",
+    const steps = row.getByRole("navigation", { name: "Onboarding steps" });
+    await expect(steps.getByRole("button")).toHaveText([
+      "1Basics",
+      "2FlightDeck details",
+      "3Apps (optional)",
+      "4AI agents (locked)",
+      "5Review & send",
     ]);
-    await expect(tabs.getByRole("tab", { name: "Basics" })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    await expect(stepButton(row, "Basics")).toHaveAttribute(
+      "aria-current",
+      "step",
     );
+    await expect(steps.locator('[aria-current="step"]')).toHaveCount(1);
     // Basics is prefilled from the Atlas project.
     await expect(row.getByLabel("Proposed OS project name")).toHaveValue(
       qa("Onboarding"),
@@ -3159,22 +3167,24 @@ test("the three-tab form prefills Basics, meters readiness, lists every field se
     const meter = row.getByRole("meter", {
       name: "Required FlightDeck details",
     });
-    // Label, function area, category and summary are prefilled.
-    await expect(meter).toHaveAttribute("aria-valuetext", "4 of 9 required");
+    // Label, function area, category and summary are prefilled. The
+    // destination is the Super Admin's own item and joins on Review only.
+    await expect(meter).toHaveAttribute("aria-valuetext", "4 of 8 required");
     // A missing item links straight to its field.
     await row
       .getByRole("list", { name: "Missing details" })
       .getByRole("button", { name: "Country" })
       .click();
-    await expect(
-      tabs.getByRole("tab", { name: "FlightDeck details" }),
-    ).toHaveAttribute("aria-selected", "true");
+    await expect(stepButton(row, "FlightDeck details")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
     await expect(row.getByLabel("Country")).toBeFocused();
     // The checklist offers role titles and the pilot's success measure.
     await row
       .getByRole("button", { name: "Apply checklist suggestions" })
       .click();
-    await expect(meter).toHaveAttribute("aria-valuetext", "5 of 9 required");
+    await expect(meter).toHaveAttribute("aria-valuetext", "5 of 8 required");
     await expect(row.getByLabel("Process owner role")).toHaveValue(
       "Process owner",
     );
@@ -3186,8 +3196,9 @@ test("the three-tab form prefills Basics, meters readiness, lists every field se
     await row.getByLabel("Mark this project Ready for FlightDeck").check();
     await row.getByLabel("New data source").fill("SAP HCM");
     await row.getByRole("button", { name: "Add data source" }).click();
+    await expect(meter).toHaveAttribute("aria-valuetext", "8 of 8 required");
+    await stepButton(row, "Review & send").click();
     await expect(meter).toHaveAttribute("aria-valuetext", "8 of 9 required");
-    await row.getByRole("tab", { name: "Review & send" }).click();
     const sendButton = row.getByRole("button", { name: "Send to FlightDeck" });
     // Unsaved edits are never what gets sent.
     await expect(sendButton).toBeDisabled();
@@ -3234,7 +3245,7 @@ test("the three-tab form prefills Basics, meters readiness, lists every field se
       "Submitted",
     );
     // The draft is locked while FlightDeck reviews it.
-    await row.getByRole("tab", { name: "Basics" }).click();
+    await stepButton(row, "Basics").click();
     await expect(row.getByLabel("Summary")).toBeDisabled();
     // Polled at most once a minute.
     const before = refreshes.length;
@@ -3256,6 +3267,130 @@ test("the three-tab form prefills Basics, meters readiness, lists every field se
     await expect(
       row.getByText("Linked", { exact: true }).first(),
     ).toBeVisible();
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
+test("the stepper counts an editor's own items, Next stops with a focused error summary, and a missing item opens its step", async ({
+  page,
+}) => {
+  await mockContext(page);
+  // View the form as an editor: the same page, with the Super Admin flag off.
+  await page.route(/\/api\/projects(\?.*)?$/, async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const response = await route.fetch();
+    const body = (await response.json()) as { access?: { superAdmin: boolean } };
+    return route.fulfill({
+      response,
+      json: {
+        ...body,
+        access: body.access && { ...body.access, superAdmin: false },
+      },
+    });
+  });
+  await page.goto("/?view=connection");
+  const project = await createProject(page, {
+    name: qa("Stepper"),
+    description: "",
+    benefit: "",
+    functionArea: "HR",
+    category: "Consultancy pilot",
+    onboardingStage: "Pilot",
+  });
+  await page.route(`**/api/flightdeck/onboard/${project.id}**`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(statusBody(null)),
+    }),
+  );
+  try {
+    await page.reload();
+    await openToFlightDeck(page);
+    const row = page.locator("article.bridge-project", {
+      hasText: qa("Stepper"),
+    });
+    await row
+      .getByRole("button", { name: "Prepare onboarding", exact: true })
+      .click();
+    const meter = row.getByRole("meter", {
+      name: "Required FlightDeck details",
+    });
+    // Label, function area and category are prefilled: the editor's own
+    // eight items, never the Super Admin's destination.
+    await expect(meter).toHaveAttribute("aria-valuetext", "3 of 8 for you");
+    await expect(meter).toContainText("3 of 8 for you");
+    const missing = row.getByRole("list", { name: "Missing details" });
+    await expect(missing).not.toContainText("Destination");
+    // Next with missing details stays put and says which, in a focused alert.
+    const next = row.getByRole("button", { name: "Next", exact: true });
+    await next.click();
+    const summary = row.getByRole("alert", {
+      name: /Complete these details before going on/,
+    });
+    await expect(summary).toBeFocused();
+    await expect(summary.getByRole("button")).toHaveText([
+      "Summary",
+      "Success measure",
+    ]);
+    await expect(stepButton(row, "Basics")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+    await row.screenshot({ path: shot("stepper-error-summary-1440.png") });
+    await summary.getByRole("button", { name: "Success measure" }).click();
+    await expect(row.getByLabel("Success measure")).toBeFocused();
+    await row.getByLabel("Success measure").fill("Fewer tickets");
+    await expect(summary.getByRole("button")).toHaveText(["Summary"]);
+    await row.getByLabel("Summary").fill("Guide new HR users");
+    await expect(summary).toHaveCount(0);
+    await expect(meter).toHaveAttribute("aria-valuetext", "5 of 8 for you");
+    await next.click();
+    await expect(stepButton(row, "FlightDeck details")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+    // A missing item on another step opens that step and focuses its field.
+    await row.getByRole("button", { name: "Back", exact: true }).click();
+    await missing
+      .getByRole("button", { name: "Works council relevance" })
+      .click();
+    await expect(stepButton(row, "FlightDeck details")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+    await expect(row.getByLabel("Works council relevant")).toBeFocused();
+    await row.getByLabel("Country").selectOption("DE");
+    await row.getByLabel("Works council relevant").selectOption("unknown");
+    await row.getByLabel("Mark this project Ready for FlightDeck").check();
+    await expect(meter).toHaveAttribute("aria-valuetext", "8 of 8 for you");
+    // Apps and AI agents are placeholders that never block Next.
+    await next.click();
+    await expect(stepButton(row, "Apps (optional)")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+    await expect(row.getByText(/not available yet/)).toBeVisible();
+    await next.click();
+    await expect(stepButton(row, "AI agents (locked)")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+    await expect(row.getByText(/AI agents are locked/)).toBeVisible();
+    await next.click();
+    await expect(stepButton(row, "Review & send")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+    await expect(next).toHaveCount(0);
+    // On Review the editor still counts only their own items, sees no
+    // workspace list, and cannot send (Decision 7).
+    await expect(meter).toHaveAttribute("aria-valuetext", "8 of 8 for you");
+    await expect(row.getByLabel("Destination workspace")).toHaveCount(0);
+    await expect(
+      row.getByRole("button", { name: "Send to FlightDeck" }),
+    ).toHaveCount(0);
   } finally {
     await removeProject(page, project.id);
   }
@@ -3332,7 +3467,7 @@ test("a project FlightDeck has created reads as held, not as a draft under revie
         { exact: false },
       ),
     ).toBeVisible();
-    await row.getByRole("tab", { name: "Basics" }).click();
+    await stepButton(row, "Basics").click();
     await expect(row.getByLabel("Summary")).toBeDisabled();
     await expect(
       row.getByRole("button", { name: "Save now" }),
@@ -3379,7 +3514,7 @@ test("needs more info reopens the draft for editing and sending again", async ({
     await expect(
       page.getByRole("status").filter({ hasText: "Onboarding draft saved" }),
     ).toBeVisible();
-    await row.getByRole("tab", { name: "Review & send" }).click();
+    await stepButton(row, "Review & send").click();
     await row.getByLabel("Destination workspace").selectOption("hr-de");
     await expect(
       row.getByRole("button", { name: "Send to FlightDeck" }),
@@ -3451,7 +3586,7 @@ test("the Super Admin can close an unconfirmed send from the form, and the draft
     await expect(
       row.getByRole("button", { name: "Save now" }),
     ).toBeDisabled();
-    await row.getByRole("tab", { name: "Review & send" }).click();
+    await stepButton(row, "Review & send").click();
     await expect(row.getByRole("button", { name: "Retry send" })).toBeEnabled();
     // Closing asks first and says what it means.
     await row
@@ -3555,7 +3690,9 @@ test("the To FlightDeck list and the dashboard follow FlightDeck without the for
       row.getByText("Needs more info", { exact: true }),
     ).toBeVisible();
     // The form was never opened, and never asked.
-    await expect(row.getByRole("tablist")).toHaveCount(0);
+    await expect(
+      row.getByRole("navigation", { name: "Onboarding steps" }),
+    ).toHaveCount(0);
     expect(forms).toEqual([]);
     // The dashboard card reads the same list.
     await page.goto("/");
@@ -3826,7 +3963,7 @@ test("after a send the form shows where it went and which revision FlightDeck ho
     await expect(
       row.getByRole("list", { name: "Missing details" }),
     ).toHaveCount(0);
-    await row.getByRole("tab", { name: "Review & send" }).click();
+    await stepButton(row, "Review & send").click();
     await expect(row.getByLabel("Destination workspace")).toHaveCount(0);
     await expect(
       row.getByRole("region", { name: "What will be sent" }),
@@ -3861,7 +3998,7 @@ test("after a send the form shows where it went and which revision FlightDeck ho
     await openToFlightDeck(page);
     await row.getByRole("button", { name: "Edit draft", exact: true }).click();
     await expect(row.getByRole("meter")).toHaveCount(0);
-    await row.getByRole("tab", { name: "Review & send" }).click();
+    await stepButton(row, "Review & send").click();
     const resend = row.getByRole("region", { name: "What Retry send resends" });
     await expect(resend).toContainText("Summary v1: contact alex@example.com");
     await expect(resend).not.toContainText("Summary v2");
@@ -3943,7 +4080,7 @@ test("a save elsewhere while the form is open refreshes Review, and an edited dr
     await expect(summaryRow).toContainText("Changed by another editor");
     await expect(row.getByLabel("Summary")).toHaveValue("My unsaved summary");
     await expect(row.getByRole("button", { name: "Save now" })).toBeDisabled();
-    await row.getByRole("tab", { name: "Review & send" }).click();
+    await stepButton(row, "Review & send").click();
     await row.getByLabel("Destination workspace").selectOption("hr-de");
     const sendButton = row.getByRole("button", { name: "Send to FlightDeck" });
     await expect(sendButton).toBeDisabled();
@@ -4016,7 +4153,7 @@ test("Review warns about personal details in free text and blocks them in every 
       hasText: qa("Privacy"),
     });
     await row.getByRole("button", { name: "Edit draft", exact: true }).click();
-    await row.getByRole("tab", { name: "Review & send" }).click();
+    await stepButton(row, "Review & send").click();
     const review = row.getByRole("region", { name: "What will be sent" });
     await expect(review).toContainText("Contact jane@example.com");
     await expect(
@@ -4029,7 +4166,7 @@ test("Review warns about personal details in free text and blocks them in every 
     const sendButton = row.getByRole("button", { name: "Send to FlightDeck" });
     await expect(sendButton).toBeEnabled();
     // A role title is never a person: an email there blocks the send.
-    await row.getByRole("tab", { name: "FlightDeck details" }).click();
+    await stepButton(row, "FlightDeck details").click();
     await row.getByLabel("Process owner role").fill("jane@example.com");
     await expect(
       row.getByText(
@@ -4040,7 +4177,7 @@ test("Review warns about personal details in free text and blocks them in every 
     await expect(
       page.getByRole("status").filter({ hasText: "Onboarding draft saved" }),
     ).toBeVisible();
-    await row.getByRole("tab", { name: "Review & send" }).click();
+    await stepButton(row, "Review & send").click();
     await expect(sendButton).toBeDisabled();
     await expect(
       row.getByText(
@@ -4585,7 +4722,7 @@ test("an onboarding-scoped save changes only the onboarding field, merges over o
   }
 });
 
-test("the timeline shows an answered request, every tab's aria-controls names a panel in the page, and Review & send states the open Legal question", async ({
+test("the timeline shows an answered request, every step labels the panel it shows, and Review & send states the open Legal question", async ({
   page,
 }) => {
   await mockContext(page);
@@ -4619,20 +4756,24 @@ test("the timeline shows an answered request, every tab's aria-controls names a 
     await expect(timeline.locator('li[aria-current="step"]')).toHaveText(
       "Needs more info",
     );
-    // Every tab's aria-controls resolves, on every tab.
-    for (const name of ["Basics", "FlightDeck details", "Review & send"]) {
-      await row.getByRole("tab", { name }).click();
-      const dangling = await row.evaluate((el) =>
-        [...el.querySelectorAll('[role="tab"]')]
-          .map((t) => t.getAttribute("aria-controls"))
-          .filter((id) => id && !document.getElementById(id)),
+    // Every step, once chosen, is the only current one and names the
+    // panel shown; no tab semantics are left without their panel.
+    for (const name of [
+      "Basics",
+      "FlightDeck details",
+      "Apps (optional)",
+      "AI agents (locked)",
+      "Review & send",
+    ]) {
+      await stepButton(row, name).click();
+      await expect(stepButton(row, name)).toHaveAttribute(
+        "aria-current",
+        "step",
       );
-      expect({ name, dangling }).toEqual({ name, dangling: [] });
-      const selected = row.getByRole("tab", { name });
-      const panel = await selected.getAttribute("aria-controls");
-      await expect(row.locator(`[id="${panel}"]`)).toHaveAttribute(
-        "role",
-        "tabpanel",
+      await expect(row.locator('[aria-current="step"]')).toHaveCount(2);
+      await expect(row.getByRole("group", { name })).toBeVisible();
+      await expect(row.locator('[role="tab"], [role="tabpanel"]')).toHaveCount(
+        0,
       );
     }
     // Where the Super Admin authorises the send, the open Legal question is
