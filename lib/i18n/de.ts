@@ -276,4 +276,11 @@ export const de: Record<MessageKey, string> = {
     "Als Nächstes: Der Entwurf ist wieder offen und kann erneut gesendet werden.",
   "pages.doc.tooNew": "Diese Seite braucht ein Atlas-Update",
   "pages.doc.unreadable": "Diese Seite kann nicht angezeigt werden",
+  "decks.export.button": "Meine Präsentationen für FlightDeck exportieren",
+  "decks.export.hint":
+    "Die Datei enthält nur Ihre eigenen Präsentationen, deren Quellprojekte Sie noch öffnen können.",
+  "decks.export.done": "{count} Präsentationen exportiert.",
+  "decks.export.withheld":
+    "{count} nicht exportiert: Ein Quellprojekt ist für Sie nicht mehr verfügbar, die Präsentation war nicht lesbar oder die Dateigrenze war erreicht. Sie stehen in der Datei unter \"withheld\".",
+  "decks.export.failed": "Der Export ist fehlgeschlagen. Bitte erneut versuchen.",
 };

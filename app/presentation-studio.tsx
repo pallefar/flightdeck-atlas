@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { createDeck, templates, type Deck } from "@/lib/presentations";
+import { useT } from "@/lib/i18n/react";
 import type { Project } from "@/lib/projects";
 async function fetchDecks(offset: number, scopedProjectId?: string) {
   const r = await fetch(
@@ -54,7 +55,9 @@ export default function PresentationStudio({
     [busy, setBusy] = useState(false),
     [slide, setSlide] = useState(0),
     [present, setPresent] = useState(false),
-    [dirty, setDirty] = useState(false);
+    [dirty, setDirty] = useState(false),
+    [exportNote, setExportNote] = useState("");
+  const tr = useT();
   async function load(offset = 0) {
     try {
       const b = await fetchDecks(offset, scopedProjectId);
@@ -207,6 +210,44 @@ export default function PresentationStudio({
       setBusy(false);
     }
   }
+  // Owner-only export for the FlightDeck import (/api/decks/export): the file
+  // holds only the caller's own decks whose source projects are still
+  // readable; the rest are reported as withheld, by id.
+  async function exportAll() {
+    setBusy(true);
+    setError("");
+    setExportNote("");
+    try {
+      const r = await fetch("/api/decks/export");
+      if (!r.ok) throw Error(tr("decks.export.failed"));
+      const b = (await r.json()) as {
+        decks: unknown[];
+        withheld: unknown[];
+      };
+      const url = URL.createObjectURL(
+        new Blob([JSON.stringify(b, null, 2)], { type: "application/json" }),
+      );
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `atlas-presentations-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setExportNote(
+        [
+          tr("decks.export.done", { count: b.decks.length }),
+          b.withheld.length
+            ? tr("decks.export.withheld", { count: b.withheld.length })
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
+      );
+    } catch {
+      setError(tr("decks.export.failed"));
+    } finally {
+      setBusy(false);
+    }
+  }
   const current = deck?.slides[Math.min(slide, (deck?.slides.length || 1) - 1)];
   return (
     <main
@@ -319,6 +360,22 @@ export default function PresentationStudio({
                 ? "Presentations for this project"
                 : "Saved presentations"}
             </h2>
+            <div className="studio-toolbar">
+              <Button
+                variant="outline"
+                disabled={busy || demo}
+                onClick={() => void exportAll()}
+              >
+                <Download size={15} />
+                {tr("decks.export.button")}
+              </Button>
+            </div>
+            <p className="hub-muted">{tr("decks.export.hint")}</p>
+            {exportNote && (
+              <p className="hub-muted" role="status">
+                {exportNote}
+              </p>
+            )}
             <div className="suite-card-grid">
               {decks.map((d) => (
                 <button
