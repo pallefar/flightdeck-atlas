@@ -11,6 +11,7 @@
 // reports arrive.
 import type { OnboardDb } from "./onboard-route";
 import { onboardingStages, type OnboardingStage } from "./onboarding";
+import { noticeStatement, type NoticeRecipients } from "./notices";
 
 /** How Atlas saw a stage. 'atlas': the answer to Atlas's own action (the
  * send's reply, or the Super Admin closing a send), 'poll': a read-back,
@@ -84,13 +85,17 @@ const uniqueViolation = (error: unknown) =>
  * written only while the send exists and its latest stage is one `stage`
  * may follow (mayFollow; so never a repeat of the latest). Two writers
  * racing to the same seq meet UNIQUE(send_id, seq): the loser records
- * nothing. Returns whether a row was written. */
+ * nothing. Returns whether a row was written. With `notify`, the row's
+ * notices follow it in the same batch (notices.ts). */
 export async function applyObservedStage(
   db: OnboardDb,
   sendId: string,
   stage: OnboardingStage,
   at: string,
   source: Exclude<TransitionSource, "backfill">,
+  /** Notify the transition's recipients (lib/flightdeck/notices.ts): the
+   * row and its notices are then written in one D1 batch, both or neither. */
+  notify?: NoticeRecipients,
 ): Promise<boolean> {
   const after = onboardingStages.filter((prev) => mayFollow(prev, stage));
   const latest =
@@ -101,7 +106,15 @@ export async function applyObservedStage(
     "WHERE EXISTS(SELECT 1 FROM atlas_flightdeck_operations WHERE id=?1) " +
     `AND (${latest} IS NULL${after.length ? ` OR ${latest} IN (${after.map((s) => `'${s}'`).join(",")})` : ""})`;
   try {
-    const result = await db.prepare(sql).bind(sendId, stage, at, source).run();
+    const insert = db.prepare(sql).bind(sendId, stage, at, source);
+    if (!notify) return (await insert.run()).meta.changes > 0;
+    // Fails closed: without a batch the notices could not share the row's
+    // transaction, so nothing is recorded (the next observation retries).
+    if (!db.batch) throw new Error("A D1 batch is required to notify.");
+    const [result] = await db.batch([
+      insert,
+      noticeStatement(db, sendId, stage, at, notify),
+    ]);
     return result.meta.changes > 0;
   } catch (error) {
     if (uniqueViolation(error)) return false;

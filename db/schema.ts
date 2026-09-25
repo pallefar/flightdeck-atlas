@@ -87,9 +87,19 @@ export const notifications = sqliteTable(
     text: text("text").notNull(),
     createdAt: text("created_at").notNull(),
     read: integer("read").notNull().default(0),
+    /** The FlightDeck send and transition seq a notice reports (lib/
+     * flightdeck/notices.ts); null for every other notice. No foreign key:
+     * the notice goes with its project, not with the send's log. */
+    sendId: text("send_id"),
+    seq: integer("seq"),
   },
   (t) => [
     index("idx_atlas_notifications_recipient").on(t.recipient, t.createdAt),
+    uniqueIndex("uniq_atlas_notifications_send_seq_recipient").on(
+      t.sendId,
+      t.seq,
+      t.recipient,
+    ),
   ],
 );
 export const files = sqliteTable(

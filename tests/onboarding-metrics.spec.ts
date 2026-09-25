@@ -24,6 +24,7 @@ import {
   recordOnboardingMetric,
   summariseOnboardingMetrics,
 } from "../lib/flightdeck/metrics";
+import { withD1Batch } from "./fixtures/d1-batch";
 
 const dir = new URL("../drizzle/", import.meta.url);
 const migrations = () =>
@@ -37,7 +38,7 @@ function store() {
       "--> statement-breakpoint",
     ))
       if (statement.trim()) sqlite.exec(statement);
-  const db: OnboardDb = {
+  const db: OnboardDb = withD1Batch(sqlite, {
     prepare(sql) {
       return {
         bind(...values) {
@@ -59,7 +60,7 @@ function store() {
         },
       };
     },
-  };
+  });
   const rows = () =>
     sqlite
       .prepare("SELECT * FROM atlas_onboarding_metrics ORDER BY at, kind")

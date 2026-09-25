@@ -64,6 +64,8 @@ import {
   type OnboardDb,
 } from "../lib/flightdeck/onboard-route";
 import { NO_FEATURES, type InboundFeatures } from "../lib/flightdeck/features";
+import { withD1Batch } from "./fixtures/d1-batch";
+import { NEEDS_CHANGES_TEXT, noticeText } from "../lib/flightdeck/notices";
 
 // Nothing in this file contacts FlightDeck OS. The OS's responses for the
 // project-onboarding kind come from a fixture recorded from the OS
@@ -929,7 +931,7 @@ function onboardDb() {
       "--> statement-breakpoint",
     ))
       sqlite.exec(statement);
-  const db: OnboardDb = {
+  const db: OnboardDb = withD1Batch(sqlite, {
     prepare(sql) {
       return {
         bind(...values) {
@@ -951,7 +953,7 @@ function onboardDb() {
         },
       };
     },
-  };
+  });
   const ops = () =>
     sqlite
       .prepare("SELECT * FROM atlas_flightdeck_operations ORDER BY rowid")
@@ -982,6 +984,8 @@ function harness(
     features?: () => Promise<InboundFeatures>;
     /** ONB_METRICS_ENABLED; unset is the default (off). */
     metrics?: boolean;
+    /** ATLAS_SUPERADMIN_EMAIL, notified of each transition. */
+    superAdminEmails?: string[];
   } = {},
 ) {
   const store = onboardDb();
@@ -1109,6 +1113,9 @@ function harness(
     ...(options.metrics === undefined
       ? {}
       : { metricsEnabled: () => options.metrics! }),
+    ...(options.superAdminEmails
+      ? { superAdminEmails: () => options.superAdminEmails! }
+      : {}),
   });
   const readAs = (name: string) => async (): Promise<ReadSubmissionResult> => {
     const body = readBack(name);
@@ -2363,6 +2370,41 @@ test("Linked appears only after read:context confirms the promoted project, then
   await h.status();
   expect(h.fake.calls).toEqual([]);
   expect(h.store.links()).toHaveLength(1);
+});
+
+test("each stage Atlas logs notifies the Super Admins and the asker once, and the needs-changes notice is the fixed sentence", async () => {
+  const asked = readyProject();
+  asked.onboarding = {
+    ...asked.onboarding,
+    sendRequest: {
+      revision: asked.revision,
+      by: "asker@example.com",
+      at: "2026-09-21T09:00:00.000Z",
+    },
+  };
+  const h = harness({ project: asked, superAdminEmails: ["Root@Example.com"] });
+  const notices = () =>
+    (
+      h.store.sqlite
+        .prepare(
+          "SELECT recipient,text,seq,read FROM atlas_notifications ORDER BY seq,recipient",
+        )
+        .all() as { recipient: string; text: string; seq: number }[]
+    ).map((n) => [n.seq, n.recipient, n.text]);
+  expect((await h.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  h.tick(61_000);
+  await h.status();
+  h.fake.onRead = h.readAs("needsMoreInfo");
+  h.tick(61_000);
+  await h.status();
+  h.tick(61_000);
+  await h.status();
+  expect(notices()).toEqual([
+    [1, "asker@example.com", noticeText("submitted")],
+    [1, "root@example.com", noticeText("submitted")],
+    [2, "asker@example.com", NEEDS_CHANGES_TEXT],
+    [2, "root@example.com", NEEDS_CHANGES_TEXT],
+  ]);
 });
 
 test("the send and poll paths log each stage once, at the time Atlas saw it, and a project delete takes the log", async () => {

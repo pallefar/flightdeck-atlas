@@ -62,7 +62,13 @@ export type OnboardDb = {
       run(): Promise<{ meta: { changes: number } }>;
     };
   };
+  /** D1's batch: the statements run in order as one transaction. Required
+   * where a transition is recorded with its notices (lib/flightdeck/
+   * notices.ts); D1 always has it. */
+  batch?(statements: OnboardBound[]): Promise<{ meta: { changes: number } }[]>;
 };
+/** A bound statement of an OnboardDb. */
+export type OnboardBound = ReturnType<ReturnType<OnboardDb["prepare"]>["bind"]>;
 export type OnboardDeps<A extends OnboardAccess> = {
   authorize(): Promise<OnboardAuth<A>>;
   loadProject(
@@ -84,6 +90,10 @@ export type OnboardDeps<A extends OnboardAccess> = {
   newId?(): string;
   /** ONB_METRICS_ENABLED (lib/flightdeck/metrics.ts). Unset is off. */
   metricsEnabled?(): boolean;
+  /** The configured Super Admin sign-in(s) (ATLAS_SUPERADMIN_EMAIL), who
+   * are notified of each transition along with the Super Admin members and
+   * the asker (lib/flightdeck/notices.ts). */
+  superAdminEmails?(): string[];
 };
 
 /** A send and its link as stored; what projectStatus projects. */
@@ -604,7 +614,9 @@ export function createOnboardRoute<A extends OnboardAccess>(
         setupState: row.setup_state,
       });
       const at = now().toISOString();
-      if (await applyObservedStage(db, id, stage, at, source)) {
+      // The row and its notices go in one batch (lib/flightdeck/notices.ts).
+      const notify = { superAdmins: deps.superAdminEmails?.() ?? [] };
+      if (await applyObservedStage(db, id, stage, at, source, notify)) {
         // Measures read off what Atlas saw, once per draft (default off).
         if (stage === "submitted")
           await measure(db, row.atlas_project_id, "sent", at);

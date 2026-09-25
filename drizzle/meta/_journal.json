@@ -57,6 +57,13 @@
       "when": 1790333559698,
       "tag": "0007_black_magneto",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1790338659188,
+      "tag": "0008_dry_thaddeus_ross",
+      "breakpoints": true
     }
   ]
 }
