@@ -461,6 +461,10 @@ export const projectOnboardingPayloadSchema = z
       .strict()
       .nullable(),
     cowork: z.object({ requested: z.boolean() }).strict(),
+    /** Only while features.supersedes is on (OS onb-resubmit-lineage-os):
+     * the earlier request of this project that FlightDeck answered
+     * needs-more-info. The builder adds it through `gated` only. */
+    supersedes: z.string().regex(SUBMISSION_ID_RE).optional(),
   })
   .strict();
 export type ProjectOnboardingPayload = z.infer<
@@ -521,7 +525,7 @@ export function buildOnboardingPayload(input: {
   requestedBy: string;
   features?: InboundFeatures;
   gated?: GatedPayload;
-}): ProjectOnboardingPayload & GatedPayload {
+}): ProjectOnboardingPayload & Omit<GatedPayload, "supersedes"> {
   const p = input.project,
     o = p.onboarding ?? {};
   const active = p.tasks.filter((t) => !t.archived);
@@ -568,7 +572,12 @@ export function buildOnboardingPayload(input: {
       ? { done: active.filter((t) => t.done).length, total: active.length }
       : null,
     cowork: { requested: !!o.coworkRequested },
-    ...gatedFields(input.gated, input.features),
+    // Typed as the schema's `supersedes`; every caller validates the
+    // payload against projectOnboardingPayloadSchema before it is sent.
+    ...(gatedFields(input.gated, input.features) as Omit<
+      GatedPayload,
+      "supersedes"
+    > & { supersedes?: string }),
   };
 }
 
@@ -779,13 +788,10 @@ export const ONBOARDING_STEPS: readonly {
  * atlas-onboarding-agents-status, plus OS enforcement that refuses aiAgents
  * while the relevant capability's prerequisites are open; a flag alone
  * never unlocks the step. Labels live under onb.agents.* in lib/i18n. */
-export type AiAgentCapability = "bedrock" | "employeeData" | "studio" | "cowork";
+export type AiAgentCapability =
+  "bedrock" | "employeeData" | "studio" | "cowork";
 export type AiAgentPrerequisiteOwner =
-  | "owner"
-  | "ownerAndDpo"
-  | "legal"
-  | "operator"
-  | "worksCouncil";
+  "owner" | "ownerAndDpo" | "legal" | "operator" | "worksCouncil";
 export type AiAgentPrerequisite = {
   id: string;
   owner: AiAgentPrerequisiteOwner;
@@ -810,7 +816,10 @@ export const AI_AGENT_PREREQUISITES: readonly {
       { id: "retention", owner: "legal", status: "open" },
     ],
   },
-  { capability: "studio", items: [{ id: "ruling8", owner: "owner", status: "open" }] },
+  {
+    capability: "studio",
+    items: [{ id: "ruling8", owner: "owner", status: "open" }],
+  },
   {
     capability: "cowork",
     items: [{ id: "promptWording", owner: "owner", status: "open" }],
@@ -1010,6 +1019,82 @@ const POINTER_TARGETS: Record<
     ids: ["fd-cowork"],
   },
 };
+/** Where each pointer's value sits in the payload. */
+const POINTER_PATHS: Record<FieldPointer, string> = {
+  summary: "profile.summary",
+  successMeasure: "profile.successMeasure",
+  functionArea: "profile.functionArea",
+  category: "profile.category",
+  status: "profile.status",
+  priority: "profile.priority",
+  targetDate: "profile.targetDate",
+  site: "profile.site",
+  countryCode: "facts.countryCode",
+  legalEntity: "facts.legalEntity",
+  headcountBand: "facts.headcountBand",
+  worksCouncilRelevant: "facts.worksCouncilRelevant",
+  ownerRoles: "facts.ownerRoles",
+  dataSources: "facts.dataSources",
+  accessRequested: "facts.accessRequested",
+  coworkRequested: "cowork.requested",
+};
+export type FieldDigests = Partial<Record<FieldPointer, string>>;
+/** One sha256 per reviewer-pointable field of a payload (onb-resubmit-
+ * atlas): what 'Fix and resubmit' compares against, so a resubmission is
+ * possible once a field the reviewer named changed. Digests, not values:
+ * Atlas keeps no second copy of the text it sent. */
+export async function fieldDigests(
+  payload: ProjectOnboardingPayload,
+): Promise<Record<FieldPointer, string>> {
+  const out = {} as Record<FieldPointer, string>;
+  for (const pointer of FIELD_POINTERS) {
+    const value = at(payload, POINTER_PATHS[pointer]);
+    const bytes = new TextEncoder().encode(
+      stableJson(value === undefined ? null : value),
+    );
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    out[pointer] = [...new Uint8Array(digest)]
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  }
+  return out;
+}
+/** JSON with sorted object keys, so a digest never depends on key order. */
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object")
+    return `{${Object.keys(value)
+      .sort()
+      .map(
+        (k) =>
+          `${JSON.stringify(k)}:${stableJson((value as Record<string, unknown>)[k])}`,
+      )
+      .join(",")}}`;
+  return JSON.stringify(value);
+}
+/** Whether 'Fix and resubmit' may go: a field the reviewer named changed
+ * since the earlier send, or, when the reviewer named none, any field.
+ * `sent` null (a send from before digests were kept, or one Atlas
+ * adopted): Atlas cannot tell, so only the server's revision check applies.
+ * Fails closed on a sent digest that is missing for a field it compares. */
+export function resubmitChanged(
+  sent: FieldDigests | null,
+  current: FieldDigests,
+  named: readonly FieldPointer[] | undefined,
+): boolean {
+  if (!sent) return true;
+  const compared = named?.length ? named : FIELD_POINTERS;
+  return compared.some(
+    (p) =>
+      sent[p] !== undefined &&
+      current[p] !== undefined &&
+      sent[p] !== current[p],
+  );
+}
+export const fieldDigestsSchema = z.record(
+  z.enum(FIELD_POINTERS),
+  z.string().regex(/^[a-f0-9]{64}$/),
+);
 const isFieldPointer = (value: unknown): value is FieldPointer =>
   typeof value === "string" && Object.hasOwn(POINTER_TARGETS, value);
 /** What a reviewer's pointers flag in the form: the control ids to outline
@@ -1247,8 +1332,8 @@ const prefilledValue = (t: PrefillTarget, field: SuggestionField) =>
         : field === "category"
           ? t.category
           : t.onboarding?.ownerRoles?.[
-            field.slice(ROLE_PREFIX.length) as "process" | "data" | "support"
-          ];
+              field.slice(ROLE_PREFIX.length) as "process" | "data" | "support"
+            ];
 /** Applies checklist suggestions and records each one's provenance. A field
  * that already holds a value (say, one the user typed) is never overwritten,
  * even by a suggestion list computed before that edit. */
@@ -1348,6 +1433,17 @@ export const osAlreadySubmittedSchema = z.object({
   code: z.literal("already_submitted"),
   submissionId: submissionIdSchema.optional(),
   state: z.string().max(40).optional(),
+});
+/** The OS's resubmission-lineage refusals (OS onb-resubmit-lineage-os):
+ * 404 SUPERSEDES_NOT_FOUND, 409 SUPERSEDES_WRONG_STATE, and 409
+ * ALREADY_SUPERSEDED naming the successor the earlier request has. */
+export const osLineageRefusalSchema = z.object({
+  code: z.enum([
+    "ALREADY_SUPERSEDED",
+    "SUPERSEDES_NOT_FOUND",
+    "SUPERSEDES_WRONG_STATE",
+  ]),
+  submissionId: submissionIdSchema.optional(),
 });
 /** The OS's other two 409s (OS server/routes/inbound.ts). Neither says
  * whether this request was filed; each has its own remedy. */
@@ -1800,6 +1896,20 @@ export const onboardingStatusSchema = z
         note: reviewerNoteSchema.optional(),
         /** Needs more info only: the allowlisted fields it points at. */
         fields: z.array(z.enum(FIELD_POINTERS)).optional(),
+        /** Super Admin only, needs more info only: a digest per field of
+         * what was sent, so the form enables 'Fix and resubmit' once a
+         * named field changed (resubmitChanged). */
+        sentDigests: fieldDigestsSchema.optional(),
+        /** This send resubmits an earlier needs-more-info send: that send's
+         * revision (null when adopted), and whether FlightDeck links the
+         * two (payload.supersedes) or only Atlas does. */
+        resubmissionOf: z
+          .object({
+            revision: z.number().int().positive().nullable(),
+            linkedInFlightDeck: z.boolean(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .nullable(),

@@ -26,6 +26,7 @@ import {
   ONBOARDING_KIND,
   onboardingEnvelopeSchema,
   osAlreadySubmittedSchema,
+  osLineageRefusalSchema,
   osSubmitAcceptedSchema,
   osSubmitConflictSchema,
   osSubmitDuplicateSchema,
@@ -386,6 +387,13 @@ export type SubmitResult =
   /** OS 409: this key was used for a different Atlas project, so nothing of
    * this project was filed under it. */
   | { state: "idempotency_key_conflict" }
+  /** OS 409 ALREADY_SUPERSEDED (onb-resubmit-lineage-os): the request this
+   * one names in `supersedes` already has a successor, named here. Nothing
+   * was filed. */
+  | { state: "already_superseded"; submissionId: string | null }
+  /** OS 404 SUPERSEDES_NOT_FOUND or 409 SUPERSEDES_WRONG_STATE: FlightDeck
+   * will not take this as that request's successor. Nothing was filed. */
+  | { state: "supersedes_refused" }
   | TransportFailure;
 export type ReadSubmissionResult =
   | { state: "ok"; data: OsSubmissionStatus }
@@ -429,6 +437,22 @@ export function createSubmissionClient(
       if (refused) return refused;
       if (response.status === 400) return { state: "invalid_submission" };
       if (!isJson(response)) return { state: "invalid_response" };
+      // The lineage refusals come only with a payload naming `supersedes`;
+      // anywhere else the code means nothing here and stays not known.
+      if (checked.data.payload.supersedes) {
+        const lineage = osLineageRefusalSchema.safeParse(body);
+        if (
+          lineage.success &&
+          response.status ===
+            (lineage.data.code === "SUPERSEDES_NOT_FOUND" ? 404 : 409)
+        )
+          return lineage.data.code === "ALREADY_SUPERSEDED"
+            ? {
+                state: "already_superseded",
+                submissionId: lineage.data.submissionId ?? null,
+              }
+            : { state: "supersedes_refused" };
+      }
       if (response.status === 409) {
         const lock = osAlreadySubmittedSchema.safeParse(body);
         if (lock.success)
@@ -512,10 +536,7 @@ export type WhoamiRead =
   | { state: "ok"; body: unknown }
   | {
       state:
-        | "unauthorized"
-        | "os_unreachable"
-        | "rate_limited"
-        | "invalid_response";
+        "unauthorized" | "os_unreachable" | "rate_limited" | "invalid_response";
     };
 /** Reads GET /v1/whoami once per call. It spends the same credential-wide
  * rate limit as every other call, and honours (and records) a 429. */

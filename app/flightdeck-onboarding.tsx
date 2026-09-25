@@ -54,6 +54,7 @@ import {
   applyChecklistSuggestions,
   checklistSuggestions,
   countryName,
+  fieldDigests,
   fieldLabel,
   flaggedFields,
   headcountBands,
@@ -67,6 +68,7 @@ import {
   ONBOARDING_STEPS,
   meterFor,
   readiness,
+  resubmitChanged,
   reviewRows,
   stepErrors,
   timelineSteps,
@@ -428,14 +430,9 @@ export function WaitingDetails({
       )}
       {view.next && <p className="fd-hint">{view.next}</p>}
       {view.eta && <p className="fd-hint">{view.eta}</p>}
-      {compact && view.freshness && (
-        <p className="fd-hint">{view.freshness}</p>
-      )}
+      {compact && view.freshness && <p className="fd-hint">{view.freshness}</p>}
       {!compact && view.rows.length > 0 && (
-        <ol
-          className="fd-observed"
-          aria-label={t("onb.observed.aria", locale)}
-        >
+        <ol className="fd-observed" aria-label={t("onb.observed.aria", locale)}>
           {view.rows.map((row, i) => (
             <li key={`${i}-${row.stage}`}>{row.text}</li>
           ))}
@@ -516,8 +513,7 @@ function StatusBanner({
   // "Last checked" (Super Admin) or "Last update seen" (editor, whose view
   // never checks) belongs to a status that can still change on its own,
   // which the server itself decides (pollable), not to every locked draft.
-  const freshness = waitingView(status, { superAdmin, locale, when })
-    .freshness;
+  const freshness = waitingView(status, { superAdmin, locale, when }).freshness;
   return (
     <div className={`fd-banner ${tone}`}>
       {tone ? <AlertTriangle size={16} /> : <Check size={16} />}
@@ -639,7 +635,10 @@ const DIFF_FIELDS: DiffField[] = [
   detailField("worksCouncilRelevant", "Works council relevant"),
   detailField("legalEntity", "Legal entity (optional)"),
   detailField("headcountBand", "Headcount band (optional)", (v, locale) =>
-    t(`onb.headcount.${v as NonNullable<OnboardingDraft["headcountBand"]>}`, locale),
+    t(
+      `onb.headcount.${v as NonNullable<OnboardingDraft["headcountBand"]>}`,
+      locale,
+    ),
   ),
   roleField("process", "Process owner role"),
   roleField("data", "Data owner role"),
@@ -786,8 +785,7 @@ function ConflictPanel({
   const rows = theirsDraft ? conflictRows(base, mine, theirsDraft) : [];
   const titleId = `fd-conflict-${theirs?.id ?? "loading"}`;
   const title =
-    theirs &&
-    (held.kind !== "recovered" || theirs.revision > held.baseRevision)
+    theirs && (held.kind !== "recovered" || theirs.revision > held.baseRevision)
       ? t("onb.conflict.title", locale, { revision: theirs.revision })
       : t("onb.conflict.recoveredTitle", locale);
   return (
@@ -803,7 +801,9 @@ function ConflictPanel({
           </p>
         ) : (
           <>
-            <p>{t("onb.conflict.intro", locale, { revision: theirs.revision })}</p>
+            <p>
+              {t("onb.conflict.intro", locale, { revision: theirs.revision })}
+            </p>
             {rows.length ? (
               <div className="fd-conflict-table">
                 <table>
@@ -954,9 +954,7 @@ export function OnboardingEditor({
     save.status === "stopped" ||
     save.status === "retrying";
   const newest =
-    snap.acked && snap.acked.revision > project.revision
-      ? snap.acked
-      : project;
+    snap.acked && snap.acked.revision > project.revision ? snap.acked : project;
   const baseDraft: Draft = { ...draftFrom(server), onboarding: onboardingBase };
   /** Moves the form's base onto a newer version, keeping local work. */
   function adopt(p: Project, keepBasics: boolean) {
@@ -1119,6 +1117,40 @@ export function OnboardingEditor({
   });
   const rows = reviewRows(payload);
   const privacy = personalDataIn(payload);
+  // 'Fix and resubmit' (onb-resubmit-atlas, plan J6): after a needs-more-
+  // info answer, Send becomes a resubmission, enabled once a field the
+  // reviewer named differs from what was sent (any field when none was
+  // named). The server refuses the same (409 nothing_changed).
+  const resubmitting = !locked && op?.stage === "needs-more-info";
+  const sentDigests = resubmitting ? op?.sentDigests : undefined;
+  const namedFields = resubmitting ? op?.fields : undefined;
+  const payloadKey = JSON.stringify(payload);
+  const [digestsChanged, setDigestsChanged] = useState<{
+    key: string;
+    changed: boolean;
+  } | null>(null);
+  useEffect(() => {
+    if (!sentDigests) return;
+    let live = true;
+    void fieldDigests(payload).then((current) => {
+      if (live)
+        setDigestsChanged({
+          key: payloadKey + JSON.stringify(sentDigests),
+          changed: resubmitChanged(sentDigests, current, namedFields),
+        });
+    });
+    return () => {
+      live = false;
+    };
+    // payloadKey stands for payload.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payloadKey, sentDigests, namedFields]);
+  const resubmitReady = !resubmitting
+    ? true
+    : sentDigests
+      ? digestsChanged?.key === payloadKey + JSON.stringify(sentDigests) &&
+        digestsChanged.changed
+      : !op?.atlasRevision || server.revision > op.atlasRevision;
   /** Exactly what Retry send resends (Super Admin only). */
   const pending = retrying ? (status?.pendingPayload ?? null) : null;
   const changedSince =
@@ -1314,14 +1346,12 @@ export function OnboardingEditor({
       setSaving(false);
     }
   }
-  async function saveAll(
-    over: {
-      server?: Project;
-      draft?: Draft;
-      basicsDirty?: boolean;
-      via?: Autosave;
-    },
-  ) {
+  async function saveAll(over: {
+    server?: Project;
+    draft?: Draft;
+    basicsDirty?: boolean;
+    via?: Autosave;
+  }) {
     setError("");
     const via = over.via ?? autosave;
     let d = over.draft ?? draft;
@@ -1330,7 +1360,11 @@ export function OnboardingEditor({
     const state = await via.coordinator.flush();
     // Still failing, refused or in conflict: the pill and the conflict view
     // say why, and the rest waits.
-    if (state.pending || state.status === "conflict" || state.status === "stopped")
+    if (
+      state.pending ||
+      state.status === "conflict" ||
+      state.status === "stopped"
+    )
       return;
     const acked = via.getSnapshot().acked;
     if (acked && acked.revision > base.revision) {
@@ -1464,7 +1498,12 @@ export function OnboardingEditor({
                 : "")
           : "The send could not be completed. Try again.",
       );
-      if (refused.success && refused.data.status) show(refused.data.status);
+      // Another resubmission of the earlier request won: reload what
+      // FlightDeck holds now.
+      if (refused.success && refused.data.code === "already_superseded")
+        void load(true);
+      else if (refused.success && refused.data.status)
+        show(refused.data.status);
       else void load(false);
     } catch {
       setError("The send could not be completed. Try again.");
@@ -1528,13 +1567,17 @@ export function OnboardingEditor({
             ? "This project was saved elsewhere. Choose Keep mine or Use theirs, then review it before sending."
             : unsaved
               ? "Save the draft first: FlightDeck receives the saved version."
-              : staleAsk && !diffConfirmed
-                ? `Confirm that you reviewed revision ${server.revision} first: the draft changed after revision ${staleAsk.revision} was asked for.`
-                : !ready.ready
-                ? `Complete the required details first (${ready.done} of ${ready.total}).`
-                : privacy.refused.length
-                  ? `Remove the email address or phone number from: ${privacy.refused.map(fieldLabel).join(", ")}. FlightDeck receives role titles and system names, not personal details.`
-                  : "";
+              : !resubmitReady
+                ? namedFields?.length
+                  ? `Change a field the reviewer named first (${namedFields.map(fieldLabel).join(", ")}): FlightDeck asked for more information.`
+                  : "Change the draft first: FlightDeck asked for more information about what was sent."
+                : staleAsk && !diffConfirmed
+                  ? `Confirm that you reviewed revision ${server.revision} first: the draft changed after revision ${staleAsk.revision} was asked for.`
+                  : !ready.ready
+                    ? `Complete the required details first (${ready.done} of ${ready.total}).`
+                    : privacy.refused.length
+                      ? `Remove the email address or phone number from: ${privacy.refused.map(fieldLabel).join(", ")}. FlightDeck receives role titles and system names, not personal details.`
+                      : "";
   const freeTextWarnings = (warned: string[]) =>
     warned.map((path) => (
       <p key={path} className="fd-warn" role="note">
@@ -2354,7 +2397,9 @@ export function OnboardingEditor({
                     {group.items.map((item) => (
                       <li key={item.id}>
                         {t(`onb.agents.pre.${item.id}` as MessageKey, locale)}{" "}
-                        <strong>{t(`onb.agents.status.${item.status}`, locale)}</strong>{" "}
+                        <strong>
+                          {t(`onb.agents.status.${item.status}`, locale)}
+                        </strong>{" "}
                         <span className="fd-hint">
                           {t("onb.agents.ownerLabel", locale, {
                             owner: t(`onb.agents.owner.${item.owner}`, locale),
@@ -2490,6 +2535,16 @@ export function OnboardingEditor({
             Sending files a request for review in FlightDeck. An OS admin
             decides; nothing becomes OS data until they accept it.
           </p>
+          {op?.resubmissionOf && (
+            <p className="fd-hint" role="note">
+              {op.resubmissionOf.revision
+                ? `Resubmission of revision ${op.resubmissionOf.revision}. `
+                : "Resubmission of an earlier request. "}
+              {op.resubmissionOf.linkedInFlightDeck
+                ? "FlightDeck links it to the earlier request."
+                : "Atlas links it to the earlier request; FlightDeck received it as a new request."}
+            </p>
+          )}
           <p
             className="fd-warn"
             role="note"
@@ -2508,8 +2563,8 @@ export function OnboardingEditor({
               <p>
                 {staleAsk.by} asked to send revision {staleAsk.revision}. The
                 draft changed after that. What will be sent lists the current
-                revision, {server.revision}, and that is the revision Send
-                sends once you confirm you reviewed it.
+                revision, {server.revision}, and that is the revision Send sends
+                once you confirm you reviewed it.
               </p>
               <label>
                 <input
@@ -2538,7 +2593,9 @@ export function OnboardingEditor({
                 ? "Sending…"
                 : retrying
                   ? "Retry send"
-                  : "Send to FlightDeck"}
+                  : resubmitting
+                    ? "Fix and resubmit"
+                    : "Send to FlightDeck"}
             </Button>
           )}
           {sendBlocked && <span className="fd-hint">{sendBlocked}</span>}
