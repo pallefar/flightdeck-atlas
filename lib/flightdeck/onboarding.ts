@@ -51,9 +51,28 @@ export const rejectionReasons = [
 export type SetupState = (typeof setupStates)[number];
 export type RejectionReason = (typeof rejectionReasons)[number];
 
-/** The FlightDeck details saved on an Atlas project. Strict, so a draft can
- * never hold a sponsor, assignee or email: the owner fields are role titles,
- * and people are appointed in the OS from its own roster. */
+/** The requester's "ask the Super Admin to send revision r" marker
+ * (onboarding plan J3, behind ATLAS_REQUESTER_REQUESTS, D-037 item 4). It is
+ * Atlas-only bookkeeping: buildOnboardingPayload never reads it, so nothing
+ * of it travels to FlightDeck, and it never sends anything: only the Super
+ * Admin presses Send (D-033 decision 7). `by` is the asker's Atlas sign-in,
+ * checked against the saving session; `stale` is kept by the server
+ * (resolveSendRequest) and set when the draft changes after the ask. */
+export const sendRequestSchema = z
+  .object({
+    revision: z.number().int().positive(),
+    by: z.string().trim().email().max(254),
+    at: isoSchema,
+    withdrawnAt: isoSchema.optional(),
+    stale: z.boolean().optional(),
+  })
+  .strict();
+export type SendRequest = z.infer<typeof sendRequestSchema>;
+
+/** The FlightDeck details saved on an Atlas project. Strict, so the details
+ * sent can never hold a sponsor, assignee or email: the owner fields are role
+ * titles, and people are appointed in the OS from its own roster. The one
+ * sign-in stored here is the send request's asker, which is never sent. */
 export const onboardingSchema = z
   .object({
     /** The OS project id is permanent once created. */
@@ -83,9 +102,143 @@ export const onboardingSchema = z
       .max(10)
       .optional(),
     coworkRequested: z.boolean().optional(),
+    sendRequest: sendRequestSchema.optional(),
   })
   .strict();
 export type OnboardingDraft = z.infer<typeof onboardingSchema>;
+
+/** ATLAS_REQUESTER_REQUESTS: editors may ask the Super Admin to send. Off
+ * unless the value is exactly "true" (D-037 item 4: default off, turned on
+ * per environment by an operator). */
+export const requesterRequestsEnabled = (value: string | undefined) =>
+  (value ?? "").trim() === "true";
+
+export type SendRequestOutcome =
+  | { ok: true; onboarding: OnboardingDraft | undefined }
+  | {
+      ok: false;
+      status: 400;
+      code: "requester_requests_off" | "send_request_actor";
+      error: string;
+    };
+
+/** What a project save may do to the send request marker, decided on the
+ * server for both the whole-project and the onboarding-scoped save. Fails
+ * closed:
+ * - Flag off: a save that writes a marker (a new ask, a changed one or a
+ *   withdrawal) is refused 400. Echoing the stored marker unchanged is not a
+ *   write, so turning the flag off never blocks ordinary saves.
+ * - A new ask (revision, by or at differ from the stored one) must name the
+ *   signed-in saver as `by`: nobody asks on someone else's behalf.
+ * - A save that omits the marker keeps the stored one; only removing the
+ *   whole onboarding draft removes it. A withdrawal cannot be undone except
+ *   by asking again.
+ * - `stale` belongs to the server: it sticks for the same ask, and a save
+ *   that changes the draft marks an open ask stale in that same write. The
+ *   draft is the onboarding details plus the project's `flightdeckDraft`
+ *   (its label is sent as target.label) and its sent profile (description,
+ *   benefit, functionArea and category, see sentProfile()), so a
+ *   whole-project save passes both copies of each. Board fields (status,
+ *   priority, due date, location) are sent as they stand at send time and
+ *   do not stale an ask, just as the lock (draftEdited()) lets them move.
+ * - Project creation passes `previous: undefined`: any marker it carries is
+ *   a new ask, under the same flag and asker rules. */
+export function resolveSendRequest(input: {
+  previous: OnboardingDraft | undefined;
+  next: OnboardingDraft | undefined;
+  enabled: boolean;
+  actor: string;
+  flightdeckDraft?: { before: unknown; after: unknown };
+  profile?: { before: SentProfileFields; after: SentProfileFields };
+}): SendRequestOutcome {
+  const { previous, next, enabled } = input;
+  if (!next) return { ok: true, onboarding: next };
+  const before = previous?.sendRequest;
+  const asked = next.sendRequest;
+  const sameAsk =
+    !!before &&
+    !!asked &&
+    before.revision === asked.revision &&
+    before.by.toLowerCase() === asked.by.toLowerCase() &&
+    before.at === asked.at;
+  const writes =
+    !!asked && (!sameAsk || (!before!.withdrawnAt && !!asked.withdrawnAt));
+  if (writes && !enabled)
+    return {
+      ok: false,
+      status: 400,
+      code: "requester_requests_off",
+      error: "Requests to the Super Admin are not turned on here.",
+    };
+  if (
+    asked &&
+    !sameAsk &&
+    asked.by.trim().toLowerCase() !== input.actor.trim().toLowerCase()
+  )
+    return {
+      ok: false,
+      status: 400,
+      code: "send_request_actor",
+      error: "A send request can only be made in your own name.",
+    };
+  const { sendRequest: _p, ...draftBefore } = previous ?? {};
+  const { sendRequest: _n, ...draftAfter } = next;
+  void _p;
+  void _n;
+  let marker: SendRequest | undefined;
+  if (asked && !sameAsk)
+    // A new ask: stored as asked, without any client-sent `stale`.
+    marker = {
+      revision: asked.revision,
+      by: asked.by,
+      at: asked.at,
+      ...(asked.withdrawnAt ? { withdrawnAt: asked.withdrawnAt } : {}),
+    };
+  else if (before) {
+    // The stored ask, carried over: a withdrawal may be added, never undone.
+    marker = { ...before };
+    if (!before.withdrawnAt && asked?.withdrawnAt)
+      marker.withdrawnAt = asked.withdrawnAt;
+    if (
+      !marker.withdrawnAt &&
+      !marker.stale &&
+      (draftChanged(draftBefore, draftAfter) ||
+        (!!input.flightdeckDraft &&
+          canonical(input.flightdeckDraft.before) !==
+            canonical(input.flightdeckDraft.after)) ||
+        (!!input.profile &&
+          canonical(sentProfile(input.profile.before)) !==
+            canonical(sentProfile(input.profile.after))))
+    )
+      marker.stale = true;
+  }
+  const onboarding: OnboardingDraft = { ...draftAfter };
+  if (marker) onboarding.sendRequest = marker;
+  return { ok: true, onboarding };
+}
+
+type SentProfileFields = Partial<
+  Pick<Project, "description" | "benefit" | "functionArea" | "category">
+>;
+/** The project fields buildOnboardingPayload sends as the profile's summary,
+ * success measure, function area and category, trimmed as they are sent. */
+const sentProfile = (p: SentProfileFields) => ({
+  description: (p.description ?? "").trim(),
+  benefit: (p.benefit ?? "").trim(),
+  functionArea: (p.functionArea ?? "").trim(),
+  category: (p.category ?? "").trim(),
+});
+
+const canonical = (value: unknown) =>
+  JSON.stringify(value ?? null, (_, v: unknown) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(
+          Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+        )
+      : v,
+  );
+const draftChanged = (a: OnboardingDraft, b: OnboardingDraft) =>
+  canonical(a) !== canonical(b);
 
 /** An RFC 9562 UUID (version 1-8, variant 10xx), lower case. Not
  * `z.string().uuid()`: the OS validates with zod 4, whose uuid demands the

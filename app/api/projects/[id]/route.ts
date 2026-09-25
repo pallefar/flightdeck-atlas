@@ -16,6 +16,7 @@ import {
   readFields,
   recordChanges,
   readScopedSave,
+  requesterRequestsOn,
 } from "@/lib/server-projects";
 import { projectFor, activeProjectPeople } from "@/lib/project-access";
 import {
@@ -23,7 +24,11 @@ import {
   deleteProject,
   draftHeld,
 } from "@/lib/flightdeck/onboard-route";
-import { draftEdited, type OnboardingDraft } from "@/lib/flightdeck/onboarding";
+import {
+  draftEdited,
+  resolveSendRequest,
+  type OnboardingDraft,
+} from "@/lib/flightdeck/onboarding";
 import type { AccessProfile } from "@/lib/access-policy";
 import { applyWorkRules, stampTimeEntries } from "@/lib/work-management";
 import { projectSchema, type Project } from "@/lib/projects";
@@ -132,6 +137,23 @@ export async function PUT(
         },
         409,
       );
+    // The send request marker is the server's to keep: refused while
+    // ATLAS_REQUESTER_REQUESTS is off, kept when a save omits it, and marked
+    // stale in this same write when the draft changes after the ask.
+    const marker = resolveSendRequest({
+      previous: previous.onboarding,
+      next: fields.onboarding,
+      enabled: requesterRequestsOn(),
+      actor: auth.access.email,
+      flightdeckDraft: {
+        before: previous.flightdeckDraft,
+        after: fields.flightdeckDraft,
+      },
+      profile: { before: previous, after: fields },
+    });
+    if (!marker.ok)
+      return json({ error: marker.error, code: marker.code }, marker.status);
+    fields = { ...fields, onboarding: marker.onboarding };
     // While FlightDeck may hold a send, the draft stays exactly as it was
     // sent. The form and the To FlightDeck row lock it too, but a form that
     // has not loaded its status knows nothing, so the save refuses on its
@@ -286,6 +308,15 @@ async function saveOnboarding(
         403,
       );
     const previous = authorized.project;
+    const marker = resolveSendRequest({
+      previous: previous.onboarding,
+      next: onboarding,
+      enabled: requesterRequestsOn(),
+      actor: access.email,
+    });
+    if (!marker.ok)
+      return json({ error: marker.error, code: marker.code }, marker.status);
+    onboarding = marker.onboarding ?? {};
     const seen =
       previous.revision === baseRevision ||
       (previous.onboardingRevision !== undefined &&
