@@ -871,13 +871,47 @@
 }
 /* To FlightDeck: the three-tab onboarding form. */
 .fd-onboard {
+  --fd-pad: 20px;
   background: var(--background);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 20px;
+  padding: var(--fd-pad);
   display: grid;
+  /* One column that may shrink below its content, so a wide child (the
+     stepper, a long value) never widens the form past the viewport. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   min-width: 0;
+}
+/* The step heading takes focus on a step change. */
+.fd-step-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.fd-step-title:focus {
+  outline: none;
+}
+.fd-step-title:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.fd-desc {
+  display: grid;
+  gap: 8px;
+}
+.fd-desc:empty {
+  display: none;
+}
+/* The form's actions stay in reach at the foot of the viewport. */
+.fd-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin: 0 calc(-1 * var(--fd-pad)) calc(-1 * var(--fd-pad));
+  padding: 12px var(--fd-pad);
+  background: var(--background);
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 10px 10px;
 }
 .fd-onboard-tabs {
   width: fit-content;
@@ -887,6 +921,8 @@
 .fd-stepper {
   list-style: none;
   margin: 0;
+  /* On a phone or at 200% zoom the steps wrap instead of scrolling. */
+  flex-wrap: wrap;
 }
 .fd-stepper button {
   display: inline-flex;
@@ -1295,7 +1331,7 @@
     padding: 14px;
   }
   .fd-onboard {
-    padding: 14px;
+    --fd-pad: 14px;
   }
   .fd-grid {
     grid-template-columns: minmax(0, 1fr);

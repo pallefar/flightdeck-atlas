@@ -1,5 +1,7 @@
 "use client";
 import {
+  cloneElement,
+  isValidElement,
   useCallback,
   useEffect,
   useMemo,
@@ -458,6 +460,26 @@ function StatusBanner({
 
 /** `strict`: every field except Summary and Success measure, where the
  * server refuses an email or phone-number shape. */
+/** Brings a focused control fully into view between the app's sticky
+ * header and the form's sticky action bar. The browser's own focus
+ * scrolling leaves a control that is already partly visible where it is,
+ * even when the action bar covers it (WCAG 2.4.11 Focus Not Obscured). */
+function keepClearOfStickyBars(el: HTMLElement, bar: HTMLElement | null) {
+  if (!bar || bar.contains(el)) return;
+  const gap = 12;
+  const top =
+    (document.querySelector(".topbar")?.getBoundingClientRect().bottom ?? 0) +
+    gap;
+  const bottom = bar.getBoundingClientRect().top - gap;
+  const r = el.getBoundingClientRect();
+  if (r.top >= top && r.bottom <= bottom) return;
+  el.style.scrollMarginTop = `${Math.max(0, top)}px`;
+  el.style.scrollMarginBottom = `${Math.max(0, innerHeight - bottom)}px`;
+  el.scrollIntoView({ block: "nearest" });
+  el.style.scrollMarginTop = "";
+  el.style.scrollMarginBottom = "";
+}
+
 function Hint({ text, strict = false }: { text: string; strict?: boolean }) {
   const hint = personalDataHint(text, strict);
   return hint ? (
@@ -940,6 +962,12 @@ export function OnboardingEditor({
     level: (typeof accessLevels)[number];
   }>({ system: "", level: "read" });
   const pendingFocus = useRef<string | null>(null);
+  const stepHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const actionsRef = useRef<HTMLDivElement | null>(null);
+  /** Whether the viewer has changed step yet: opening the form keeps focus
+   * where it was; a step change moves it to the new step's heading. */
+  const stepChanged = useRef(false);
+  const [stepMoved, setStepMoved] = useState(false);
   const { status, show, failed, load } = useOnboardingStatus(
     project.id,
     superAdmin,
@@ -947,9 +975,10 @@ export function OnboardingEditor({
   );
   const op = status?.operation ?? null;
   useEffect(() => {
-    if (!pendingFocus.current) return;
-    document.getElementById(pendingFocus.current)?.focus();
-    pendingFocus.current = null;
+    if (pendingFocus.current) {
+      document.getElementById(pendingFocus.current)?.focus();
+      pendingFocus.current = null;
+    } else if (stepChanged.current) stepHeadingRef.current?.focus();
   }, [tab]);
   useEffect(() => {
     if (summaryShown) summaryRef.current?.focus();
@@ -1042,6 +1071,8 @@ export function OnboardingEditor({
     setDetail("ownerRoles", { ...draft.onboarding.ownerRoles, [role]: value });
   function step(next: OnboardingStep) {
     setSummaryStep(null);
+    stepChanged.current = true;
+    setStepMoved(true);
     setTab(next);
   }
   function goTo(next: OnboardingStep, field: string) {
@@ -1394,19 +1425,38 @@ export function OnboardingEditor({
     </dl>
   );
 
+  // A field's hint, warning or error is its control's description, so a
+  // screen reader reads it with the label (WCAG 1.3.1, 3.3.1).
   const field = (
     id: string,
     label: string,
     control: React.ReactNode,
     extra?: React.ReactNode,
     wide = false,
-  ) => (
-    <div className={`fd-field${wide ? " fd-wide" : ""}`}>
-      <label htmlFor={id}>{label}</label>
-      {control}
-      {extra}
-    </div>
-  );
+  ) => {
+    const described =
+      extra !== undefined &&
+      isValidElement<{ id?: string }>(control) &&
+      control.props.id === id;
+    return (
+      <div className={`fd-field${wide ? " fd-wide" : ""}`}>
+        <label htmlFor={id}>{label}</label>
+        {described
+          ? cloneElement(control as React.ReactElement<React.AriaAttributes>, {
+              "aria-describedby": `${id}-desc`,
+            })
+          : control}
+        {extra !== undefined &&
+          (described ? (
+            <div id={`${id}-desc`} className="fd-desc">
+              {extra}
+            </div>
+          ) : (
+            extra
+          ))}
+      </div>
+    );
+  };
   // A held conflict keeps edits local, so the pill never claims they are
   // saved while it waits for Keep mine or Use theirs.
   const pill = autosavePill(
@@ -1422,6 +1472,10 @@ export function OnboardingEditor({
   return (
     <form
       className="fd-onboard"
+      onFocus={(e) => {
+        if (e.target instanceof HTMLElement)
+          keepClearOfStickyBars(e.target, actionsRef.current);
+      }}
       onSubmit={(e) => {
         e.preventDefault();
         void saveNow();
@@ -1583,10 +1637,28 @@ export function OnboardingEditor({
           </Button>
         </div>
       )}
+      {/* A step change moves focus here and is announced politely. */}
+      <h2
+        ref={stepHeadingRef}
+        id={`fd-step-title-${project.id}`}
+        className="fd-step-title"
+        tabIndex={-1}
+      >
+        {t(STEP_LABEL[tab], locale)}
+      </h2>
+      <p className="sr-only" role="status" aria-live="polite">
+        {stepMoved
+          ? t("onb.step.position", locale, {
+              n: stepIndex + 1,
+              total: ONBOARDING_STEPS.length,
+              name: t(STEP_LABEL[tab], locale),
+            })
+          : ""}
+      </p>
       <fieldset
         disabled={frozen || busy || saving}
         id={`fd-panel-${tab}`}
-        aria-labelledby={`fd-step-${tab}`}
+        aria-labelledby={`fd-step-title-${project.id}`}
       >
         {tab === "basics" && (
           <div className="fd-grid">
@@ -1620,22 +1692,20 @@ export function OnboardingEditor({
             {field(
               "fd-function",
               "Function area",
-              <>
-                <Input
-                  id="fd-function"
-                  list="fd-functions"
-                  maxLength={80}
-                  value={draft.functionArea}
-                  onChange={(e) => set("functionArea", e.target.value)}
-                />
-                <datalist id="fd-functions">
-                  {functions.map((f) => (
-                    <option key={f} value={f} />
-                  ))}
-                </datalist>
-              </>,
+              <Input
+                id="fd-function"
+                list="fd-functions"
+                maxLength={80}
+                value={draft.functionArea}
+                onChange={(e) => set("functionArea", e.target.value)}
+              />,
               <Hint text={draft.functionArea} strict />,
             )}
+            <datalist id="fd-functions">
+              {functions.map((f) => (
+                <option key={f} value={f} />
+              ))}
+            </datalist>
             {field(
               "fd-category",
               "Category",
@@ -2233,7 +2303,9 @@ export function OnboardingEditor({
           {error}
         </p>
       )}
-      <div className="bridge-actions">
+      {/* Sticky at the foot of the viewport; a focused control is scrolled
+          clear of it (keepClearOfStickyBars). */}
+      <div ref={actionsRef} className="bridge-actions fd-actions">
         {(!locked || save.pending) && (
           <p
             className={`fd-autosave ${pill.tone}`}
