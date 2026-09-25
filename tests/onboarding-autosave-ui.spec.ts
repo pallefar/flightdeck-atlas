@@ -93,7 +93,7 @@ async function openStatus(page: Page, id: string) {
     }),
   );
 }
-async function openEditor(page: Page, name: string) {
+async function openEditor(page: Page, name: string, open = "Edit draft") {
   await page.goto("/?view=connection");
   const tab = page.getByRole("button", { name: /To FlightDeck/ });
   const row = page.locator("article.bridge-project", { hasText: name });
@@ -106,7 +106,7 @@ async function openEditor(page: Page, name: string) {
       timeout: 1_000,
     });
     await row
-      .getByRole("button", { name: "Edit draft", exact: true })
+      .getByRole("button", { name: open, exact: true })
       .click({ timeout: 2_000 });
     await expect(row.getByRole("tab", { name: "FlightDeck details" })).toBeVisible({
       timeout: 2_000,
@@ -414,5 +414,57 @@ test("Save now freezes the form until the whole save is done, so no edit is lost
   expect(server.onboarding?.legalEntity).toBe("First GmbH");
   expect(server.flightdeckDraft?.label).toBe(`${name} renamed`);
   await expect(legal).toHaveValue("First GmbH");
+  expect(await unloadGuarded(page)).toBe(false);
+});
+
+test("Save now creating the draft keeps Basics another editor changed while the autosave was waiting", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const name = qa("SaveNowRebase");
+  const project = await createProject(page, {
+    ...seed(name),
+    flightdeckDraft: undefined,
+  });
+  expect(project.flightdeckDraft).toBeUndefined();
+  await openStatus(page, project.id);
+  // Hold the onboarding autosave until another editor has saved Basics.
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => (release = r));
+  let held = false;
+  await page.route(`**/api/projects/${project.id}`, async (route) => {
+    if (
+      route.request().method() === "PUT" &&
+      (route.request().postData() ?? "").includes('"scope":"onboarding"')
+    ) {
+      held = true;
+      await gate;
+    }
+    await route.fallback();
+  });
+  const row = await openEditor(page, name, "Prepare onboarding");
+  await row.getByLabel("Legal entity (optional)").fill("Mine GmbH");
+  await row.getByRole("button", { name: "Save now" }).click();
+  await expect.poll(() => held).toBe(true);
+  // Another editor changes the summary and the category meanwhile; the
+  // waiting onboarding autosave then merges over their save.
+  const theirs = await saveElsewhere(page, project, {
+    description: "Their summary",
+    category: "Their category",
+  });
+  expect(theirs.revision).toBe(project.revision + 1);
+  release();
+  await expect(row.getByRole("status", { name: "Autosave" })).toHaveText(
+    /^(All changes saved|Saved)/,
+  );
+  await expect
+    .poll(async () => (await latest(page, project.id)).flightdeckDraft)
+    .toBeTruthy();
+  const server = await latest(page, project.id);
+  expect(server.onboarding?.legalEntity).toBe("Mine GmbH");
+  // The whole-project save that created the draft did not put back the
+  // summary and category this form had before their save.
+  expect(server.description).toBe("Their summary");
+  expect(server.category).toBe("Their category");
   expect(await unloadGuarded(page)).toBe(false);
 });

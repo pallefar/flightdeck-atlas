@@ -1130,7 +1130,7 @@ export function OnboardingEditor({
   ) {
     setError("");
     const via = over.via ?? autosave;
-    const d = over.draft ?? draft;
+    let d = over.draft ?? draft;
     const dirty = over.basicsDirty ?? basicsDirty;
     let base = over.server ?? server;
     const state = await via.coordinator.flush();
@@ -1143,6 +1143,12 @@ export function OnboardingEditor({
       // Someone else changed a field this form edited: the conflict view
       // asks first.
       if (dirty && !sameOutsideOnboarding(acked, base)) return;
+      // Untouched Basics follow the acknowledged version: the draft was
+      // captured before the flush, so its Basics may predate a save made
+      // elsewhere that the onboarding autosave merged over, and sending them
+      // against the newer revision would silently put the old values back.
+      // The onboarding part is what the flush just saved.
+      if (!dirty) d = { ...draftFrom(acked), onboarding: d.onboarding };
       base = acked;
     }
     if (!dirty && base.flightdeckDraft) {
