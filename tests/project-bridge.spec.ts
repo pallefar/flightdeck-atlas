@@ -5074,6 +5074,97 @@ test("every stage has a place on the status timeline, and an answered request sh
   ]);
 });
 
+test("a stale ask can be sent from the form once the Super Admin confirms the revision Review shows", async ({
+  page,
+}) => {
+  // onb-atlas-send-enforcement: the server refuses a send of a draft that
+  // changed after the editor's ask unless the Super Admin confirms the diff
+  // against the current revision. The form must offer that confirmation, or
+  // the ask blocks the send for good.
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const created = await createProject(page, {
+    name: qa("Stale Ask"),
+    description: "Summary as asked",
+    benefit: "Measure",
+    functionArea: "HR",
+    onboardingStage: "Ready for FlightDeck",
+    flightdeckDraft: { label: qa("Stale Ask"), workspaceHint: "" },
+    onboarding: { countryCode: "DE", worksCouncilRelevant: "no" },
+  });
+  // Changed after the ask: the server keeps the ask and marks it stale.
+  const project = await updateProject(page, created, {
+    description: "Summary changed after the ask",
+  });
+  const ask = {
+    revision: created.revision,
+    by: "editor@example.com",
+    at: "2026-09-22T08:00:00.000Z",
+    stale: true,
+  };
+  await page.route("**/api/projects", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const response = await route.fetch();
+    const body = (await response.json()) as { projects: Project[] };
+    for (const p of body.projects)
+      if (p.id === project.id)
+        p.onboarding = { ...p.onboarding, sendRequest: ask };
+    return route.fulfill({ response, json: body });
+  });
+  const posts: unknown[] = [];
+  let status = statusBody(null);
+  await page.route(`**/api/flightdeck/onboard/${project.id}**`, (route) => {
+    if (route.request().method() === "POST") {
+      posts.push(route.request().postDataJSON());
+      status = statusBody("submitted");
+    }
+    return route.fulfill({
+      status: route.request().method() === "POST" ? 202 : 200,
+      contentType: "application/json",
+      body: JSON.stringify(status),
+    });
+  });
+  try {
+    await page.reload();
+    await openToFlightDeck(page);
+    const row = page.locator("article.bridge-project", {
+      hasText: qa("Stale Ask"),
+    });
+    await row.getByRole("button", { name: "Edit draft", exact: true }).click();
+    await stepButton(row, "Review & send").click();
+    await row.getByLabel("Destination workspace").selectOption("hr-de");
+    const note = row.getByRole("region", {
+      name: "Changed since it was asked for",
+    });
+    await expect(note).toContainText(`revision ${created.revision}`);
+    await expect(note).toContainText(`revision ${project.revision}`);
+    await expect(note).toContainText("editor@example.com");
+    const sendButton = row.getByRole("button", { name: "Send to FlightDeck" });
+    await expect(sendButton).toBeDisabled();
+    await expect(
+      row.getByText(/Confirm that you reviewed revision/),
+    ).toBeVisible();
+    const confirm = note.getByRole("checkbox", {
+      name: `I reviewed revision ${project.revision}, as listed in What will be sent`,
+    });
+    await confirm.check();
+    await expect(sendButton).toBeEnabled();
+    await sendButton.click();
+    await expect
+      .poll(() => posts)
+      .toEqual([
+        {
+          destinationWorkspaceId: "hr-de",
+          revision: project.revision,
+          confirmDiff: true,
+          baseRevision: project.revision,
+        },
+      ]);
+  } finally {
+    await removeProject(page, project.id);
+  }
+});
+
 test("a locked Remove draft looks and announces locked, says why on the row, and refuses mouse, keyboard and touch", async ({
   page,
   browser,

@@ -1027,6 +1027,12 @@ export function OnboardingEditor({
   const savingRef = useRef(false);
   const [closing, setClosing] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
+  /** The revision the Super Admin confirmed against a stale ask (the
+   * draft changed after the editor asked). Tied to that revision, so a newer
+   * save needs a new confirmation. */
+  const [confirmedRevision, setConfirmedRevision] = useState<number | null>(
+    null,
+  );
   const [error, setError] = useState("");
   const [newSource, setNewSource] = useState("");
   const [newAccess, setNewAccess] = useState<{
@@ -1378,6 +1384,15 @@ export function OnboardingEditor({
     () => () => clearHeld(viewerId, project.id),
     [viewerId, project.id],
   );
+  // The editor's open ask, once the draft changed after it: the server
+  // sends it only with confirmDiff against the current revision
+  // (409 changed_since_ask otherwise), so Review asks for that confirmation.
+  const askOpen = server.onboarding?.sendRequest;
+  const staleAsk =
+    !locked && !retrying && !!askOpen?.stale && !askOpen.withdrawnAt
+      ? askOpen
+      : null;
+  const diffConfirmed = !!staleAsk && confirmedRevision === server.revision;
   async function send() {
     if (!target) return;
     setSending(true);
@@ -1391,12 +1406,16 @@ export function OnboardingEditor({
           // A retry confirms the reserved revision, which it resends as
           // first sent; a new send confirms the revision Review showed, so
           // anything saved after it is refused (409 project_changed).
+          // A confirmed stale ask names the revision it confirmed.
           body: JSON.stringify({
             destinationWorkspaceId: target,
             revision:
               retrying && op?.atlasRevision
                 ? op.atlasRevision
                 : server.revision,
+            ...(diffConfirmed
+              ? { confirmDiff: true, baseRevision: server.revision }
+              : {}),
           }),
         },
       );
@@ -1482,7 +1501,9 @@ export function OnboardingEditor({
             ? "This project was saved elsewhere. Choose Keep mine or Use theirs, then review it before sending."
             : unsaved
               ? "Save the draft first: FlightDeck receives the saved version."
-              : !ready.ready
+              : staleAsk && !diffConfirmed
+                ? `Confirm that you reviewed revision ${server.revision} first: the draft changed after revision ${staleAsk.revision} was asked for.`
+                : !ready.ready
                 ? `Complete the required details first (${ready.done} of ${ready.total}).`
                 : privacy.refused.length
                   ? `Remove the email address or phone number from: ${privacy.refused.map(fieldLabel).join(", ")}. FlightDeck receives role titles and system names, not personal details.`
@@ -2436,6 +2457,32 @@ export function OnboardingEditor({
             </strong>{" "}
             <span id={`fd-legal-${project.id}`}>{LEGAL_OPEN_NOTE}</span>
           </p>
+          {superAdmin && staleAsk && (
+            <section
+              className="fd-warn"
+              aria-label="Changed since it was asked for"
+            >
+              <p>
+                {staleAsk.by} asked to send revision {staleAsk.revision}. The
+                draft changed after that. What will be sent lists the current
+                revision, {server.revision}, and that is the revision Send
+                sends once you confirm you reviewed it.
+              </p>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={diffConfirmed}
+                  onChange={(e) =>
+                    setConfirmedRevision(
+                      e.target.checked ? server.revision : null,
+                    )
+                  }
+                />{" "}
+                I reviewed revision {server.revision}, as listed in What will be
+                sent
+              </label>
+            </section>
+          )}
           {superAdmin && (
             <Button
               type="button"
