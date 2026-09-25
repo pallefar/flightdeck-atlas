@@ -6,6 +6,9 @@
    classes (duration-500, ease-out, static) that no Atlas element uses; not
    scanning it keeps this stylesheet exactly what Atlas's markup needs. */
 @source not "../lib/motion";
+/* lib/pagedoc mirrors the OS PageDoc tree; its CSS arrives through
+   pagedoc.css and it uses only pd-* classes, so it is not scanned either. */
+@source not "../lib/pagedoc";
 :root {
   --background: #101214;
   --foreground: #f0f1f2;

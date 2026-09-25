@@ -269,6 +269,10 @@ export const en = {
     "Next: nothing is pending. Update the draft if you want to send it again.",
   "onb.next.not-sent": "Next: fix what FlightDeck refused, then send again.",
   "onb.next.closed": "Next: the draft is open again and can be sent again.",
+  // Pages (pages-atlas-mirror-contract): what Atlas says instead of a PageDoc
+  // it cannot read (lib/pagedoc-atlas.ts).
+  "pages.doc.tooNew": "This page needs an Atlas update",
+  "pages.doc.unreadable": "This page cannot be shown",
 } as const;
 
 export type MessageKey = keyof typeof en;
