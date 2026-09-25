@@ -13,6 +13,7 @@ import {
 } from "@/lib/collaboration";
 import { keptSelection } from "@/lib/flightdeck/context-route";
 import { osOrigin } from "@/lib/flightdeck/os-server";
+import { markNoticeRead, noticesFor } from "@/lib/flightdeck/notices";
 export const dynamic = "force-dynamic";
 export async function GET() {
   const a = await authorize("projects.read");
@@ -58,16 +59,13 @@ export async function GET() {
       .prepare("SELECT data,revision FROM atlas_preferences WHERE user_id=?")
       .bind(a.access.userId)
       .first();
-    const notes = await db
-      .prepare(
-        "SELECT * FROM atlas_notifications WHERE recipient=? ORDER BY created_at DESC LIMIT 100",
-      )
-      .bind(a.access.email)
-      .all();
-    const notifications = [];
-    for (const n of notes.results)
-      if (await projectFor(a.access, n.project_id as string))
-        notifications.push(n);
+    // Access is re-checked on every read: a notice of a project this user
+    // can no longer view is not shown.
+    const notifications = await noticesFor(
+      db,
+      a.access.email,
+      async (projectId) => !!(await projectFor(a.access, projectId)),
+    );
     const capacity = [];
     for (const person of people) {
       const common = teams.some(
@@ -142,12 +140,7 @@ export async function POST(req: Request) {
       return json({ success: true });
     }
     if (b.action === "read-notification") {
-      await db
-        .prepare(
-          "UPDATE atlas_notifications SET read=1 WHERE id=? AND recipient=?",
-        )
-        .bind(String(b.id), a.access.email)
-        .run();
+      await markNoticeRead(db, String(b.id), a.access.email);
       return json({ success: true });
     }
     if (b.action === "preferences") {

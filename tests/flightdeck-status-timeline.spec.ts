@@ -29,6 +29,7 @@ import type {
 import * as waiting from "../lib/flightdeck/waiting";
 import { en } from "../lib/i18n/en";
 import { de } from "../lib/i18n/de";
+import { withD1Batch } from "./fixtures/d1-batch";
 
 const ATLAS_ID = "4f7d1c2a-8b3e-4c5d-9e6f-a1b2c3d4e5f6";
 const ORIGIN = "http://localhost:5173";
@@ -63,7 +64,9 @@ function store() {
       "--> statement-breakpoint",
     ))
       if (statement.trim()) sqlite.exec(statement);
-  const db: OnboardDb = {
+  // D1's batch: a recorded transition and its notices share one
+  // transaction (lib/flightdeck/notices.ts).
+  const db: OnboardDb = withD1Batch(sqlite, {
     prepare(sql) {
       return {
         bind(...values) {
@@ -85,7 +88,7 @@ function store() {
         },
       };
     },
-  };
+  });
   sqlite
     .prepare(
       "INSERT INTO atlas_projects (id,owner_id,data,source,updated_at,revision) VALUES (?,?,?,?,?,?)",

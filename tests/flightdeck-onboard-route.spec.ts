@@ -10,6 +10,7 @@ import {
   type OnboardLinkRow,
   type OnboardSendRow,
 } from "../lib/flightdeck/onboard-route";
+import { withD1Batch } from "./fixtures/d1-batch";
 
 // The approved status projection per viewer (plan 2026-09-25 J4,
 // onb-requester-status-projection): the Atlas Super Admin keeps today's
@@ -32,7 +33,7 @@ function store() {
       "--> statement-breakpoint",
     ))
       sqlite.exec(statement);
-  const db: OnboardDb = {
+  const db: OnboardDb = withD1Batch(sqlite, {
     prepare(sql) {
       return {
         bind(...values) {
@@ -54,7 +55,7 @@ function store() {
         },
       };
     },
-  };
+  });
   return { db, sqlite };
 }
 

@@ -1,7 +1,7 @@
 // The real dependencies of the onboarding handlers (lib/flightdeck/
 // onboard-route.ts): Atlas authorisation and project access, the OS clients
 // and the D1 binding. Server-only.
-import { authorize } from "../access";
+import { authorize, superAdminEmail } from "../access";
 import type { AccessProfile } from "../access-policy";
 import { projectFor, visibleProjects } from "../project-access";
 import {
@@ -35,4 +35,5 @@ export const onboardRoute = createOnboardRoute<AccessProfile>({
   installationId: atlasInstallationId,
   metricsEnabled: onboardingMetricsEnabled,
   responsePolicyDays: onboardingResponsePolicyDays,
+  superAdminEmails: () => [superAdminEmail()].filter(Boolean),
 });
