@@ -173,6 +173,35 @@ export const en = {
   "onb.card.view": "View status",
   "onb.card.close": "Close",
   "onb.card.rowLink": "FlightDeck card",
+  // The waiting view (onb-atlas-status-timeline, plan 2026-09-25 J4).
+  "onb.observed.aria": "What Atlas saw",
+  "onb.observed.row": "{stage}: {seen}",
+  "onb.observed.seen": "seen {when}",
+  "onb.observed.before": "before tracking",
+  "onb.history.title": "Earlier sends",
+  "onb.history.revision": "Revision {n}",
+  "onb.history.adopted": "FlightDeck's earlier request",
+  "onb.history.row": "{send}: {stage} ({seen}).",
+  "onb.history.again": "Sent again as revision {n}.",
+  "onb.history.againAdopted": "Sent again.",
+  "onb.outage": "Could not reach FlightDeck since {when}.",
+  "onb.eta.one": "Usually answered within 1 working day.",
+  "onb.eta.many": "Usually answered within {n} working days.",
+  "onb.check.seen": "Last update seen {when}",
+  "onb.check.seenNever": "No update seen yet",
+  "onb.next.not-confirmed":
+    "Next: the Atlas Super Admin retries the send or closes it.",
+  "onb.next.submitted": "Next: an OS admin reviews the request in FlightDeck.",
+  "onb.next.linked": "Next: FlightDeck sets the project up.",
+  "onb.next.setup-in-progress":
+    "Next: FlightDeck finishes setting the project up.",
+  "onb.next.setup-complete": "Next: work in the project in FlightDeck.",
+  "onb.next.needs-more-info":
+    "Next: update the draft and ask for it to be sent again.",
+  "onb.next.rejected":
+    "Next: nothing is pending. Update the draft if you want to send it again.",
+  "onb.next.not-sent": "Next: fix what FlightDeck refused, then send again.",
+  "onb.next.closed": "Next: the draft is open again and can be sent again.",
 } as const;
 
 export type MessageKey = keyof typeof en;

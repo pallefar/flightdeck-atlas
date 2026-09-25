@@ -46,7 +46,11 @@ import {
   type OsSubmissionStatus,
   type SetupState,
 } from "./onboarding";
-import { applyObservedStage, type TransitionSource } from "./transitions";
+import {
+  applyObservedStage,
+  transitionsOf,
+  type TransitionSource,
+} from "./transitions";
 import { NO_FEATURES, type InboundFeatures } from "./features";
 import { recordOnboardingMetric } from "./metrics";
 
@@ -84,6 +88,9 @@ export type OnboardDeps<A extends OnboardAccess> = {
   newId?(): string;
   /** ONB_METRICS_ENABLED (lib/flightdeck/metrics.ts). Unset is off. */
   metricsEnabled?(): boolean;
+  /** ONB_RESPONSE_POLICY_DAYS (lib/flightdeck/waiting.ts): working days,
+   * or null (the default) so no ETA is shown. */
+  responsePolicyDays?(): number | null;
 };
 
 /** A send and its link as stored; what projectStatus projects. */
@@ -111,6 +118,10 @@ type OperationRow = {
   request_body: string | null;
   /** 1 when Atlas adopted a request FlightDeck already held. */
   adopted: number;
+  /** Read-backs in a row that could not reach FlightDeck. */
+  check_failures?: number;
+  /** When the first of those failed. */
+  unreachable_since?: string | null;
 };
 type LinkRow = {
   installation_id: string;
@@ -448,14 +459,21 @@ export const WAITING_TO_BE_FILED = "waiting_to_be_filed";
  * editor's freshness is the Super Admin's poll (plan §7). */
 export function projectStatus(
   viewer: { superAdmin: boolean } | null,
-  send: { operation?: OperationRow | null; link?: LinkRow | null },
+  send: {
+    operation?: OperationRow | null;
+    link?: LinkRow | null;
+    waiting?: WaitingFacts;
+  },
   notice: string | null = null,
   retryAfter: number | null = null,
 ): OnboardingStatus | null {
   if (!viewer) return null;
   const op = send.operation ?? null;
   if (viewer.superAdmin)
-    return statusBody(op, send.link ?? null, notice, retryAfter);
+    return {
+      ...statusBody(op, send.link ?? null, notice, retryAfter),
+      ...waitingFields(op, send.waiting),
+    };
   const stage = op
     ? stageFor({
         state: op.state,
@@ -493,7 +511,43 @@ export function projectStatus(
     pollable: !!op && isPollable(op),
     notice: null,
     retryAfter: null,
+    ...waitingFields(op, send.waiting),
   };
+}
+
+/** What the waiting view (plan J4, onb-atlas-status-timeline) reads beyond
+ * the send row; currentStatus loads it. Neither part names a destination,
+ * a submission or a send id, so both viewers get the same facts. */
+export type WaitingFacts = {
+  /** The current send's log, oldest first. */
+  transitions: { stage: OnboardingStage; observedAt: string | null }[];
+  /** The project's earlier sends, newest first. */
+  history: {
+    revision: number | null;
+    stage: OnboardingStage;
+    transitions: { stage: OnboardingStage; observedAt: string | null }[];
+  }[];
+  responsePolicyDays: number | null;
+};
+/** Read-backs in a row that must fail before the status says FlightDeck
+ * could not be reached: one blip is not an outage. */
+const OUTAGE_AFTER = 3;
+function waitingFields(op: OperationRow | null, facts?: WaitingFacts) {
+  return {
+    transitions: facts?.transitions ?? [],
+    history: facts?.history ?? [],
+    unreachableSince:
+      op && (op.check_failures ?? 0) >= OUTAGE_AFTER
+        ? (op.unreachable_since ?? null)
+        : null,
+    responsePolicyDays: facts?.responsePolicyDays ?? null,
+  };
+}
+/** The last 50 of a send's log: what the status schema carries. */
+async function observedOf(db: OnboardDb, sendId: string) {
+  return (await transitionsOf(db, sendId))
+    .slice(-50)
+    .map(({ stage, observedAt }) => ({ stage, observedAt }));
 }
 
 /** The Atlas Super Admin's status body (projectStatus). */
@@ -624,15 +678,54 @@ export function createOnboardRoute<A extends OnboardAccess>(
     retryAfter: number | null = null,
   ) {
     const installationId = deps.installationId();
+    const operation = await latestOperation(db, atlasProjectId);
+    // Every earlier send of the project, newest first: the correction
+    // history. Only revision, stage and log leave this function.
+    const earlier = operation
+      ? (
+          await db
+            .prepare(
+              "SELECT id,atlas_revision,adopted,state,reason_code,setup_state FROM atlas_flightdeck_operations WHERE atlas_project_id=? AND id<>? ORDER BY updated_at DESC, rowid DESC LIMIT 20",
+            )
+            .bind(atlasProjectId, operation.id)
+            .all<
+              Pick<
+                OperationRow,
+                | "id"
+                | "atlas_revision"
+                | "adopted"
+                | "state"
+                | "reason_code"
+                | "setup_state"
+              >
+            >()
+        ).results
+      : [];
+    const waiting: WaitingFacts = {
+      transitions: operation ? await observedOf(db, operation.id) : [],
+      history: await Promise.all(
+        earlier.map(async (row) => ({
+          revision: row.adopted ? null : row.atlas_revision,
+          stage: stageFor({
+            state: row.state,
+            reasonCode: row.reason_code,
+            setupState: row.setup_state,
+          }),
+          transitions: await observedOf(db, row.id),
+        })),
+      ),
+      responsePolicyDays: deps.responsePolicyDays?.() ?? null,
+    };
     // An editor's projection never shows the link, so it is not read.
     return projectStatus(
       { superAdmin },
       {
-        operation: await latestOperation(db, atlasProjectId),
+        operation,
         link:
           superAdmin && installationId
             ? await linkFor(db, installationId, atlasProjectId)
             : null,
+        waiting,
       },
       notice,
       retryAfter,
@@ -1163,10 +1256,23 @@ export function createOnboardRoute<A extends OnboardAccess>(
     userId: string,
   ): Promise<Check> {
     const stamp = now().toISOString();
+    // Any answer from FlightDeck ends an outage (touch); only a read that
+    // could not reach it counts towards one.
     const touch = (
       extra: Partial<OperationRow> = {},
       from?: OperationState[],
-    ) => patch(db, op.id, { checked_at: stamp, ...extra }, from);
+    ) =>
+      patch(
+        db,
+        op.id,
+        {
+          checked_at: stamp,
+          check_failures: 0,
+          unreachable_since: null,
+          ...extra,
+        },
+        from,
+      );
     const read = await submissions.readSubmission(op.submission_id ?? "");
     if (read.state === "not_found") {
       // FlightDeck answers 404 for an id it never had and for one that is
@@ -1189,8 +1295,15 @@ export function createOnboardRoute<A extends OnboardAccess>(
         stop: false,
       };
     }
+    if (read.state === "os_unreachable")
+      await db
+        .prepare(
+          "UPDATE atlas_flightdeck_operations SET checked_at=?1,check_failures=check_failures+1,unreachable_since=COALESCE(unreachable_since,?1) WHERE id=?2",
+        )
+        .bind(stamp, op.id)
+        .run();
     if (read.state !== "ok") {
-      await touch();
+      if (read.state !== "os_unreachable") await touch();
       return {
         notice: "Atlas could not check FlightDeck just now. It will try again.",
         retryAfter:

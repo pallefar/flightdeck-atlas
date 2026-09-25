@@ -184,6 +184,12 @@ export const flightdeckOperations = sqliteTable(
      * subject. Its destination and revision are FlightDeck's, not this
      * row's, so Atlas never shows or links them as its own. */
     adopted: integer("adopted", { mode: "boolean" }).notNull().default(false),
+    /** Read-backs in a row that could not reach FlightDeck (plan 2026-09-25
+     * J4, the honest outage). Any answer from FlightDeck resets it. */
+    checkFailures: integer("check_failures").notNull().default(0),
+    /** When the first of those failed read-backs happened; null once
+     * FlightDeck answers again. The status shows it from the third. */
+    unreachableSince: text("unreachable_since"),
   },
   (t) => [
     index("idx_atlas_fd_operations_project").on(t.atlasProjectId, t.updatedAt),

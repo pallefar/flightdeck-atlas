@@ -4,7 +4,11 @@
 import { authorize } from "../access";
 import type { AccessProfile } from "../access-policy";
 import { projectFor, visibleProjects } from "../project-access";
-import { database, onboardingMetricsEnabled } from "../server-projects";
+import {
+  database,
+  onboardingMetricsEnabled,
+  onboardingResponsePolicyDays,
+} from "../server-projects";
 import { createOnboardRoute } from "./onboard-route";
 import {
   atlasInstallationId,
@@ -30,4 +34,5 @@ export const onboardRoute = createOnboardRoute<AccessProfile>({
   db: database,
   installationId: atlasInstallationId,
   metricsEnabled: onboardingMetricsEnabled,
+  responsePolicyDays: onboardingResponsePolicyDays,
 });

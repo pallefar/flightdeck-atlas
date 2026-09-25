@@ -11,6 +11,7 @@ import {
   requesterRequestsEnabled,
 } from "./flightdeck/onboarding";
 import { metricsFlagOn } from "./flightdeck/metrics";
+import { responsePolicyDaysFrom } from "./flightdeck/waiting";
 /** ATLAS_REQUESTER_REQUESTS, read per request: off unless exactly "true". */
 export const requesterRequestsOn = () =>
   requesterRequestsEnabled(env.ATLAS_REQUESTER_REQUESTS);
@@ -25,6 +26,10 @@ export function database() {
  * (lib/flightdeck/metrics.ts). Read on every call. */
 export const onboardingMetricsEnabled = () =>
   metricsFlagOn(env.ONB_METRICS_ENABLED);
+/** ONB_RESPONSE_POLICY_DAYS (D-037 item 7, owner-owned): unset means no ETA
+ * is shown anywhere. Read on every call. */
+export const onboardingResponsePolicyDays = () =>
+  responsePolicyDaysFrom(env.ONB_RESPONSE_POLICY_DAYS);
 export async function owner() {
   const user = await getChatGPTUser();
   return user?.userId || null;
