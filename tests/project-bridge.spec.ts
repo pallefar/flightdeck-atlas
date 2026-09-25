@@ -4328,6 +4328,161 @@ test("the form stays read-only until Atlas knows FlightDeck does not hold the dr
   }
 });
 
+test("an onboarding-scoped save changes only the onboarding field, merges over other edits, and refuses a stale onboarding, a wrong scope and a held draft", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const created = await createProject(page, {
+    name: qa("Scoped Save"),
+    description: "Original description",
+    functionArea: "HR",
+  });
+  const scoped = (body: Record<string, unknown>) =>
+    page.evaluate(
+      async ({ id, body }) => {
+        const r = await fetch(`/api/projects/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        return {
+          status: r.status,
+          body: (await r.json()) as {
+            project?: Project;
+            code?: string;
+            error?: string;
+          },
+        };
+      },
+      { id: created.id, body },
+    );
+  try {
+    expect(created.revision).toBe(1);
+    // User A saves the description (revision 2) while user B's onboarding
+    // form still holds revision 1.
+    const a1 = await updateProject(page, created, {
+      description: "A's description",
+    });
+    expect(a1.revision).toBe(2);
+    // B's autosave merges: only the onboarding field changes.
+    const b1 = await scoped({
+      scope: "onboarding",
+      baseRevision: 1,
+      onboarding: { countryCode: "DE" },
+      // Anything else in the body is ignored, never saved.
+      description: "B must not overwrite this",
+      name: "Hijacked",
+    });
+    expect(b1.status).toBe(200);
+    expect(b1.body.project).toMatchObject({
+      revision: 3,
+      description: "A's description",
+      name: qa("Scoped Save"),
+      onboarding: { countryCode: "DE" },
+    });
+    // A form based on revision 2 has not seen that onboarding change.
+    const stale = await scoped({
+      scope: "onboarding",
+      baseRevision: 2,
+      onboarding: { countryCode: "FR" },
+    });
+    expect(stale.status).toBe(409);
+    expect(stale.body.code).toBe("onboarding_changed");
+    // A full save by A that leaves onboarding alone keeps B's next autosave
+    // (based on revision 3) mergeable.
+    const a2 = await updateProject(page, b1.body.project!, {
+      description: "A again",
+    });
+    expect(a2).toMatchObject({
+      revision: 4,
+      onboarding: { countryCode: "DE" },
+    });
+    const b2 = await scoped({
+      scope: "onboarding",
+      baseRevision: 3,
+      onboarding: { countryCode: "DE", legalEntity: "Acme GmbH" },
+    });
+    expect(b2.status).toBe(200);
+    expect(b2.body.project).toMatchObject({
+      revision: 5,
+      description: "A again",
+      onboarding: { countryCode: "DE", legalEntity: "Acme GmbH" },
+    });
+    // A full save that changes onboarding is an onboarding change too.
+    const a3 = await updateProject(page, b2.body.project!, {
+      onboarding: { countryCode: "AT" },
+    });
+    expect(a3.revision).toBe(6);
+    expect(
+      (
+        await scoped({
+          scope: "onboarding",
+          baseRevision: 5,
+          onboarding: { countryCode: "DE" },
+        })
+      ).status,
+    ).toBe(409);
+    // Only the onboarding scope exists, and the body must be well formed.
+    expect(
+      (
+        await scoped({
+          scope: "description",
+          baseRevision: 6,
+          onboarding: { countryCode: "DE" },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (await scoped({ scope: "onboarding", onboarding: { countryCode: "DE" } }))
+        .status,
+    ).toBe(400);
+    expect(
+      (
+        await scoped({
+          scope: "onboarding",
+          baseRevision: 6,
+          onboarding: { countryCode: "XX" },
+        })
+      ).status,
+    ).toBe(400);
+    // A draft FlightDeck may hold stays as it was sent.
+    devDb((db) =>
+      db
+        .prepare(
+          "INSERT INTO atlas_flightdeck_operations (id,atlas_project_id,atlas_revision,idempotency_key,destination_workspace_id,proposed_label,state,setup_state,created_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        )
+        .run(
+          `op-${created.id}`,
+          created.id,
+          6,
+          crypto.randomUUID(),
+          "hr-de",
+          qa("Scoped Save"),
+          "linked",
+          "complete",
+          "qa",
+          new Date().toISOString(),
+        ),
+    );
+    const locked = await scoped({
+      scope: "onboarding",
+      baseRevision: 6,
+      onboarding: { countryCode: "DE" },
+    });
+    expect(locked).toMatchObject({
+      status: 409,
+      body: { code: "draft_locked" },
+    });
+  } finally {
+    devDb((db) =>
+      db
+        .prepare("DELETE FROM atlas_flightdeck_operations WHERE id=?")
+        .run(`op-${created.id}`),
+    );
+    await removeProject(page, created.id);
+  }
+});
+
 test("the timeline shows an answered request, every tab's aria-controls names a panel in the page, and Review & send states the open Legal question", async ({
   page,
 }) => {

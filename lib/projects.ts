@@ -169,6 +169,11 @@ export const projectSchema = z
       .optional(),
     /** FlightDeck details for onboarding (lib/flightdeck/onboarding.ts). */
     onboarding: onboardingSchema.optional(),
+    /** The revision that last changed `onboarding`. The server stamps it on
+     * every save and ignores the client's value; an onboarding-scoped save
+     * merges over a newer revision only while this is not newer than its
+     * base. Declared here so every writer that re-parses a project keeps it. */
+    onboardingRevision: z.number().int().positive().optional(),
   })
   .refine(
     (p) => (p.latitude === null) === (p.longitude === null),
