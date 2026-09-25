@@ -9,6 +9,8 @@ import {
   createGuardedSubmissions,
   createSubmissionClient,
   createWhoamiLoader,
+  createWhoamiReader,
+  type WhoamiRead,
   readContextConfig,
   type ContextResult,
 } from "./context-client";
@@ -52,6 +54,27 @@ export function osFeatures(): Promise<InboundFeatures> {
   if (!c) return Promise.resolve(NO_FEATURES);
   featureReader ??= createFeatureReader(createWhoamiLoader(c, cache));
   return featureReader.read();
+}
+// The Connections line's whoami: a successful answer is kept per isolate for
+// a minute, so page views by many members do not spend the credential's 30
+// requests a minute. A failure is never kept (the rate-limit block is, in the
+// shared cache), so the next view asks again.
+const WHOAMI_KEEP_MS = 60_000;
+let keptWhoami: { at: number; value: WhoamiRead } | null = null;
+/** The whoami reader for /api/flightdeck/connection, or null when FlightDeck
+ * is not configured. `fresh` skips the kept answer. */
+export function osWhoami(fresh: boolean): (() => Promise<WhoamiRead>) | null {
+  const c = config();
+  if (!c) return null;
+  const read = createWhoamiReader(c, cache);
+  return async () => {
+    const now = Date.now();
+    if (!fresh && keptWhoami && now - keptWhoami.at <= WHOAMI_KEEP_MS)
+      return keptWhoami.value;
+    const value = await read();
+    keptWhoami = value.state === "ok" ? { at: now, value } : null;
+    return value;
+  };
 }
 /** The OS's origin, for a LINK in the UI — never for a call.
  *

@@ -89,36 +89,18 @@ export const de: Record<MessageKey, string> = {
   "onb.promo.checking": "Onboarding-Status wird geprüft…",
   "onb.promo.open": "FlightDeck-Verbindung",
   "onb.promo.import": "Import aus FlightDeck: nicht aktiviert",
-  "onb.context.ok.chip": "Verbunden (nur lesen)",
-  "onb.context.ok.text":
-    "verbunden (nur lesen). Die Seitenleiste spiegelt Ihre FlightDeck-OS-Workspace- und Projektlisten über die OS-Inbound-API.",
-  "onb.context.workspace_not_found.text":
-    "verbunden (nur lesen). Ihr gespeicherter Workspace ist nicht mehr mit Atlas geteilt; wählen Sie in der Seitenleiste einen anderen.",
-  "onb.context.workspace_disabled.text":
-    "verbunden (nur lesen). Der gewählte Workspace ist in FlightDeck deaktiviert.",
-  "onb.context.checking.chip": "Wird geprüft",
-  "onb.context.checking.text": "die FlightDeck-Inbound-API wird geprüft.",
-  "onb.context.not_configured.chip": "Nicht konfiguriert",
-  "onb.context.not_configured.text":
-    "nicht konfiguriert. Legen Sie die FlightDeck-URL und die Inbound-Zugangsdaten in der Atlas-Serverkonfiguration fest.",
-  "onb.context.not_permitted.chip": "Nur Super Admin",
-  "onb.context.not_permitted.text":
-    "die Listen (nur lesen) sieht nur der Atlas-Super-Admin, weil sie eine gemeinsame OS-Maschinen-Zugangsberechtigung nutzen.",
-  "onb.context.os_unreachable.chip": "Nicht erreichbar",
-  "onb.context.os_unreachable.text":
-    "FlightDeck OS war nicht erreichbar. Die zuletzt bestätigten Listen bleiben sichtbar.",
-  "onb.context.rate_limited.chip": "Ausgelastet",
-  "onb.context.rate_limited.text":
-    "FlightDeck hat Atlas gebeten, vor dem nächsten Lesen zu warten.",
-  "onb.context.invalid_response.chip": "Unerwartete Antwort",
-  "onb.context.invalid_response.text":
-    "FlightDeck hat geantwortet, aber nicht im vereinbarten Kontext-Format.",
-  "onb.context.check_failed.chip": "Nicht verfügbar",
-  "onb.context.check_failed.text":
-    "Atlas konnte den Kontext gerade nicht prüfen.",
-  "onb.context.unauthorized.chip": "Abgelehnt",
-  "onb.context.unauthorized.text":
-    "FlightDeck hat die Inbound-Zugangsdaten von Atlas abgelehnt. Es wird nichts angezeigt.",
+  "onb.conn.checking": "Die FlightDeck-Verbindung wird geprüft…",
+  "onb.conn.readSubmit": "Verbunden: kann Kontext lesen und Onboarding-Anfragen senden",
+  "onb.conn.readOnly": "Verbunden: nur lesen",
+  "onb.conn.submitOnly": "Verbunden: kann Onboarding-Anfragen senden, aber keinen Kontext lesen",
+  "onb.conn.notConnected": "Nicht verbunden ({reason})",
+  "onb.conn.reason.not_configured": "FlightDeck ist in Atlas nicht konfiguriert",
+  "onb.conn.reason.unauthorized": "FlightDeck hat die Zugangsdaten von Atlas abgelehnt",
+  "onb.conn.reason.os_unreachable": "FlightDeck war nicht erreichbar",
+  "onb.conn.reason.rate_limited": "FlightDeck bittet Atlas zu warten; bitte gleich erneut versuchen",
+  "onb.conn.reason.invalid_response": "FlightDeck hat unerwartet geantwortet",
+  "onb.conn.reason.no_scope": "die Zugangsdaten haben keinen Atlas-Bereich",
+  "onb.conn.reason.check_failed": "Atlas konnte die Verbindung nicht prüfen",
   "onb.row.draftPrepared": "Entwurf vorbereitet",
   "onb.row.notPrepared": "Nicht vorbereitet",
   "onb.autosave.label": "Automatisches Speichern",

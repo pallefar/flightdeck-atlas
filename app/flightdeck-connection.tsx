@@ -36,7 +36,7 @@ import {
   stageLabel,
   useOnboardingStages,
 } from "./flightdeck-onboarding";
-import { t, type Locale } from "@/lib/i18n";
+import { t } from "@/lib/i18n";
 import { useLocale } from "@/lib/i18n/react";
 import {
   exportDraftText,
@@ -44,34 +44,29 @@ import {
   isStatusMoving,
   lockNote,
 } from "@/lib/flightdeck/onboarding";
-import type { ContextState } from "@/lib/flightdeck/context";
 import { CARD_ANCHOR } from "@/lib/flightdeck/project-card";
-type ContextRowKey = ContextState | "check_failed" | "checking";
-const CONTEXT_TONE: Record<ContextRowKey, string> = {
-  ok: "completed",
-  workspace_not_found: "completed",
-  workspace_disabled: "completed",
-  checking: "planning",
-  not_configured: "planning",
-  not_permitted: "planning",
-  os_unreachable: "on-hold",
-  rate_limited: "on-hold",
-  invalid_response: "on-hold",
-  check_failed: "on-hold",
-  unauthorized: "on-hold",
-};
-/** The context line's chip and text; the three connected states share the
- * "Connected (read-only)" chip. */
-const contextStatus = (key: ContextRowKey, locale: Locale) => ({
-  chip: t(
-    key === "workspace_not_found" || key === "workspace_disabled"
-      ? "onb.context.ok.chip"
-      : `onb.context.${key}.chip`,
-    locale,
-  ),
-  tone: CONTEXT_TONE[key],
-  text: t(`onb.context.${key}.text`, locale),
-});
+import {
+  connectionLine,
+  connectionViewSchema,
+  workWaitingForFlightDeck,
+  type ConnectionView,
+} from "@/lib/flightdeck/connection";
+/** The one connection line's source: the credential's whoami, through
+ * /api/flightdeck/connection. Anything unreadable is "check_failed". */
+async function fetchConnection(fresh: boolean): Promise<ConnectionView> {
+  try {
+    const r = await fetch(
+      `/api/flightdeck/connection${fresh ? "?refresh=1" : ""}`,
+      { cache: "no-store" },
+    );
+    const parsed = connectionViewSchema.safeParse(
+      r.ok ? await r.json() : null,
+    );
+    return parsed.success ? parsed.data : { state: "check_failed" };
+  } catch {
+    return { state: "check_failed" };
+  }
+}
 async function fetchCatalog(cursor?: string) {
   const r = await fetch(
     `/api/flightdeck/catalog${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
@@ -107,7 +102,11 @@ export default function FlightDeckConnection({
   onProjectSaved?: (project: Project) => void;
   onImported: () => Promise<void>;
 }) {
-  const [tab, setTab] = useState<"import" | "onboard">("import");
+  // null until someone picks a tab: the page then opens on To FlightDeck
+  // while work waits there (an unsent draft or an open ask), else on From
+  // FlightDeck. Once it has opened on To FlightDeck it stays there.
+  const [chosenTab, setTab] = useState<"import" | "onboard" | null>(null);
+  const [connection, setConnection] = useState<ConnectionView | null>(null);
   const [catalog, setCatalog] = useState<ProjectCatalog | null>(null),
     // The first catalog check starts on mount, so the view opens "Checking".
     [loading, setLoading] = useState(true),
@@ -125,15 +124,12 @@ export default function FlightDeckConnection({
   // shown here, in the signed-in Connections view, and not there.
   const { data: workspace } = useWorkspace();
   const osUrl = (workspace?.apps.find((x) => x.id === "flightdeck")?.url ?? "").replace(/\/+$/, "");
-  const contextRow = contextStatus(
-    !superAdmin ? "not_permitted" : context.state || "checking",
-    locale,
-  );
   function failed(e: unknown) {
     setError((e as Error).message);
     setCatalog(null);
   }
   async function refresh(cursor?: string) {
+    if (!cursor) void fetchConnection(true).then(setConnection);
     setLoading(true);
     setError("");
     try {
@@ -159,6 +155,13 @@ export default function FlightDeckConnection({
       setLoading(false);
     }
   }
+  useEffect(() => {
+    let live = true;
+    void fetchConnection(false).then((v) => live && setConnection(v));
+    return () => {
+      live = false;
+    };
+  }, []);
   useEffect(() => {
     fetchCatalog()
       .then(setCatalog, failed)
@@ -187,6 +190,11 @@ export default function FlightDeckConnection({
   }
   const local = projects.filter((p) => !p.archived && p.source === "atlas");
   const prepared = local.filter((p) => p.flightdeckDraft);
+  const waiting = workWaitingForFlightDeck(local, onboarding.stages);
+  // Latched during render (not in an effect): once work has waited, a
+  // later stage load that shows it sent does not flip the page away.
+  if (waiting && chosenTab === null) setTab("onboard");
+  const tab = chosenTab ?? (waiting ? "onboard" : "import");
   const filtered = local.filter((p) =>
     `${p.name} ${p.functionArea || ""}`
       .toLowerCase()
@@ -211,42 +219,11 @@ export default function FlightDeckConnection({
         </div>
         <Link2 className="hub-heading-icon" size={29} />
       </div>
+      {/* ONE connection line, from the credential's whoami: no other
+          chip, so "Connected" and "Not enabled" can never sit side by side. */}
       <div className="connection-status">
-        <span className={`status ${contextRow.tone}`}>{contextRow.chip}</span>
-        <p>
-          <strong>Workspace &amp; project context:</strong> {contextRow.text}
-        </p>
-      </div>
-      <div className="connection-status">
-        <span className="status planning">
-          {superAdmin ? "Proposal only" : "Super Admin sends"}
-        </span>
-        <p>
-          <strong>Onboarding to FlightDeck:</strong> the Atlas Super Admin can
-          send a prepared project to FlightDeck for review. It files a request
-          only: an OS admin decides, and nothing is created automatically.
-          FlightDeck must have project onboarding enabled for Atlas.
-        </p>
-      </div>
-      <div className="connection-status">
-        <span
-          className={`status ${catalog?.connected ? "in-progress" : "planning"}`}
-        >
-          {catalog?.connected
-            ? "Connected"
-            : loading
-              ? "Checking"
-              : catalog
-                ? "Not enabled"
-                : "Unavailable"}
-        </span>
-        <p>
-          <strong>Import from FlightDeck:</strong>{" "}
-          {catalog?.connected
-            ? "Projects shown here are filtered by your FlightDeck access."
-            : catalog
-              ? "not enabled. OS projects cannot be imported into Atlas until delegated sign-in and per-project access exist."
-              : "Checking whether import is available."}
+        <p role="status" data-testid="fd-connection-line">
+          <strong>{connectionLine(connection, locale)}</strong>
         </p>
         <Button
           variant="outline"
@@ -316,12 +293,12 @@ export default function FlightDeckConnection({
               <h3>
                 {error
                   ? "Discovery unavailable"
-                  : "Your OS project list will appear here"}
+                  : "Import from FlightDeck is not available yet"}
               </h3>
               <p>
                 {error
                   ? "Refresh to try again. No project access or import status can be confirmed."
-                  : "Connect FlightDeck to discover projects you can access. No OS data has been imported."}
+                  : "OS projects cannot be imported into Atlas until delegated sign-in and per-project access exist. No OS data has been imported."}
               </p>
               <a className="text-link" href="/integration">
                 Connection requirements <ArrowUpRight size={14} />

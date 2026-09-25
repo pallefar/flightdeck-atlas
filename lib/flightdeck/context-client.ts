@@ -505,29 +505,56 @@ export function createSubmissionClient(
 // ── whoami — this credential's optional-feature flags ──────────────────────
 
 export const WHOAMI_PATH = "/api/inbound/v1/whoami";
-/** Loads the whoami body for lib/flightdeck/features.ts: the JSON body of a
- * 200, or null for anything else (the reader then turns every flag off). It
- * spends the same credential-wide rate limit as every other call. */
-export function createWhoamiLoader(
+/** What one whoami read came to: the JSON body of a 200, or why there is
+ * none. Kept apart from the body-or-null loader below so the Connections
+ * line (lib/flightdeck/connection.ts) can say WHY Atlas is not connected. */
+export type WhoamiRead =
+  | { state: "ok"; body: unknown }
+  | {
+      state:
+        | "unauthorized"
+        | "os_unreachable"
+        | "rate_limited"
+        | "invalid_response";
+    };
+/** Reads GET /v1/whoami once per call. It spends the same credential-wide
+ * rate limit as every other call, and honours (and records) a 429. */
+export function createWhoamiReader(
   config: ContextConfig,
   cache: Map<string, { until: number; value?: ContextResult<unknown> }>,
   options: ClientOptions & { now?: () => number } = {},
-): () => Promise<unknown> {
+): () => Promise<WhoamiRead> {
   const exchange = exchanger(config, options);
   const now = options.now || Date.now;
   return async () => {
     const blocked = cache.get(RATE_LIMIT_KEY);
-    if (blocked && blocked.until > now()) return null;
+    if (blocked && blocked.until > now()) return { state: "rate_limited" };
     const answer = await exchange(WHOAMI_PATH, { method: "GET" });
-    if (answer.state !== "answered") return null;
+    if (answer.state !== "answered") return { state: "os_unreachable" };
     const { response, body } = answer;
     if (response.status === 429) {
       cache.set(RATE_LIMIT_KEY, {
         until: now() + retryAfterFrom(response, body) * 1000,
       });
-      return null;
+      return { state: "rate_limited" };
     }
-    return response.status === 200 && isJson(response) ? body : null;
+    if (response.status === 401) return { state: "unauthorized" };
+    return response.status === 200 && isJson(response)
+      ? { state: "ok", body }
+      : { state: "invalid_response" };
+  };
+}
+/** Loads the whoami body for lib/flightdeck/features.ts: the JSON body of a
+ * 200, or null for anything else (the reader then turns every flag off). */
+export function createWhoamiLoader(
+  config: ContextConfig,
+  cache: Map<string, { until: number; value?: ContextResult<unknown> }>,
+  options: ClientOptions & { now?: () => number } = {},
+): () => Promise<unknown> {
+  const read = createWhoamiReader(config, cache, options);
+  return async () => {
+    const answer = await read();
+    return answer.state === "ok" ? answer.body : null;
   };
 }
 

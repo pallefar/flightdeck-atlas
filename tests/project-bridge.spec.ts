@@ -3031,13 +3031,23 @@ test("onboarding drafts persist, export, and remove without creating an OS proje
     ).status(),
   ).toBe(401);
   await page.goto("/?view=connection");
-  await expect(
-    page.getByText("Import from FlightDeck:", { exact: true }),
-  ).toBeVisible();
-  await expect(page.getByText("Not enabled", { exact: true })).toBeVisible();
+  // One connection line, from the credential's whoami; no second chip that
+  // could contradict it (onb-atlas-connection-clarity).
+  await expect(page.getByTestId("fd-connection-line")).toHaveText(
+    /^(Connected: |Not connected \()/,
+  );
+  await expect(page.getByText("Not enabled", { exact: true })).toHaveCount(0);
+  // Other drafts may make the page open on To FlightDeck: pick From.
+  const fromTab = page.getByRole("button", { name: /From FlightDeck/ });
+  await expect(async () => {
+    await fromTab.click();
+    await expect(fromTab).toHaveAttribute("aria-pressed", "true", {
+      timeout: 1_000,
+    });
+  }).toPass({ timeout: 15_000 });
   await expect(
     page.getByRole("heading", {
-      name: "Your OS project list will appear here",
+      name: "Import from FlightDeck is not available yet",
     }),
   ).toBeVisible();
   const project = await createProject(page, { name: qa("Bridge") });
@@ -3064,6 +3074,11 @@ test("onboarding drafts persist, export, and remove without creating an OS proje
       page.getByRole("status").filter({ hasText: "Onboarding draft saved" }),
     ).toBeVisible();
     await page.reload();
+    // An unsent draft waits on To FlightDeck, so the page opens there by
+    // itself (onb-atlas-connection-clarity).
+    await expect(
+      page.getByRole("button", { name: /To FlightDeck/ }),
+    ).toHaveAttribute("aria-pressed", "true", { timeout: 15_000 });
     await openToFlightDeck(page);
     await expect(row.getByText(/Operations Europe/)).toBeVisible();
     const downloadPromise = page.waitForEvent("download");
