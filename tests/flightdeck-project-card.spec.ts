@@ -242,6 +242,22 @@ test("Open in FlightDeck: fdWorkspace+fdProject for the Super Admin, hidden for 
   });
 });
 
+test("Open in FlightDeck goes to the app's origin + /console, whatever path, query or fragment the catalog URL carries", () => {
+  const linked = row({ state: "linked", setup_state: "complete" });
+  const href = (appUrl: string) =>
+    view(drafted, ADMIN, linked, true, appUrl).openHref;
+  const want =
+    "https://fd.example.com/console?fdWorkspace=ws-ops&fdProject=harbour-pilot";
+  expect(href("https://fd.example.com/console")).toBe(want);
+  expect(href("https://fd.example.com/console/")).toBe(want);
+  expect(href("https://fd.example.com/app/home?tab=1#top")).toBe(want);
+  expect(href("https://fd.example.com")).toBe(want);
+  // Not a usable web address: no link (fails closed, never a javascript: or relative href).
+  expect(href("not a url")).toBeNull();
+  expect(href("javascript:alert(1)")).toBeNull();
+  expect(href("ftp://fd.example.com/")).toBeNull();
+});
+
 test("the local field is 'Readiness stage' / 'Reifegrad', and the card's words exist in both languages", () => {
   const keys = en as Record<string, string>;
   expect(keys["onb.readiness.label"]).toBe("Readiness stage");

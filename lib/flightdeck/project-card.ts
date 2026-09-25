@@ -51,16 +51,30 @@ export type CardView =
   | { kind: "fix"; reasonCode: string | null }
   | { kind: "created"; stage: OnboardingStage; openHref: string | null };
 
+/** The OS origin from the catalog's FlightDeck app URL. That URL may carry
+ * a path, query or fragment (e.g. `https://host/console`), so only its
+ * origin is kept. Not an http(s) address: null, so no link is built. */
+function appOrigin(appUrl: string): string | null {
+  try {
+    const url = new URL(appUrl.trim());
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.origin
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /** "Open in FlightDeck": for the Super Admin the linked workspace and
  * project; for anyone else the project only, and only if the projection
  * gave them the link (today's editor projection never does, so it is
- * hidden). No OS origin configured: no link. */
+ * hidden). No usable OS address configured: no link. */
 export function openInFlightDeckHref(
   status: OnboardingStatus,
   superAdmin: boolean,
   osOrigin: string,
 ) {
-  const origin = osOrigin.replace(/\/+$/, "");
+  const origin = appOrigin(osOrigin);
   const link = status.link;
   if (!origin || !link) return null;
   const params = new URLSearchParams(
