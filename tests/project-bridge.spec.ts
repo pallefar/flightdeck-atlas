@@ -521,6 +521,7 @@ test("applied suggestions record their provenance, and human facts are never inf
       expect(applied.onboarding?.prefill?.[s.field]).toEqual({
         source: "checklist",
         at: AT,
+        value: s.value,
       });
     expect(applied.functionArea).toBe(idea.area);
     expect(applied.description).toBe(idea.pilot);
@@ -568,6 +569,7 @@ test("a user edit clears a field's provenance, and re-applying never overwrites 
   expect(edited.onboarding.prefill?.["ownerRoles.data"]).toEqual({
     source: "checklist",
     at: AT,
+    value: "Data owner",
   });
   // Re-applying, even with the list offered before the edit, keeps the edits.
   const again = applyChecklistSuggestions(edited, suggestions, AT);
@@ -637,6 +639,7 @@ test("a save from any editor drops the provenance of a field whose value it chan
   expect(saved.onboarding?.prefill?.functionArea).toEqual({
     source: "checklist",
     at: AT,
+    value: idea.area,
   });
   expect(saved.onboarding?.prefill?.["ownerRoles.data"]).toBeDefined();
   // An unchanged save keeps everything; the last entry dropped leaves no
@@ -684,6 +687,55 @@ test("a save from any editor drops the provenance of a field whose value it chan
     "utf8",
   );
   expect(route.match(/settlePrefill\(/g)?.length).toBe(2);
+});
+
+test("a provenance entry saved ahead of its value never labels text the user wrote later", () => {
+  const AT = "2026-09-25T10:00:00.000Z";
+  const idea = opportunities.find((o) => o.id === "hr-onboarding")!;
+  const pilot = readyProject({
+    functionArea: undefined,
+    benefit: "",
+    description: "",
+    onboarding: {},
+    tasks: onboardingTasks(idea),
+  });
+  const applied = applyChecklistSuggestions(
+    pilot,
+    checklistSuggestions(pilot),
+    AT,
+  );
+  // The entry records the value it vouches for.
+  expect(applied.onboarding?.prefill?.summary?.value).toBe(idea.pilot);
+  // The onboarding autosave lands first (only the onboarding field is
+  // written), then the user leaves and discards the unsaved Basics: the
+  // project holds entries for empty fields.
+  const autosaved = settlePrefill(pilot, {
+    ...pilot,
+    onboarding: applied.onboarding,
+  });
+  // Later the regular project editor fills those fields with the user's own
+  // words and sends the onboarding details back as they were.
+  const later = settlePrefill(autosaved, {
+    ...autosaved,
+    functionArea: "Finance",
+    description: "Our own words",
+    benefit: "Our own measure",
+  });
+  expect(later.onboarding?.prefill?.functionArea).toBeUndefined();
+  expect(later.onboarding?.prefill?.summary).toBeUndefined();
+  expect(later.onboarding?.prefill?.successMeasure).toBeUndefined();
+  // The Basics save that carries the suggested values keeps the labels.
+  const basics = settlePrefill(autosaved, applied);
+  expect(basics.onboarding?.prefill?.summary?.value).toBe(idea.pilot);
+  expect(basics.onboarding?.prefill?.functionArea?.value).toBe(idea.area);
+  // An entry that names no value cannot be checked, so it goes once the
+  // field holds one (fails closed).
+  const bare = settlePrefill(pilot, {
+    ...pilot,
+    description: idea.pilot,
+    onboarding: { prefill: { summary: { source: "checklist", at: AT } } },
+  });
+  expect(bare.onboarding?.prefill).toBeUndefined();
 });
 
 test("submit() POSTs the envelope with only the bearer credential and never X-Workspace-Id", async () => {

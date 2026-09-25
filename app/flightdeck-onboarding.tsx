@@ -1060,10 +1060,11 @@ export function OnboardingEditor({
     if (draft.onboarding.prefill?.[field])
       editOnboarding(withoutPrefill(draft.onboarding, field));
   };
-  /** Where a prefilled value came from, shown while the value is there. */
+  /** Where a prefilled value came from, shown while the field holds the
+   * text the prefill put there. */
   const source = (field: SuggestionField, value: string | undefined) => {
     const from = draft.onboarding.prefill?.[field];
-    return from && value?.trim() ? (
+    return from && value?.trim() && from.value?.trim() === value.trim() ? (
       <span className="fd-hint" data-prefill={from.source}>
         {t(`onb.prefill.${from.source}`, locale)}
       </span>

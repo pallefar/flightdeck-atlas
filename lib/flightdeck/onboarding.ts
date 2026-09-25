@@ -81,8 +81,16 @@ export const prefillFields = [
   "ownerRoles.support",
 ] as const;
 export const prefillSources = ["atlas-project", "checklist"] as const;
+/** `value` is the text the prefill put in the field. A save keeps the entry
+ * only while the field still holds exactly that text, so the label can never
+ * attach to words the user wrote, even when the entry was saved ahead of its
+ * value (the onboarding autosave) and the value never followed. */
 export const provenanceSchema = z
-  .object({ source: z.enum(prefillSources), at: isoSchema })
+  .object({
+    source: z.enum(prefillSources),
+    at: isoSchema,
+    value: z.string().trim().min(1).max(1500).optional(),
+  })
   .strict();
 export type Provenance = z.infer<typeof provenanceSchema>;
 
@@ -994,7 +1002,7 @@ export function applyChecklistSuggestions<T extends PrefillTarget>(
       onboarding.ownerRoles![
         s.field.slice(ROLE_PREFIX.length) as "process" | "data" | "support"
       ] = s.value;
-    onboarding.prefill![s.field] = { source: "checklist", at };
+    onboarding.prefill![s.field] = { source: "checklist", at, value: s.value };
   }
   if (!Object.keys(onboarding.ownerRoles!).length) delete onboarding.ownerRoles;
   if (!Object.keys(onboarding.prefill!).length) delete onboarding.prefill;
@@ -1014,9 +1022,10 @@ export function withoutPrefill(
   return Object.keys(rest).length ? { ...others, prefill: rest } : others;
 }
 /** The save path's check, whichever editor sent the save: a provenance entry
- * survives only while it still describes the value. Kept when the field was
- * empty before (that is the prefill itself, which only ever fills empty
- * fields) or when the stored entry and the value are both unchanged. So an
+ * survives only while it still describes the value. The field must hold the
+ * exact text the entry names, and either was empty before (that is the
+ * prefill itself, which only ever fills empty fields) or kept both the stored
+ * entry and the value unchanged. So an
  * edit in the regular project editor, which sends the onboarding details
  * back as they were, and a stale client resending an old entry both lose
  * it: text the user wrote is never labelled as a suggestion. */
@@ -1028,13 +1037,20 @@ export function settlePrefill<T extends PrefillTarget>(
   if (!prefill) return next;
   let onboarding: OnboardingDraft = next.onboarding!;
   for (const field of Object.keys(prefill) as SuggestionField[]) {
+    const after = clean(prefilledValue(next, field));
+    // Saved ahead of its value (the onboarding autosave writes only the
+    // onboarding field): kept, and checked once the field holds text.
+    if (!after) continue;
+    // The field must hold exactly the text the prefill put there; an entry
+    // that names no text cannot be checked and goes (fails closed).
+    const vouched = clean(prefill[field]?.value) === after;
     const before = clean(prefilledValue(previous, field));
-    if (!before) continue;
     const same =
-      before === clean(prefilledValue(next, field)) &&
-      JSON.stringify(previous.onboarding?.prefill?.[field] ?? null) ===
-        JSON.stringify(prefill[field]);
-    if (!same) onboarding = withoutPrefill(onboarding, field);
+      !before ||
+      (before === after &&
+        JSON.stringify(previous.onboarding?.prefill?.[field] ?? null) ===
+          JSON.stringify(prefill[field]));
+    if (!vouched || !same) onboarding = withoutPrefill(onboarding, field);
   }
   return onboarding === next.onboarding ? next : { ...next, onboarding };
 }
