@@ -9,7 +9,12 @@
 // projects.read because the list is product names and links only: opening a
 // link still needs an OS sign-in and the OS's own role check.
 import { json } from "../http";
-import type { ContextState, FlightdeckAppLink, OsSelection } from "./context";
+import {
+  pickWorkspace,
+  type ContextState,
+  type FlightdeckAppLink,
+  type OsSelection,
+} from "./context";
 import type { ContextReader } from "./context-client";
 
 export type AppsAuth =
@@ -60,12 +65,16 @@ export function createAppsRoute(deps: {
     } catch {
       saved = null; // a missing preference row is not an error here
     }
-    const list = ws.data.workspaces;
-    const target =
-      list.find((w) => w.id === saved?.osWorkspaceId && w.enabled) ??
-      list.find((w) => w.isDefault && w.enabled) ??
-      list.find((w) => w.enabled);
+    // Same rule as the context switcher: a saved selection is kept even when
+    // it is gone or disabled, and reported - never swapped for another
+    // workspace whose apps would then be shown as if they were the selection's.
+    const { workspace: target } = pickWorkspace(
+      ws.data.workspaces,
+      saved?.osWorkspaceId ?? null,
+    );
     if (!target) return respond(view("workspace_not_found"));
+    if (!target.enabled)
+      return respond(view("workspace_disabled", { workspaceId: target.id }));
     const res = await os.apps(target.id);
     if (res.state !== "ok")
       return respond(
@@ -81,7 +90,13 @@ export function createAppsRoute(deps: {
           id: a.id,
           label: a.label,
           icon: a.icon,
-          url: origin + a.path,
+          // The OS console adopts these into its workspace/project switchers
+          // (web/src/launchContext.ts), so the app opens in the context whose
+          // enable state this list reflects, not the browser's last one.
+          url: `${origin}${a.path}?${new URLSearchParams({
+            fdWorkspace: res.data.workspaceId,
+            fdProject: res.data.projectId,
+          })}`,
         })),
       }),
     );

@@ -97,6 +97,15 @@ export type FlightdeckAppLink = {
   icon: string;
   url: string;
 };
+/** The launcher's search, applied to the FlightDeck section the same way the
+ * Atlas catalogue applies it: a case-insensitive substring of the label. */
+export function filterFlightdeckApps(
+  apps: FlightdeckAppLink[],
+  query: string,
+): FlightdeckAppLink[] {
+  const q = query.trim().toLowerCase();
+  return q ? apps.filter((a) => a.label.toLowerCase().includes(q)) : apps;
+}
 
 /** Atlas already uses "workspace" for an Atlas project (?workspace=). These
  * names are deliberately OS-prefixed so the two can never be confused. */

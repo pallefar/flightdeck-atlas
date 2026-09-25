@@ -26,7 +26,10 @@ import {
 } from "@/lib/collaboration";
 import type { AccessProfile } from "@/lib/access-policy";
 import type { Project, ProjectFields } from "@/lib/projects";
-import type { FlightdeckAppLink } from "@/lib/flightdeck/context";
+import {
+  filterFlightdeckApps,
+  type FlightdeckAppLink,
+} from "@/lib/flightdeck/context";
 export type WorkspaceData = {
   email: string;
   capacity: { email: string; weeklyHours: number; leaveDays: string[] }[];
@@ -120,7 +123,14 @@ const FLIGHTDECK_APPS_STATE: Record<string, string> = {
   workspace_disabled: "The FlightDeck workspace is disabled.",
   invalid_response: "FlightDeck OS sent an unexpected answer.",
 };
-function FlightdeckAppsSection({ data }: { data: FlightdeckApps }) {
+function FlightdeckAppsSection({
+  data,
+  query,
+}: {
+  data: FlightdeckApps;
+  query: string;
+}) {
+  const shown = data ? filterFlightdeckApps(data.apps, query) : [];
   return (
     <section
       className="flightdeck-apps"
@@ -139,9 +149,13 @@ function FlightdeckAppsSection({ data }: { data: FlightdeckApps }) {
         <p className="hub-muted" role="status">
           No FlightDeck sub-apps are enabled in this workspace.
         </p>
+      ) : shown.length === 0 ? (
+        <p className="hub-muted" role="status">
+          No FlightDeck apps match your search.
+        </p>
       ) : (
         <div className="launcher-grid">
-          {data.apps.map((a) => (
+          {shown.map((a) => (
             <article key={a.id} className="launcher-tile">
               <a href={a.url} target="_blank" rel="noopener noreferrer">
                 <span className="app-icon app-monogram" aria-hidden="true">
@@ -303,7 +317,7 @@ export function AppLauncher({
                 </article>
               ))}
           </div>
-          <FlightdeckAppsSection data={fdApps} />
+          <FlightdeckAppsSection data={fdApps} query={query} />
           {access?.superAdmin && (
             <Button
               variant="outline"

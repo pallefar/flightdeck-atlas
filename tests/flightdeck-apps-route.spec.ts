@@ -3,7 +3,10 @@ import {
   createContextClient,
   type ContextReader,
 } from "../lib/flightdeck/context-client";
-import { osAppsResponseSchema } from "../lib/flightdeck/context";
+import {
+  filterFlightdeckApps,
+  osAppsResponseSchema,
+} from "../lib/flightdeck/context";
 import { createAppsRoute } from "../lib/flightdeck/apps-route";
 
 // The 9-dot app menu's FlightDeck section: the real client parsing a stub
@@ -134,7 +137,7 @@ test.describe("/api/flightdeck/apps", () => {
         id: "maps",
         label: "Maps",
         icon: "🗺️",
-        url: `${OS}/console/apps/maps`,
+        url: `${OS}/console/apps/maps?fdWorkspace=te-ops&fdProject=general`,
       },
     ]);
     expect(JSON.stringify(body)).not.toContain("Bearer");
@@ -157,6 +160,44 @@ test.describe("/api/flightdeck/apps", () => {
     const body = (await (await route.GET()).json()) as { workspaceId: string };
     expect(asked).toEqual(["hr-de"]);
     expect(body.workspaceId).toBe("hr-de");
+  });
+
+  test("a saved selection that is disabled or no longer shared is reported, never swapped for another workspace", async () => {
+    const asked: string[] = [];
+    const withSaved = (osWorkspaceId: string, enabled: boolean) =>
+      createAppsRoute({
+        authorize: allowed,
+        reader: () =>
+          reader({
+            async workspaces() {
+              return {
+                state: "ok",
+                data: {
+                  ...wsBody,
+                  workspaces: wsBody.workspaces.map((w) =>
+                    w.id === "hr-de" ? { ...w, enabled } : w,
+                  ),
+                },
+              };
+            },
+            async apps(id) {
+              asked.push(id);
+              return { state: "ok", data: appsBody(id) };
+            },
+          }),
+        origin: () => OS,
+        selection: async () => ({ osWorkspaceId, osProjectId: null }),
+      });
+    expect(await (await withSaved("hr-de", false).GET()).json()).toMatchObject({
+      state: "workspace_disabled",
+      workspaceId: "hr-de",
+      apps: [],
+    });
+    expect(await (await withSaved("gone", true).GET()).json()).toMatchObject({
+      state: "workspace_not_found",
+      apps: [],
+    });
+    expect(asked).toEqual([]);
   });
 
   test("not configured and unreachable are honest states with no apps", async () => {
@@ -206,4 +247,14 @@ test.describe("/api/flightdeck/apps", () => {
     expect((await route.GET()).status).toBe(401);
     expect(read).toBe(false);
   });
+});
+
+test("the launcher search filters FlightDeck apps by label, case-insensitively", () => {
+  const apps = [
+    { id: "maps", label: "Maps", icon: "", url: `${OS}/console/apps/maps` },
+    { id: "docusign", label: "Flightdeck Sign", icon: "", url: `${OS}/console/apps/docusign` },
+  ];
+  expect(filterFlightdeckApps(apps, "").map((a) => a.id)).toEqual(["maps", "docusign"]);
+  expect(filterFlightdeckApps(apps, "  SIGN ").map((a) => a.id)).toEqual(["docusign"]);
+  expect(filterFlightdeckApps(apps, "zzz")).toEqual([]);
 });
