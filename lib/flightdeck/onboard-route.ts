@@ -167,12 +167,30 @@ const NOT_FOUND = "submission_not_found";
 const ABANDONED = "abandoned";
 const ATLAS_ID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** `confirmDiff` with `baseRevision`: the Super Admin saw what changed
+ * since the editor's ask, against the project's current revision
+ * (onb-atlas-send-enforcement, plan J3). Both or neither. */
 const sendSchema = z
   .object({
     destinationWorkspaceId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/),
     revision: z.number().int().positive(),
+    confirmDiff: z.literal(true).optional(),
+    baseRevision: z.number().int().positive().optional(),
   })
-  .strict();
+  .strict()
+  .refine((body) => !!body.confirmDiff === (body.baseRevision !== undefined));
+/** The editor's open ask (not withdrawn) on a draft, or null. */
+function openAsk(onboarding: Project["onboarding"]) {
+  const ask = onboarding?.sendRequest;
+  return ask && !ask.withdrawnAt ? ask : null;
+}
+const changedSinceAsk = (askedRevision: number, revision: number) =>
+  refuse(
+    409,
+    "changed_since_ask",
+    `The draft changed after revision ${askedRevision} was asked for. Review what changed and confirm it, or withdraw the request, before sending. Nothing was sent.`,
+    { askedRevision, revision },
+  );
 /** Names the send the Super Admin saw, by its last change, so a close never
  * lands on a send that changed (a retry, a new send) since. */
 const closeSchema = z.object({ updatedAt: isoSchema }).strict();
@@ -1025,7 +1043,8 @@ export function createOnboardRoute<A extends OnboardAccess>(
         "invalid_request",
         "Choose the FlightDeck workspace to send this project to.",
       );
-    const { destinationWorkspaceId, revision } = parsed.data;
+    const { destinationWorkspaceId, revision, confirmDiff, baseRevision } =
+      parsed.data;
     try {
       const loaded = await deps.loadProject(access, atlasProjectId);
       if (!loaded) return refuse(404, "not_found", "Project not found.");
@@ -1087,7 +1106,14 @@ export function createOnboardRoute<A extends OnboardAccess>(
           );
         envelope = stored;
       } else {
-        if (project.revision !== revision)
+        // Only the asked, acknowledged draft is sent: once it changed after
+        // the ask (the server marks the ask stale in that same save), the
+        // Super Admin must confirm the changes against the current revision.
+        const ask = openAsk(project.onboarding);
+        const confirmed = !!ask?.stale && confirmDiff === true;
+        if (ask?.stale && !(confirmed && baseRevision === project.revision))
+          return changedSinceAsk(ask.revision, project.revision);
+        if (project.revision !== (confirmed ? baseRevision : revision))
           return refuse(
             409,
             "project_changed",
@@ -1200,15 +1226,35 @@ export function createOnboardRoute<A extends OnboardAccess>(
         };
         // Reserved BEFORE the remote call. The partial unique index allows
         // one open send per project, so a second tab loses here. And only
-        // while the project still exists: it was loaded before the OS lists
-        // were read, and a delete in between would otherwise leave this
-        // request text in a row no route can reach (see deleteProject).
+        // while the project still exists at the revision checked above, in
+        // this one statement: it was loaded before the OS lists were read,
+        // and a delete in between would otherwise leave this request text in
+        // a row no route can reach (see deleteProject), and a save in between
+        // (every save, ask and withdrawal bumps the revision) would send a
+        // draft nobody checked against the ask.
         const reserved = await insert(db, "atlas_flightdeck_operations", op, {
-          sql: "EXISTS(SELECT 1 FROM atlas_projects WHERE id=?)",
-          values: [project.id],
+          sql: "EXISTS(SELECT 1 FROM atlas_projects WHERE id=? AND revision=?)",
+          values: [project.id, project.revision],
         });
-        if (reserved === "skipped")
-          return refuse(404, "not_found", "Project not found.");
+        if (reserved === "skipped") {
+          const row = await db
+            .prepare("SELECT revision,data FROM atlas_projects WHERE id=?")
+            .bind(project.id)
+            .first<{ revision: number; data: string }>();
+          if (!row) return refuse(404, "not_found", "Project not found.");
+          let ask: ReturnType<typeof openAsk> = null;
+          try {
+            ask = openAsk((JSON.parse(row.data) as Project).onboarding);
+          } catch {
+            ask = null;
+          }
+          if (ask?.stale) return changedSinceAsk(ask.revision, row.revision);
+          return refuse(
+            409,
+            "project_changed",
+            "This project changed after you reviewed it. Review it again before sending.",
+          );
+        }
         if (!reserved)
           return refuse(
             409,

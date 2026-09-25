@@ -2263,6 +2263,9 @@ test("the server keeps a draft FlightDeck may hold as it was sent, whatever the 
       .run();
   expect(await draftHeld(h.store.db, ATLAS_ID)).toBe(false);
   expect((await save()).meta.changes).toBe(1);
+  // The send names the revision that save left, which its reservation is
+  // bound to (onb-atlas-send-enforcement).
+  h.setProject(readyProject({ revision: 8 }));
   // Reserved, then filed: FlightDeck may hold it, so the draft is held.
   const remote = gate();
   h.fake.onSubmit = async () => {
@@ -2277,7 +2280,7 @@ test("the server keeps a draft FlightDeck may hold as it was sent, whatever the 
       },
     };
   };
-  const sending = h.route.POST(sendTo("hr-de"), ATLAS_ID);
+  const sending = h.route.POST(sendTo("hr-de", 8), ATLAS_ID);
   await remote.reached;
   expect(await draftHeld(h.store.db, ATLAS_ID)).toBe(true);
   expect((await save()).meta.changes).toBe(0);
@@ -2351,6 +2354,187 @@ test("two sends at once reserve one row: one reaches FlightDeck, the other is to
       submission_id: os.submissionId,
       request_body: null,
     }),
+  ]);
+});
+
+// onb-atlas-send-enforcement (plan J3): the Super Admin sends only the
+// revision an editor asked for and the server acknowledged. Once the draft
+// changed after the ask, the send is refused unless the Super Admin confirms
+// the changes against the current revision (confirmDiff with baseRevision).
+// The revision check and the reservation are one statement, so a save that
+// lands between them can never be sent.
+const askedProject = (revision: number, ask: Record<string, unknown>) =>
+  readyProject({
+    revision,
+    onboarding: {
+      ...readyProject().onboarding!,
+      sendRequest: {
+        revision: 7,
+        by: "editor@example.com",
+        at: "2026-09-22T08:00:00.000Z",
+        ...ask,
+      },
+    } as Project["onboarding"],
+  });
+
+test("a send after the draft changed since the ask is refused unless the Super Admin confirms the changes against the current revision", async () => {
+  // Asked at revision 7 (the ask itself made it 8), then an editor saved 9.
+  const h = harness({ project: askedProject(9, { stale: true }) });
+  for (const body of [
+    // The revision Review showed when the Super Admin opened it.
+    { destinationWorkspaceId: "hr-de", revision: 8 },
+    // The current revision, but nobody confirmed what changed since the ask.
+    { destinationWorkspaceId: "hr-de", revision: 9 },
+    // The diff shown was against revision 8, not what is there now.
+    {
+      destinationWorkspaceId: "hr-de",
+      revision: 8,
+      confirmDiff: true,
+      baseRevision: 8,
+    },
+  ]) {
+    const refused = await h.route.POST(send(body), ATLAS_ID);
+    expect(refused.status, JSON.stringify(body)).toBe(409);
+    expect(await refused.json()).toMatchObject({
+      code: "changed_since_ask",
+      askedRevision: 7,
+      revision: 9,
+    });
+  }
+  // A half-stated confirmation is not a confirmation.
+  for (const body of [
+    { destinationWorkspaceId: "hr-de", revision: 9, confirmDiff: true },
+    { destinationWorkspaceId: "hr-de", revision: 9, baseRevision: 9 },
+    {
+      destinationWorkspaceId: "hr-de",
+      revision: 9,
+      confirmDiff: false,
+      baseRevision: 9,
+    },
+  ])
+    expect((await h.route.POST(send(body), ATLAS_ID)).status).toBe(400);
+  expect(h.fake.calls).toEqual([]);
+  expect(h.fake.submits).toEqual([]);
+  expect(h.store.ops()).toEqual([]);
+
+  // Confirmed against the current revision: revision 9 is what is sent.
+  const sent = await h.route.POST(
+    send({
+      destinationWorkspaceId: "hr-de",
+      revision: 8,
+      confirmDiff: true,
+      baseRevision: 9,
+    }),
+    ATLAS_ID,
+  );
+  expect(sent.status).toBe(202);
+  expect(h.fake.submits).toHaveLength(1);
+  expect(h.fake.submits[0].payload.atlasRevision).toBe(9);
+  expect(h.store.ops()).toEqual([
+    expect.objectContaining({ state: "filed", atlas_revision: 9 }),
+  ]);
+});
+
+test("the asked, unchanged revision sends as before; a withdrawn ask or no ask leaves today's revision check alone", async () => {
+  // The ask moved the project to revision 8 and nothing changed since.
+  const asked = harness({ project: askedProject(8, {}) });
+  expect((await asked.route.POST(sendTo("hr-de", 8), ATLAS_ID)).status).toBe(
+    202,
+  );
+  expect(asked.fake.submits[0].payload.atlasRevision).toBe(8);
+
+  const withdrawn = harness({
+    project: askedProject(9, {
+      stale: true,
+      withdrawnAt: "2026-09-22T08:30:00.000Z",
+    }),
+  });
+  expect(
+    (await withdrawn.route.POST(sendTo("hr-de", 9), ATLAS_ID)).status,
+  ).toBe(202);
+
+  // Without an open ask a confirmation changes nothing: the send must name
+  // the current revision.
+  const none = harness();
+  const stale = await none.route.POST(
+    send({
+      destinationWorkspaceId: "hr-de",
+      revision: 6,
+      confirmDiff: true,
+      baseRevision: 7,
+    }),
+    ATLAS_ID,
+  );
+  expect(stale.status).toBe(409);
+  expect(await stale.json()).toMatchObject({ code: "project_changed" });
+  expect(none.fake.submits).toEqual([]);
+});
+
+test("a save that lands between the revision check and the reservation is never reserved or sent", async () => {
+  // The editor saves while the send reads the OS lists: the reservation is
+  // bound to the revision that was checked, so it is refused in the same
+  // statement and FlightDeck is never called.
+  const h = harness({ project: askedProject(8, {}) });
+  const reader = gate();
+  h.fake.beforeWorkspaces = reader.wait;
+  const sending = h.route.POST(sendTo("hr-de", 8), ATLAS_ID);
+  await reader.reached;
+  h.setProject(askedProject(9, { stale: true }));
+  reader.open();
+  const refused = await sending;
+  expect(refused.status).toBe(409);
+  expect(await refused.json()).toMatchObject({
+    code: "changed_since_ask",
+    askedRevision: 7,
+    revision: 9,
+  });
+  expect(h.fake.submits).toEqual([]);
+  expect(h.store.ops()).toEqual([]);
+
+  // Without an ask the same race is refused as a changed project.
+  const plain = harness();
+  const held = gate();
+  plain.fake.beforeWorkspaces = held.wait;
+  const racing = plain.route.POST(sendTo("hr-de"), ATLAS_ID);
+  await held.reached;
+  plain.setProject(readyProject({ revision: 8, status: "On hold" }));
+  held.open();
+  const changed = await racing;
+  expect(changed.status).toBe(409);
+  expect(await changed.json()).toMatchObject({ code: "project_changed" });
+  expect(plain.fake.submits).toEqual([]);
+  expect(plain.store.ops()).toEqual([]);
+});
+
+test("FlightDeck accepts a send but the reply is lost: the retry under the same key and bytes gives one submission and one row", async () => {
+  const h = harness();
+  // A FlightDeck that files by key: the first call is filed, then the
+  // connection drops before Atlas reads the answer.
+  const filed = new Map<string, string>();
+  h.fake.onSubmit = async (envelope) => {
+    const key = envelope.payload.idempotencyKey;
+    const duplicate = filed.has(key);
+    if (!duplicate) filed.set(key, JSON.stringify(envelope));
+    if (!duplicate) return { state: "os_unreachable" };
+    return {
+      state: "ok",
+      data: {
+        submissionId: os.submissionId,
+        receivedAt: null,
+        payloadSha256: null,
+        duplicate: true,
+      },
+    };
+  };
+  expect((await h.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(503);
+  expect((await h.route.POST(sendTo("hr-de"), ATLAS_ID)).status).toBe(202);
+  expect(filed.size).toBe(1);
+  expect(h.fake.submits).toHaveLength(2);
+  expect(JSON.stringify(h.fake.submits[1])).toBe(
+    JSON.stringify(h.fake.submits[0]),
+  );
+  expect(h.store.ops()).toEqual([
+    expect.objectContaining({ state: "filed", submission_id: os.submissionId }),
   ]);
 });
 
@@ -4888,6 +5072,97 @@ test("every stage has a place on the status timeline, and an answered request sh
     ["setup-in-progress", "upcoming"],
     ["setup-complete", "upcoming"],
   ]);
+});
+
+test("a stale ask can be sent from the form once the Super Admin confirms the revision Review shows", async ({
+  page,
+}) => {
+  // onb-atlas-send-enforcement: the server refuses a send of a draft that
+  // changed after the editor's ask unless the Super Admin confirms the diff
+  // against the current revision. The form must offer that confirmation, or
+  // the ask blocks the send for good.
+  await mockContext(page);
+  await page.goto("/?view=connection");
+  const created = await createProject(page, {
+    name: qa("Stale Ask"),
+    description: "Summary as asked",
+    benefit: "Measure",
+    functionArea: "HR",
+    onboardingStage: "Ready for FlightDeck",
+    flightdeckDraft: { label: qa("Stale Ask"), workspaceHint: "" },
+    onboarding: { countryCode: "DE", worksCouncilRelevant: "no" },
+  });
+  // Changed after the ask: the server keeps the ask and marks it stale.
+  const project = await updateProject(page, created, {
+    description: "Summary changed after the ask",
+  });
+  const ask = {
+    revision: created.revision,
+    by: "editor@example.com",
+    at: "2026-09-22T08:00:00.000Z",
+    stale: true,
+  };
+  await page.route("**/api/projects", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const response = await route.fetch();
+    const body = (await response.json()) as { projects: Project[] };
+    for (const p of body.projects)
+      if (p.id === project.id)
+        p.onboarding = { ...p.onboarding, sendRequest: ask };
+    return route.fulfill({ response, json: body });
+  });
+  const posts: unknown[] = [];
+  let status = statusBody(null);
+  await page.route(`**/api/flightdeck/onboard/${project.id}**`, (route) => {
+    if (route.request().method() === "POST") {
+      posts.push(route.request().postDataJSON());
+      status = statusBody("submitted");
+    }
+    return route.fulfill({
+      status: route.request().method() === "POST" ? 202 : 200,
+      contentType: "application/json",
+      body: JSON.stringify(status),
+    });
+  });
+  try {
+    await page.reload();
+    await openToFlightDeck(page);
+    const row = page.locator("article.bridge-project", {
+      hasText: qa("Stale Ask"),
+    });
+    await row.getByRole("button", { name: "Edit draft", exact: true }).click();
+    await stepButton(row, "Review & send").click();
+    await row.getByLabel("Destination workspace").selectOption("hr-de");
+    const note = row.getByRole("region", {
+      name: "Changed since it was asked for",
+    });
+    await expect(note).toContainText(`revision ${created.revision}`);
+    await expect(note).toContainText(`revision ${project.revision}`);
+    await expect(note).toContainText("editor@example.com");
+    const sendButton = row.getByRole("button", { name: "Send to FlightDeck" });
+    await expect(sendButton).toBeDisabled();
+    await expect(
+      row.getByText(/Confirm that you reviewed revision/),
+    ).toBeVisible();
+    const confirm = note.getByRole("checkbox", {
+      name: `I reviewed revision ${project.revision}, as listed in What will be sent`,
+    });
+    await confirm.check();
+    await expect(sendButton).toBeEnabled();
+    await sendButton.click();
+    await expect
+      .poll(() => posts)
+      .toEqual([
+        {
+          destinationWorkspaceId: "hr-de",
+          revision: project.revision,
+          confirmDiff: true,
+          baseRevision: project.revision,
+        },
+      ]);
+  } finally {
+    await removeProject(page, project.id);
+  }
 });
 
 test("a locked Remove draft looks and announces locked, says why on the row, and refuses mouse, keyboard and touch", async ({
