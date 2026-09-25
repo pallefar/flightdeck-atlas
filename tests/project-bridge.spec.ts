@@ -2735,6 +2735,33 @@ test("the note goes with its send: a new send of the project, a later stage of t
   expect(everything(gone.store)).not.toContain("name the");
 });
 
+test("the rejection is stored only once its note is: a failed note write leaves the send pollable, and the next read-back keeps the note", async () => {
+  for (const view of ["form", "list"] as const) {
+    const h = harness();
+    await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+    withNote(h, ["site"]);
+    // The needs-more-info row cannot be written (storage fault).
+    h.store.sqlite.exec(
+      "CREATE TRIGGER fail_note BEFORE INSERT ON atlas_flightdeck_transitions WHEN NEW.stage='needs-more-info' BEGIN SELECT RAISE(ABORT,'disk I/O error'); END;",
+    );
+    h.tick(61_000);
+    if (view === "form") await h.route.GET(statusRequest(true), ATLAS_ID);
+    else await h.route.LIST(listRequest(true));
+    // Not yet rejected: the send is still read back until the note is kept.
+    expect(h.store.ops()[0].state).toBe("filed");
+    expect(noteRows(h.store)).toEqual([]);
+    h.store.sqlite.exec("DROP TRIGGER fail_note");
+    h.tick(61_000);
+    const after = await h.status();
+    expect(after.operation).toMatchObject({
+      stage: "needs-more-info",
+      note: NOTE,
+      fields: ["site"],
+    });
+    expect(h.store.ops()[0].state).toBe("rejected");
+  }
+});
+
 test("definitive OS refusals close the send; an OS subject lock is adopted only when it is this project's", async () => {
   const h = harness();
   h.fake.onSubmit = async () => ({ state: "refused" });

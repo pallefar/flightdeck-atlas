@@ -101,7 +101,10 @@ const storedFieldsSchema = z.array(z.enum(FIELD_POINTERS));
  * `decision`: the reviewer's note and pointers, kept on this row only when
  * `stage` is needs-more-info. A row written after it deletes the note (the
  * trigger in migration 0008): the send moved on (sent again, closed), so
- * the note has done its job. */
+ * the note has done its job. The note is also kept only while `sendId` is
+ * still its project's latest send, checked in the same INSERT: a poll that
+ * resumes after a corrected send was reserved (and clearProjectNotes ran)
+ * records the stage but cannot bring the superseded note back. */
 export async function applyObservedStage(
   db: OnboardDb,
   sendId: string,
@@ -113,9 +116,13 @@ export async function applyObservedStage(
   const after = onboardingStages.filter((prev) => mayFollow(prev, stage));
   const latest =
     "(SELECT stage FROM atlas_flightdeck_transitions WHERE send_id=?1 ORDER BY seq DESC LIMIT 1)";
+  // A later send of the same project: this send's note is superseded.
+  const superseded =
+    "EXISTS(SELECT 1 FROM atlas_flightdeck_operations o WHERE o.atlas_project_id=(SELECT atlas_project_id FROM atlas_flightdeck_operations WHERE id=?1) AND o.rowid>(SELECT rowid FROM atlas_flightdeck_operations WHERE id=?1))";
   const sql =
     "INSERT INTO atlas_flightdeck_transitions (send_id,seq,stage,observed_at,source,note,fields) " +
-    "SELECT ?1,COALESCE((SELECT MAX(seq) FROM atlas_flightdeck_transitions WHERE send_id=?1),0)+1,?2,?3,?4,?5,?6 " +
+    "SELECT ?1,COALESCE((SELECT MAX(seq) FROM atlas_flightdeck_transitions WHERE send_id=?1),0)+1,?2,?3,?4," +
+    `CASE WHEN ${superseded} THEN NULL ELSE ?5 END,CASE WHEN ${superseded} THEN NULL ELSE ?6 END ` +
     "WHERE EXISTS(SELECT 1 FROM atlas_flightdeck_operations WHERE id=?1) " +
     `AND (${latest} IS NULL${after.length ? ` OR ${latest} IN (${after.map((s) => `'${s}'`).join(",")})` : ""})`;
   // Only a well-formed note travels into the row; anything else is dropped.

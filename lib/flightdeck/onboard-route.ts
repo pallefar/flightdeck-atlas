@@ -581,9 +581,6 @@ type Check = {
   notice: string | null;
   retryAfter: number | null;
   stop: boolean;
-  /** Needs more info only: the reviewer's note and pointers, for the
-   * transition row (never for the notice). */
-  decision?: DecisionNote;
 };
 
 export function createOnboardRoute<A extends OnboardAccess>(
@@ -617,7 +614,6 @@ export function createOnboardRoute<A extends OnboardAccess>(
     db: OnboardDb,
     id: string,
     source: Exclude<TransitionSource, "backfill">,
-    decision?: DecisionNote,
   ) {
     try {
       const row = await db
@@ -637,17 +633,35 @@ export function createOnboardRoute<A extends OnboardAccess>(
         reasonCode: row.reason_code,
         setupState: row.setup_state,
       });
-      const at = now().toISOString();
-      if (await applyObservedStage(db, id, stage, at, source, decision)) {
-        // Measures read off what Atlas saw, once per draft (default off).
-        if (stage === "submitted")
-          await measure(db, row.atlas_project_id, "sent", at);
-        else if (stage === "needs-more-info")
-          await measure(db, row.atlas_project_id, "correction", at);
-      }
+      await logStage(
+        db,
+        id,
+        row.atlas_project_id,
+        stage,
+        now().toISOString(),
+        source,
+      );
     } catch {
       // Caught up by the next observation of this send.
     }
+  }
+  /** Writes one transition row (applyObservedStage) and, when it was
+   * written, the measure it stands for: read off what Atlas saw, once per
+   * draft (default off). Throws when the row cannot be written. */
+  async function logStage(
+    db: OnboardDb,
+    id: string,
+    atlasProjectId: string,
+    stage: OnboardingStage,
+    at: string,
+    source: Exclude<TransitionSource, "backfill">,
+    decision?: DecisionNote,
+  ) {
+    if (!(await applyObservedStage(db, id, stage, at, source, decision)))
+      return;
+    if (stage === "submitted") await measure(db, atlasProjectId, "sent", at);
+    else if (stage === "needs-more-info")
+      await measure(db, atlasProjectId, "correction", at);
   }
 
   async function currentStatus(
@@ -1262,6 +1276,26 @@ export function createOnboardRoute<A extends OnboardAccess>(
         await touch(receipt);
         return none;
       case "rejected":
+        // A needs-more-info answer: its note and pointers are logged FIRST,
+        // on the send's needs-more-info row, and a failure to log them
+        // throws here, before the send is marked rejected. A rejected send
+        // is no longer read back, so marking it first would lose the note
+        // for good; this way the send stays pollable and the next read-back
+        // tries again. A repeat of the stage (a racing check) writes
+        // nothing, so the rejection below still goes through.
+        if (s.reasonCode === "needs-more-info")
+          await logStage(
+            db,
+            op.id,
+            op.atlas_project_id,
+            "needs-more-info",
+            stamp,
+            "poll",
+            {
+              ...(s.note !== undefined ? { note: s.note } : {}),
+              ...(s.fields !== undefined ? { fields: s.fields } : {}),
+            },
+          );
         // Rejection releases the OS subject lock: the draft reopens and a
         // revised draft is sent with a fresh key.
         await touch(
@@ -1273,15 +1307,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
           },
           ["filed", "promoted"],
         );
-        return s.reasonCode === "needs-more-info"
-          ? {
-              ...none,
-              decision: {
-                ...(s.note !== undefined ? { note: s.note } : {}),
-                ...(s.fields !== undefined ? { fields: s.fields } : {}),
-              },
-            }
-          : none;
+        return none;
       case "promoted-or-withdrawn":
         await touch(receipt);
         return {
@@ -1396,8 +1422,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
       if (found.canEdit && !op && found.project.onboarding === undefined)
         await measure(db, atlasProjectId, "draft-opened", now().toISOString());
       let notice: string | null = null,
-        retryAfter: number | null = null,
-        decision: DecisionNote | undefined;
+        retryAfter: number | null = null;
       // Only the Super Admin's view reads the OS: the machine credential
       // cannot filter per Atlas user (same rule as the context route).
       if (
@@ -1413,7 +1438,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
           notice =
             "FlightDeck is not configured, so Atlas cannot check this request.";
         else if (await claimCheck(db, op, POLL_MS)) {
-          ({ notice, retryAfter, decision } = await reconcile(
+          ({ notice, retryAfter } = await reconcile(
             db,
             op,
             os.reader,
@@ -1421,7 +1446,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
             os.installationId,
             access.userId,
           ));
-          await observe(db, op.id, "poll", decision);
+          await observe(db, op.id, "poll");
         }
       }
       return json(
@@ -1481,7 +1506,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
             os.installationId,
             access.userId,
           );
-          await observe(db, op.id, "poll", result.decision);
+          await observe(db, op.id, "poll");
           if (result.stop) {
             retryAfter = result.retryAfter;
             break;

@@ -18,6 +18,8 @@ import type { OnboardDb } from "../lib/flightdeck/onboard-route";
 import {
   BEFORE_TRACKING,
   applyObservedStage,
+  clearProjectNotes,
+  decisionNoteOf,
   mayFollow,
   observedAtText,
   transitionsOf,
@@ -430,4 +432,60 @@ test("(e) concurrent identical observations insert one row", async () => {
     ),
   ).rejects.toThrow(/disk/);
   expect(rows(sqlite, send)).toHaveLength(1);
+});
+
+test("(f) a late observation of a superseded send records its stage but never restores its reviewer note", async () => {
+  const sqlite = database();
+  const db = d1(sqlite);
+  // A poll saw the old send rejected (needs more info), then paused before
+  // it logged the stage. Meanwhile the corrected send was reserved and the
+  // project's notes were cleared. The poll now resumes.
+  const old = addSend(sqlite, "rejected", "needs-more-info");
+  const project = (
+    sqlite
+      .prepare(
+        "SELECT atlas_project_id FROM atlas_flightdeck_operations WHERE id=?",
+      )
+      .get(old) as { atlas_project_id: string }
+  ).atlas_project_id;
+  sqlite
+    .prepare(
+      "INSERT INTO atlas_flightdeck_operations (id,atlas_project_id,atlas_revision,idempotency_key,destination_workspace_id,proposed_label,state,created_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+    )
+    .run(
+      "op-corrected",
+      project,
+      2,
+      "key-corrected",
+      "hr-de",
+      "Payroll",
+      "reserved",
+      "user-1",
+      at(1),
+    );
+  await clearProjectNotes(db, project);
+  expect(
+    await applyObservedStage(db, old, "needs-more-info", at(2), "poll", {
+      note: "Please name the site.",
+      fields: ["site"],
+    }),
+  ).toBe(true);
+  expect(
+    sqlite
+      .prepare(
+        "SELECT stage,note,fields FROM atlas_flightdeck_transitions WHERE send_id=?",
+      )
+      .all(old),
+  ).toEqual([{ stage: "needs-more-info", note: null, fields: null }]);
+  expect(await decisionNoteOf(db, old)).toEqual({});
+  // The current send of a project keeps its note.
+  const current = addSend(sqlite, "rejected", "needs-more-info");
+  await applyObservedStage(db, current, "needs-more-info", at(3), "poll", {
+    note: "Please name the site.",
+    fields: ["site"],
+  });
+  expect(await decisionNoteOf(db, current)).toEqual({
+    note: "Please name the site.",
+    fields: ["site"],
+  });
 });
