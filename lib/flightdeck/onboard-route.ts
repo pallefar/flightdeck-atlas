@@ -46,6 +46,7 @@ import {
   type OsSubmissionStatus,
   type SetupState,
 } from "./onboarding";
+import { applyObservedStage, type TransitionSource } from "./transitions";
 
 export type OnboardAccess = { userId: string; superAdmin: boolean };
 export type OnboardAuth<A extends OnboardAccess> =
@@ -471,6 +472,42 @@ export function createOnboardRoute<A extends OnboardAccess>(
 ) {
   const now = () => deps.now?.() ?? new Date();
   const newId = () => deps.newId?.() ?? crypto.randomUUID();
+
+  /** Logs the stage send `id` is at now, as Atlas just saw it (the
+   * transition log, lib/flightdeck/transitions.ts). Called after every
+   * write that may move a send: the send's own answer, a close, and each
+   * read-back. It records the stored stage rather than the change, so a
+   * write whose log entry was lost is caught up by the next one. The log is
+   * a record of what Atlas saw, never what decides the send, so a failure
+   * to write it does not fail the request that moved it. */
+  async function observe(
+    db: OnboardDb,
+    id: string,
+    source: Exclude<TransitionSource, "backfill">,
+  ) {
+    try {
+      const row = await db
+        .prepare(
+          "SELECT state,reason_code,setup_state FROM atlas_flightdeck_operations WHERE id=?",
+        )
+        .bind(id)
+        .first<Pick<OperationRow, "state" | "reason_code" | "setup_state">>();
+      if (!row) return;
+      await applyObservedStage(
+        db,
+        id,
+        stageFor({
+          state: row.state,
+          reasonCode: row.reason_code,
+          setupState: row.setup_state,
+        }),
+        now().toISOString(),
+        source,
+      );
+    } catch {
+      // Caught up by the next observation of this send.
+    }
+  }
 
   async function currentStatus(
     db: OnboardDb,
@@ -898,7 +935,15 @@ export function createOnboardRoute<A extends OnboardAccess>(
           );
       }
       const result = await submissions.submit(envelope);
-      return await settle(db, op, result, submissions, reuse !== null);
+      const response = await settle(
+        db,
+        op,
+        result,
+        submissions,
+        reuse !== null,
+      );
+      await observe(db, op.id, "atlas");
+      return response;
     } catch {
       return refuse(
         503,
@@ -1188,7 +1233,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
         if (!os)
           notice =
             "FlightDeck is not configured, so Atlas cannot check this request.";
-        else if (await claimCheck(db, op, POLL_MS))
+        else if (await claimCheck(db, op, POLL_MS)) {
           ({ notice, retryAfter } = await reconcile(
             db,
             op,
@@ -1197,6 +1242,8 @@ export function createOnboardRoute<A extends OnboardAccess>(
             os.installationId,
             access.userId,
           ));
+          await observe(db, op.id, "poll");
+        }
       }
       return json(
         await currentStatus(
@@ -1255,6 +1302,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
             os.installationId,
             access.userId,
           );
+          await observe(db, op.id, "poll");
           if (result.stop) {
             retryAfter = result.retryAfter;
             break;
@@ -1363,6 +1411,7 @@ export function createOnboardRoute<A extends OnboardAccess>(
         .bind(ABANDONED, now().toISOString(), op.id, op.updated_at, NOT_FOUND)
         .run();
       if (!done.meta.changes) return changed();
+      await observe(db, op.id, "atlas");
       return json(await status());
     } catch {
       return refuse(
