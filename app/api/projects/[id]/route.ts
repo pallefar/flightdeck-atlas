@@ -29,6 +29,7 @@ import {
 import {
   draftEdited,
   resolveSendRequest,
+  settlePrefill,
   type OnboardingDraft,
 } from "@/lib/flightdeck/onboarding";
 import type { AccessProfile } from "@/lib/access-policy";
@@ -155,7 +156,13 @@ export async function PUT(
     });
     if (!marker.ok)
       return json({ error: marker.error, code: marker.code }, marker.status);
-    fields = { ...fields, onboarding: marker.onboarding };
+    // A field this save changed is the user's now, whichever editor sent
+    // it, so its prefill provenance goes (the regular project editor sends
+    // the onboarding details back as they were).
+    fields = settlePrefill(previous, {
+      ...fields,
+      onboarding: marker.onboarding,
+    });
     // While FlightDeck may hold a send, the draft stays exactly as it was
     // sent. The form and the To FlightDeck row lock it too, but a form that
     // has not loaded its status knows nothing, so the save refuses on its
@@ -327,7 +334,11 @@ async function saveOnboarding(
     });
     if (!marker.ok)
       return json({ error: marker.error, code: marker.code }, marker.status);
-    onboarding = marker.onboarding ?? {};
+    onboarding =
+      settlePrefill(previous, {
+        ...previous,
+        onboarding: marker.onboarding ?? {},
+      }).onboarding ?? {};
     const seen =
       previous.revision === baseRevision ||
       (previous.onboardingRevision !== undefined &&

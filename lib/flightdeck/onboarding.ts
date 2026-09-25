@@ -1013,6 +1013,31 @@ export function withoutPrefill(
   void _old;
   return Object.keys(rest).length ? { ...others, prefill: rest } : others;
 }
+/** The save path's check, whichever editor sent the save: a provenance entry
+ * survives only while it still describes the value. Kept when the field was
+ * empty before (that is the prefill itself, which only ever fills empty
+ * fields) or when the stored entry and the value are both unchanged. So an
+ * edit in the regular project editor, which sends the onboarding details
+ * back as they were, and a stale client resending an old entry both lose
+ * it: text the user wrote is never labelled as a suggestion. */
+export function settlePrefill<T extends PrefillTarget>(
+  previous: PrefillTarget,
+  next: T,
+): T {
+  const prefill = next.onboarding?.prefill;
+  if (!prefill) return next;
+  let onboarding: OnboardingDraft = next.onboarding!;
+  for (const field of Object.keys(prefill) as SuggestionField[]) {
+    const before = clean(prefilledValue(previous, field));
+    if (!before) continue;
+    const same =
+      before === clean(prefilledValue(next, field)) &&
+      JSON.stringify(previous.onboarding?.prefill?.[field] ?? null) ===
+        JSON.stringify(prefill[field]);
+    if (!same) onboarding = withoutPrefill(onboarding, field);
+  }
+  return onboarding === next.onboarding ? next : { ...next, onboarding };
+}
 
 // ── OS wire DTOs for the kind (plan §4.3, §4.6) ────────────────────────────
 // Parsed in strip mode: Atlas stores only the fields named here, so an extra

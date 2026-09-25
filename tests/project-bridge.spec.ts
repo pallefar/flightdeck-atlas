@@ -52,6 +52,7 @@ import {
   timelineSteps,
   type OnboardingEnvelope,
   type OnboardingStage,
+  settlePrefill,
   withoutPrefill,
   type OnboardingStatus,
 } from "../lib/flightdeck/onboarding";
@@ -606,6 +607,83 @@ test("a user edit clears a field's provenance, and re-applying never overwrites 
   );
   expect(sent).not.toContain("prefill");
   expect(sent).not.toContain(AT);
+});
+
+test("a save from any editor drops the provenance of a field whose value it changed", () => {
+  const AT = "2026-09-25T10:00:00.000Z";
+  const idea = opportunities.find((o) => o.id === "hr-onboarding")!;
+  const pilot = readyProject({
+    functionArea: undefined,
+    benefit: "",
+    description: "",
+    onboarding: {},
+    tasks: onboardingTasks(idea),
+  });
+  const stored = applyChecklistSuggestions(
+    pilot,
+    checklistSuggestions(pilot),
+    AT,
+  );
+  // The regular project editor rewrites the description and the benefit and
+  // sends the onboarding details back untouched, old provenance included.
+  const saved = settlePrefill(stored, {
+    ...stored,
+    description: "Our own words",
+    benefit: "Our own measure",
+  });
+  expect(saved.onboarding?.prefill?.summary).toBeUndefined();
+  expect(saved.onboarding?.prefill?.successMeasure).toBeUndefined();
+  // Fields the save left alone keep theirs.
+  expect(saved.onboarding?.prefill?.functionArea).toEqual({
+    source: "checklist",
+    at: AT,
+  });
+  expect(saved.onboarding?.prefill?.["ownerRoles.data"]).toBeDefined();
+  // An unchanged save keeps everything; the last entry dropped leaves no
+  // empty record.
+  expect(settlePrefill(stored, { ...stored }).onboarding).toEqual(
+    stored.onboarding,
+  );
+  const one = applyChecklistSuggestions(
+    { ...pilot, onboarding: {} },
+    [{ field: "summary", value: idea.pilot }],
+    AT,
+  );
+  expect(
+    settlePrefill(one, { ...one, description: "Mine" }).onboarding,
+  ).toEqual({});
+  // Applying suggestions fills empty fields, so a fresh entry on a field that
+  // was empty is the prefill itself and is kept, whichever save lands first.
+  expect(settlePrefill(pilot, stored).onboarding?.prefill).toEqual(
+    stored.onboarding?.prefill,
+  );
+  const scopedFirst = { ...pilot, onboarding: stored.onboarding };
+  expect(settlePrefill(scopedFirst, stored).onboarding?.prefill).toEqual(
+    stored.onboarding?.prefill,
+  );
+  // A stale client cannot label text the user wrote: an entry the stored
+  // project does not hold, on a field that already had a value, is dropped.
+  const mine = { ...stored, description: "Our own words" };
+  const cleared = settlePrefill(stored, mine);
+  expect(
+    settlePrefill(cleared, { ...cleared, onboarding: stored.onboarding })
+      .onboarding?.prefill?.summary,
+  ).toBeUndefined();
+  // Owner role titles are settled the same way.
+  const role = settlePrefill(stored, {
+    ...stored,
+    onboarding: {
+      ...stored.onboarding,
+      ownerRoles: { ...stored.onboarding?.ownerRoles, data: "Records lead" },
+    },
+  });
+  expect(role.onboarding?.prefill?.["ownerRoles.data"]).toBeUndefined();
+  // Both save paths of the project route settle provenance on the server.
+  const route = readFileSync(
+    new URL("../app/api/projects/[id]/route.ts", import.meta.url),
+    "utf8",
+  );
+  expect(route.match(/settlePrefill\(/g)?.length).toBe(2);
 });
 
 test("submit() POSTs the envelope with only the bearer credential and never X-Workspace-Id", async () => {
