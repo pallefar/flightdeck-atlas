@@ -905,10 +905,18 @@ export function createOnboardRoute<A extends OnboardAccess>(
           .bind(operation.supersedes_send_id)
           .first<Pick<OperationRow, "atlas_revision" | "adopted">>()
       : null;
+    // Lineage is claimed only once FlightDeck filed this send: a reserved
+    // attempt has no answer yet, and a refused one (ALREADY_SUPERSEDED,
+    // SUPERSEDES_WRONG_STATE, ...) filed nothing, though it still records
+    // the supersedes Atlas asked for.
+    const filed =
+      !!operation &&
+      (SENT.includes(operation.state) || operation.state === "rejected");
     const resubmissionOf: ResubmissionOf | undefined = pred
       ? {
           revision: pred.adopted ? null : pred.atlas_revision,
-          linkedInFlightDeck: !!operation?.supersedes_submission_id,
+          linkedInFlightDeck: filed && !!operation?.supersedes_submission_id,
+          filed,
         }
       : undefined;
     // An editor's projection never shows the link, so it is not read.

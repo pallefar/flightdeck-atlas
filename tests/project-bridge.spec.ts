@@ -59,6 +59,7 @@ import {
   FIELD_POINTERS,
   fieldDigests,
   resubmitChanged,
+  resubmissionNote,
 } from "../lib/flightdeck/onboarding";
 import {
   DRAFT_NOT_HELD_SQL,
@@ -3143,7 +3144,7 @@ test("Fix and resubmit waits for a named field to change, then sends a fresh key
   const resubmitted = await h.status(false);
   expect(resubmitted.operation).toMatchObject({
     atlasRevision: 9,
-    resubmissionOf: { revision: 7, linkedInFlightDeck: false },
+    resubmissionOf: { revision: 7, linkedInFlightDeck: false, filed: true },
   });
   // History shows both: the earlier send with its answer.
   expect(resubmitted.history).toMatchObject([
@@ -3295,9 +3296,7 @@ test("the reviewer's named fields still gate the next resubmission after FlightD
   expect(h.fake.submits).toHaveLength(2);
   // The named field changed: the next resubmission goes (Atlas link only).
   h.setProject(readyProject({ revision: 10, location: "Hamburg, Germany" }));
-  expect((await h.route.POST(sendTo("hr-de", 10), ATLAS_ID)).status).toBe(
-    202,
-  );
+  expect((await h.route.POST(sendTo("hr-de", 10), ATLAS_ID)).status).toBe(202);
   expect(h.store.ops()[2]).toMatchObject({
     state: "filed",
     supersedes_send_id: h.store.ops()[0].id,
@@ -3315,8 +3314,59 @@ test("a resubmission FlightDeck links carries supersedes and reads back as linke
   expect((await h.route.POST(sendTo("hr-de", 8), ATLAS_ID)).status).toBe(202);
   expect(h.fake.submits[1].payload.supersedes).toBe(os.submissionId);
   expect((await h.status(false)).operation).toMatchObject({
-    resubmissionOf: { revision: 7, linkedInFlightDeck: true },
+    resubmissionOf: { revision: 7, linkedInFlightDeck: true, filed: true },
   });
+});
+
+test("the resubmission's lineage reads as linked only once FlightDeck filed it: a refused or unconfirmed attempt claims no link and no receipt", async () => {
+  for (const answer of [
+    { state: "already_superseded", submissionId: os.otherSubmissionId },
+    { state: "supersedes_refused" },
+    { state: "os_unreachable" },
+  ] as const) {
+    const h = harness({ features: resubmitFeatures(true) });
+    await h.route.POST(sendTo("hr-de"), ATLAS_ID);
+    withNote(h, ["site"]);
+    h.tick(61_000);
+    await h.status();
+    h.fake.onSubmit = async () => answer;
+    h.setProject(readyProject({ revision: 8, location: "Berlin, Germany" }));
+    await h.route.POST(sendTo("hr-de", 8), ATLAS_ID);
+    // Atlas asked FlightDeck to link it...
+    expect(h.fake.submits[1].payload.supersedes).toBe(os.submissionId);
+    // ...but FlightDeck filed nothing (refused) or has not said (reserved).
+    const { operation } = await h.status(false);
+    expect(operation!.state).toBe(
+      answer.state === "os_unreachable" ? "reserved" : "refused",
+    );
+    expect(operation!.resubmissionOf).toEqual({
+      revision: 7,
+      linkedInFlightDeck: false,
+      filed: false,
+    });
+    const note = resubmissionNote(operation!)!;
+    expect(note).not.toMatch(/FlightDeck links it|FlightDeck received it/);
+    expect(note).toMatch(
+      answer.state === "os_unreachable"
+        ? /FlightDeck has not confirmed/
+        : /FlightDeck filed nothing/,
+    );
+  }
+});
+
+test("resubmissionNote says who links a filed resubmission, and nothing for a first send", () => {
+  const filed = (linkedInFlightDeck: boolean, revision: number | null = 7) =>
+    resubmissionNote({
+      state: "filed",
+      resubmissionOf: { revision, linkedInFlightDeck, filed: true },
+    });
+  expect(filed(true)).toBe(
+    "Resubmission of revision 7. FlightDeck links it to the earlier request.",
+  );
+  expect(filed(false, null)).toBe(
+    "Resubmission of an earlier request. Atlas links it to the earlier request; FlightDeck received it as a new request.",
+  );
+  expect(resubmissionNote({ state: "filed" })).toBeNull();
 });
 
 test("submit() maps FlightDeck's lineage refusals: ALREADY_SUPERSEDED, SUPERSEDES_NOT_FOUND and SUPERSEDES_WRONG_STATE", async () => {

@@ -1105,6 +1105,36 @@ export function resubmitChanged(
       sent[p] !== current[p],
   );
 }
+/** The Review & send step's note on a resubmission. It claims a receipt or
+ * a link only once FlightDeck filed the send: a refused attempt filed
+ * nothing, and a reserved one has no answer yet. */
+export function resubmissionNote(op: {
+  state: OperationState;
+  resubmissionOf?: {
+    revision: number | null;
+    linkedInFlightDeck: boolean;
+    filed: boolean;
+  };
+}): string | null {
+  const of = op.resubmissionOf;
+  if (!of) return null;
+  const lead = of.revision
+    ? `Resubmission of revision ${of.revision}. `
+    : "Resubmission of an earlier request. ";
+  if (!of.filed)
+    return (
+      lead +
+      (op.state === "refused"
+        ? "FlightDeck filed nothing for this attempt, so nothing is linked to the earlier request."
+        : "FlightDeck has not confirmed it received it yet, so nothing is linked to the earlier request yet.")
+    );
+  return (
+    lead +
+    (of.linkedInFlightDeck
+      ? "FlightDeck links it to the earlier request."
+      : "Atlas links it to the earlier request; FlightDeck received it as a new request.")
+  );
+}
 export const fieldDigestsSchema = z.record(
   z.enum(DIGEST_FIELDS as [DigestField, ...DigestField[]]),
   z.string().regex(/^[a-f0-9]{64}$/),
@@ -1915,12 +1945,15 @@ export const onboardingStatusSchema = z
          * named field changed (resubmitChanged). */
         sentDigests: fieldDigestsSchema.optional(),
         /** This send resubmits an earlier needs-more-info send: that send's
-         * revision (null when adopted), and whether FlightDeck links the
-         * two (payload.supersedes) or only Atlas does. */
+         * revision (null when adopted); whether FlightDeck filed this send
+         * (false while reserved or once refused); and, only once filed,
+         * whether FlightDeck links the two (payload.supersedes) or only
+         * Atlas does. */
         resubmissionOf: z
           .object({
             revision: z.number().int().positive().nullable(),
             linkedInFlightDeck: z.boolean(),
+            filed: z.boolean(),
           })
           .strict()
           .optional(),

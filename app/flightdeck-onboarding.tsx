@@ -69,6 +69,7 @@ import {
   meterFor,
   readiness,
   resubmitChanged,
+  resubmissionNote,
   reviewRows,
   stepErrors,
   timelineSteps,
@@ -2535,14 +2536,9 @@ export function OnboardingEditor({
             Sending files a request for review in FlightDeck. An OS admin
             decides; nothing becomes OS data until they accept it.
           </p>
-          {op?.resubmissionOf && (
+          {op && resubmissionNote(op) && (
             <p className="fd-hint" role="note">
-              {op.resubmissionOf.revision
-                ? `Resubmission of revision ${op.resubmissionOf.revision}. `
-                : "Resubmission of an earlier request. "}
-              {op.resubmissionOf.linkedInFlightDeck
-                ? "FlightDeck links it to the earlier request."
-                : "Atlas links it to the earlier request; FlightDeck received it as a new request."}
+              {resubmissionNote(op)}
             </p>
           )}
           <p
