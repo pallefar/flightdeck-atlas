@@ -20,6 +20,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { progress, type Project, type ProjectFields } from "@/lib/projects";
 import { downloadText } from "@/lib/briefing";
+import { t } from "@/lib/i18n";
+import { useLocale } from "@/lib/i18n/react";
+import FlightDeckProjectCard from "./flightdeck-project-card";
 export default function ProjectWorkspace({
   project,
   demo,
@@ -33,8 +36,13 @@ export default function ProjectWorkspace({
   onPresent,
   embedded = false,
   section,
+  superAdmin = false,
+  requesterRequests = false,
 }: {
   embedded?: boolean;
+  /** Who sees the FlightDeck card (lib/flightdeck/project-card.ts). */
+  superAdmin?: boolean;
+  requesterRequests?: boolean;
   section?: "overview" | "updates" | "collaboration";
   project: Project;
   demo: boolean;
@@ -52,6 +60,7 @@ export default function ProjectWorkspace({
   onPresent: () => void;
 }) {
   const readOnly = demo || project.canEdit === false;
+  const locale = useLocale();
   const [tab, setTab] = useState<
     | "studio"
     | "overview"
@@ -215,6 +224,7 @@ export default function ProjectWorkspace({
         </div>
       )}
       {tab === "overview" ? (
+        <>
         <div className="project-overview">
           <div>
             <h3>Outcome & direction</h3>{" "}
@@ -256,7 +266,7 @@ export default function ProjectWorkspace({
               <dd>{project.location || "Not set"}</dd>
             </div>
             <div>
-              <dt>Onboarding</dt>
+              <dt>{t("onb.readiness.label", locale)}</dt>
               <dd>{project.onboardingStage || "Discovery"}</dd>
             </div>
             <div>
@@ -265,6 +275,15 @@ export default function ProjectWorkspace({
             </div>
           </dl>
         </div>
+        <FlightDeckProjectCard
+          project={project}
+          superAdmin={superAdmin}
+          requesterRequests={requesterRequests}
+          demo={demo}
+          busy={busy}
+          onSave={onSave}
+        />
+        </>
       ) : tab !== "updates" ? null : (
         <div className="workspace-updates">
           {!readOnly && (

@@ -108,4 +108,28 @@ export const de: Record<MessageKey, string> = {
     "FlightDeck hat die Inbound-Zugangsdaten von Atlas abgelehnt. Es wird nichts angezeigt.",
   "onb.row.draftPrepared": "Entwurf vorbereitet",
   "onb.row.notPrepared": "Nicht vorbereitet",
+  "onb.readiness.label": "Reifegrad",
+  "onb.card.title": "FlightDeck",
+  "onb.card.prepare": "FlightDeck-Anfrage vorbereiten",
+  "onb.card.prepare.text":
+    "Bereiten Sie eine Anfrage vor, um dieses Projekt in FlightDeck einzurichten. Ein OS-Admin entscheidet; nichts wird automatisch erstellt.",
+  "onb.card.continue": "Entwurf fortsetzen ({done} von {total} für Sie)",
+  "onb.card.continue.text":
+    "Ihr Entwurf ist in Atlas gespeichert. Nur der Atlas-Super-Admin sendet ihn an FlightDeck.",
+  "onb.card.lastStage": "Letzte Sendung: {stage}",
+  "onb.card.waitingSuperAdmin": "Wartet auf den Super-Admin",
+  "onb.card.waitingSuperAdmin.text":
+    "FlightDeck hat die Sendung noch nicht bestätigt. Der Atlas-Super-Admin wiederholt oder schließt sie.",
+  "onb.card.waitingFlightDeck": "Wartet auf Prüfung in FlightDeck",
+  "onb.card.waitingFlightDeck.text":
+    "Ein OS-Admin entscheidet; nichts wird automatisch erstellt.",
+  "onb.card.fix": "Anfrage korrigieren",
+  "onb.card.fix.text":
+    "FlightDeck hat weitere Informationen angefordert. Aktualisieren Sie den Entwurf; der Atlas-Super-Admin sendet ihn erneut.",
+  "onb.card.created": "Projekt erstellt",
+  "onb.card.created.text": "FlightDeck führt dieses Projekt jetzt.",
+  "onb.card.open": "In FlightDeck öffnen",
+  "onb.card.view": "Status anzeigen",
+  "onb.card.close": "Schließen",
+  "onb.card.rowLink": "FlightDeck-Karte",
 };

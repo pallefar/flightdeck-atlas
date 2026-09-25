@@ -31,7 +31,12 @@ export default function ProjectManagement({
   onGlobe,
   onSave,
   onReload,
+  superAdmin = false,
+  requesterRequests = false,
 }: {
+  /** Who sees the project page's FlightDeck card. */
+  superAdmin?: boolean;
+  requesterRequests?: boolean;
   projects: Project[];
   projectId: string;
   tool: WorkTool;
@@ -305,6 +310,8 @@ export default function ProjectManagement({
                     onEdit={() => onEdit(project)}
                     onGlobe={() => onGlobe(project)}
                     onPresent={() => onTool("slides")}
+                    superAdmin={superAdmin}
+                    requesterRequests={requesterRequests}
                   />
                 ) : tool === "slides" ? (
                   <PresentationStudio
