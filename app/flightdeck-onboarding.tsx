@@ -910,6 +910,9 @@ export function OnboardingEditor({
   const [tab, setTab] = useState<OnboardingTab>("basics");
   const [destination, setDestination] = useState("");
   const [sending, setSending] = useState(false);
+  /** Save now is running: the form is frozen until it is done. */
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [closing, setClosing] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
   const [error, setError] = useState("");
@@ -978,14 +981,23 @@ export function OnboardingEditor({
     setBasicsDirty(true);
   };
   /** An onboarding edit: shown at once, and handed to the autosave unless
-   * the server would refuse it as it stands. */
-  function editOnboarding(next: OnboardingDraft, via: Autosave = autosave) {
+   * the server would refuse it as it stands. While a conflict waits for
+   * Keep mine or Use theirs, edits stay local: the form may hold a copy
+   * based on an older version (say, recovered after a reload), and sending
+   * it would overwrite the other change without a 409. The held copy keeps
+   * them, and Keep mine re-applies them on top. */
+  function editOnboarding(
+    next: OnboardingDraft,
+    via: Autosave = autosave,
+    local = !!held,
+  ) {
     setDraft((d) => ({ ...d, onboarding: next }));
     if (next.proposedProjectId && !SLUG_RE.test(next.proposedProjectId)) {
       setUnsent(true);
       return;
     }
     setUnsent(false);
+    if (local) return;
     const c = via.coordinator;
     const state = c.getState();
     // A save refused as it stood (say, a value the server rejected) gets a
@@ -1054,18 +1066,16 @@ export function OnboardingEditor({
     setDraft(next);
     setBasicsDirty(dirty);
     setRefreshedTo(null);
-    let via = autosave;
-    if (save.status === "conflict" || save.status === "stopped")
-      via.coordinator.resume(theirs.revision);
-    else if (save.acknowledgedRevision !== theirs.revision) {
-      via = startAutosave(theirs.revision);
-      setAutosave(via);
-    }
+    // Always a new coordinator on their revision: the old one may still
+    // queue the pre-conflict value, which would be sent over theirs even
+    // when the reconciled copy already equals theirs.
+    const via = startAutosave(theirs.revision);
+    setAutosave(via);
     if (
       stableJson(cleanOnboarding(next.onboarding)) !==
       stableJson(cleanOnboarding(theirsDraft.onboarding))
     )
-      editOnboarding(next.onboarding, via);
+      editOnboarding(next.onboarding, via, false);
     void saveNow({ server: theirs, draft: next, basicsDirty: dirty, via });
   }
   /** Use theirs: the local changes are discarded. */
@@ -1097,7 +1107,27 @@ export function OnboardingEditor({
       via?: Autosave;
     } = {},
   ) {
-    if (frozen) return;
+    if (frozen || savingRef.current) return;
+    // The form takes no edit until the whole save is done: the draft is
+    // captured here, and an edit made while the waiting autosave is flushed
+    // would be overwritten by the whole-project save that follows.
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await saveAll(over);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
+  async function saveAll(
+    over: {
+      server?: Project;
+      draft?: Draft;
+      basicsDirty?: boolean;
+      via?: Autosave;
+    },
+  ) {
     setError("");
     const via = over.via ?? autosave;
     const d = over.draft ?? draft;
@@ -1325,11 +1355,15 @@ export function OnboardingEditor({
       {extra}
     </div>
   );
+  // A held conflict keeps edits local, so the pill never claims they are
+  // saved while it waits for Keep mine or Use theirs.
   const pill = autosavePill(
-    unsent &&
-      !["conflict", "stopped", "retrying", "saving"].includes(save.status)
-      ? { ...save, status: "pending" }
-      : save,
+    held && !["conflict", "stopped"].includes(save.status)
+      ? { ...save, status: "conflict" }
+      : unsent &&
+          !["conflict", "stopped", "retrying", "saving"].includes(save.status)
+        ? { ...save, status: "pending" }
+        : save,
     { locale, savedAt: snap.savedAt, basicsDirty },
   );
   const onTabKey = (e: React.KeyboardEvent, index: number) => {
@@ -1380,7 +1414,7 @@ export function OnboardingEditor({
           held={held}
           base={held.base}
           mine={draft}
-          disabled={busy}
+          disabled={busy || saving}
           onKeepMine={keepMine}
           onUseTheirs={takeTheirs}
         />
@@ -1476,13 +1510,18 @@ export function OnboardingEditor({
               </li>
             ))}
           </ul>
-          <Button type="button" variant="outline" onClick={applySuggestions}>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={saving}
+            onClick={applySuggestions}
+          >
             Apply checklist suggestions
           </Button>
         </div>
       )}
       <fieldset
-        disabled={frozen || busy}
+        disabled={frozen || busy || saving}
         id={`fd-panel-${tab}`}
         role="tabpanel"
         aria-labelledby={`fd-tab-${tab}`}
@@ -2121,7 +2160,9 @@ export function OnboardingEditor({
         )}
         <Button
           type="submit"
-          disabled={busy || frozen || !!held || !draft.label.trim() || !slugOk}
+          disabled={
+            busy || saving || frozen || !!held || !draft.label.trim() || !slugOk
+          }
         >
           {t("onb.autosave.saveNow", locale)}
         </Button>

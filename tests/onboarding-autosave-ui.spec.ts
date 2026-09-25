@@ -299,3 +299,120 @@ test("Use theirs discards the local copy and loads the other version", async ({
     after.getByRole("region", { name: /Someone else saved|Unsaved changes/ }),
   ).toHaveCount(0);
 });
+
+test("edits made while a recovered conflict waits for a choice stay local until Keep mine", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const name = qa("HeldEdits");
+  const project = await createProject(page, seed(name));
+  await openStatus(page, project.id);
+  const row = await openEditor(page, name);
+  const theirs = await saveElsewhere(page, project, {
+    onboarding: { countryCode: "AT", worksCouncilRelevant: "yes" },
+  });
+  await row.getByLabel("Legal entity (optional)").fill("Mine GmbH");
+  await expect(
+    row.getByRole("region", {
+      name: `Someone else saved revision ${theirs.revision}`,
+    }),
+  ).toBeVisible();
+  // After a reload the form holds the old local copy, and a new coordinator
+  // starts on their revision: an edit now must not send that copy over
+  // theirs.
+  await page.reload();
+  const again = await openEditor(page, name);
+  const held = again.getByRole("region", {
+    name: /Someone else saved|Unsaved changes/,
+  });
+  await expect(held).toBeVisible();
+  await again.getByLabel("Legal entity (optional)").fill("Mine Two GmbH");
+  await page.waitForTimeout(2_500);
+  const untouched = await latest(page, project.id);
+  expect(untouched.revision).toBe(theirs.revision);
+  expect(untouched.onboarding?.countryCode).toBe("AT");
+  expect(untouched.onboarding?.worksCouncilRelevant).toBe("yes");
+  await expect(held).toBeVisible();
+  await expect(again.getByRole("status", { name: "Autosave" })).toContainText(
+    /Not saved/,
+  );
+  expect(await unloadGuarded(page)).toBe(true);
+
+  await held.getByRole("button", { name: "Keep mine (re-apply on top)" }).click();
+  await expect(held).toHaveCount(0);
+  await expect(again.getByRole("status", { name: "Autosave" })).toHaveText(
+    /Saved/,
+  );
+  const merged = await latest(page, project.id);
+  expect(merged.onboarding?.legalEntity).toBe("Mine Two GmbH");
+  expect(merged.onboarding?.countryCode).toBe("AT");
+  expect(merged.onboarding?.worksCouncilRelevant).toBe("yes");
+});
+
+test("Keep mine where both sides chose the same value keeps their unrelated change", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const name = qa("SameValue");
+  const project = await createProject(page, seed(name));
+  await openStatus(page, project.id);
+  const row = await openEditor(page, name);
+  // Both editors pick France; the other one also changed works-council
+  // relevance.
+  const theirs = await saveElsewhere(page, project, {
+    onboarding: { countryCode: "FR", worksCouncilRelevant: "yes" },
+  });
+  await row.getByLabel("Country").selectOption("FR");
+  const panel = row.getByRole("region", {
+    name: `Someone else saved revision ${theirs.revision}`,
+  });
+  await expect(panel).toBeVisible();
+  await panel.getByRole("button", { name: "Keep mine (re-apply on top)" }).click();
+  await expect(panel).toHaveCount(0);
+  await page.waitForTimeout(2_500);
+  const server = await latest(page, project.id);
+  expect(server.onboarding?.countryCode).toBe("FR");
+  expect(server.onboarding?.worksCouncilRelevant).toBe("yes");
+  await expect(row.getByLabel("Works council relevant")).toHaveValue("yes");
+  expect(await unloadGuarded(page)).toBe(false);
+});
+
+test("Save now freezes the form until the whole save is done, so no edit is lost", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const name = qa("SaveNowFreeze");
+  const project = await createProject(page, seed(name));
+  await openStatus(page, project.id);
+  // Hold the onboarding autosave open long enough to try an edit.
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => (release = r));
+  await page.route(`**/api/projects/${project.id}`, async (route) => {
+    if (
+      route.request().method() === "PUT" &&
+      (route.request().postData() ?? "").includes('"scope":"onboarding"')
+    )
+      await gate;
+    await route.fallback();
+  });
+  const row = await openEditor(page, name);
+  await row.getByRole("tab", { name: "Basics" }).click();
+  await row.getByLabel("Proposed OS project name").fill(`${name} renamed`);
+  await row.getByRole("tab", { name: "FlightDeck details" }).click();
+  const legal = row.getByLabel("Legal entity (optional)");
+  await legal.fill("First GmbH");
+  await row.getByRole("button", { name: "Save now" }).click();
+  // While the waiting autosave is sent and the whole-project save follows,
+  // the form takes no edit that the save would then overwrite.
+  await expect(legal).toBeDisabled();
+  release();
+  await expect(legal).toBeEnabled();
+  await expect(row.getByRole("status", { name: "Autosave" })).toHaveText(
+    /^(All changes saved|Saved)/,
+  );
+  const server = await latest(page, project.id);
+  expect(server.onboarding?.legalEntity).toBe("First GmbH");
+  expect(server.flightdeckDraft?.label).toBe(`${name} renamed`);
+  await expect(legal).toHaveValue("First GmbH");
+  expect(await unloadGuarded(page)).toBe(false);
+});
