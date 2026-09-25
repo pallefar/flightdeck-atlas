@@ -104,10 +104,7 @@ const when = (iso: string) =>
   });
 /** When Atlas last read the send back, for a status that can still change:
  * Atlas has no background job, so it can be out of date. */
-export const checkedLine = (
-  checkedAt: string | null,
-  locale: Locale = "en",
-) =>
+export const checkedLine = (checkedAt: string | null, locale: Locale = "en") =>
   checkedAt
     ? t("onb.check.last", locale, { when: when(checkedAt) })
     : t("onb.check.never", locale);
@@ -224,6 +221,22 @@ export async function fetchStatus(projectId: string, refresh: boolean) {
     return null;
   }
 }
+/** How long to wait before the next status read, after a read that gave
+ * `next` (null: it failed): a minute normally; FlightDeck's Retry-After when
+ * it gave one; doubling (up to 15 minutes) after a failure or a notice.
+ * Shared by the form and the project page's FlightDeck card. */
+export function nextStatusDelay(
+  previous: number,
+  next: OnboardingStatus | null,
+) {
+  if (!next) return Math.min(previous * 2, MAX_BACKOFF_MS);
+  return next.retryAfter
+    ? Math.max(POLL_MS, next.retryAfter * 1000)
+    : next.notice
+      ? Math.min(previous * 2, MAX_BACKOFF_MS)
+      : POLL_MS;
+}
+export const STATUS_POLL_MS = POLL_MS;
 /** Reads the stored status every minute while it can still change; the
  * Super Admin's view also asks the server to check FlightDeck. Backs off on
  * failures and on FlightDeck's Retry-After: the credential allows 30
@@ -248,16 +261,11 @@ function useOnboardingStatus(
   );
   const settle = useCallback(
     (next: OnboardingStatus | null) => {
+      delay.current = nextStatusDelay(delay.current, next);
       if (!next) {
-        delay.current = Math.min(delay.current * 2, MAX_BACKOFF_MS);
         setFailed(true);
         return;
       }
-      delay.current = next.retryAfter
-        ? Math.max(POLL_MS, next.retryAfter * 1000)
-        : next.notice
-          ? Math.min(delay.current * 2, MAX_BACKOFF_MS)
-          : POLL_MS;
       setFailed(false);
       show(next);
     },

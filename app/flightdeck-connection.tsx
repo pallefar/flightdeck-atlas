@@ -45,6 +45,7 @@ import {
   lockNote,
 } from "@/lib/flightdeck/onboarding";
 import type { ContextState } from "@/lib/flightdeck/context";
+import { CARD_ANCHOR } from "@/lib/flightdeck/project-card";
 type ContextRowKey = ContextState | "check_failed" | "checking";
 const CONTEXT_TONE: Record<ContextRowKey, string> = {
   ok: "completed",
@@ -462,6 +463,28 @@ export default function FlightDeckConnection({
                             ? ` · ${p.flightdeckDraft.workspaceHint || (stage ? "Destination chosen when you send again" : "Destination chosen when you send")}`
                             : " · Atlas only"}
                     </p>
+                    {/* The requester's surface is the project page's card
+                        (plan 2026-09-25 J1); this page is the Super Admin's
+                        tool and links back to it. */}
+                    {superAdmin && (
+                      <a
+                        className="text-link"
+                        href={`/?${new URLSearchParams({ view: "manage", tool: "overview", workspace: p.id })}#${CARD_ANCHOR}`}
+                        onClick={(e) => {
+                          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
+                            return;
+                          e.preventDefault();
+                          onOpen(p);
+                          history.replaceState(
+                            null,
+                            "",
+                            `${location.pathname}${location.search}#${CARD_ANCHOR}`,
+                          );
+                        }}
+                      >
+                        {t("onb.card.rowLink", locale)}
+                      </a>
+                    )}
                     {isStatusMoving(stage) && (
                       <p className="fd-hint">
                         {checkedLine(onboarding.checked[p.id] ?? null, locale)}

@@ -1158,6 +1158,42 @@
   color: var(--muted-foreground);
   font-weight: 500;
 }
+/* The FlightDeck card on the project page (app/flightdeck-project-card.tsx). */
+.fd-project-card {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  margin-top: 24px;
+}
+.fd-project-card-mark {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 35px;
+  height: 35px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted-foreground);
+}
+.fd-project-card-body {
+  display: grid;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+.fd-project-card-body h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  font-size: 16px;
+  margin: 0;
+}
+.fd-project-card-state {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
 .fd-review {
   display: grid;
   gap: 18px;

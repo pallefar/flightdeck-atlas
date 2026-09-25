@@ -93,6 +93,8 @@ import {
   SETTINGS_KEY,
   type AtlasSettings,
 } from "@/lib/settings";
+import { t } from "@/lib/i18n";
+import { useLocale } from "@/lib/i18n/react";
 const blank: ProjectFields = {
   name: "",
   description: "",
@@ -110,6 +112,8 @@ async function fetchProjects() {
   const body = (await r.json()) as {
     projects: Project[];
     access?: AccessProfile;
+    /** ATLAS_REQUESTER_REQUESTS (default off). */
+    requesterRequests?: boolean;
     error?: string;
   };
   if (!r.ok) throw Error(body.error || "Projects could not be loaded.");
@@ -139,6 +143,7 @@ function startingPoint() {
 export default function Atlas() {
   const { theme, setTheme } = useTheme();
   const [access, setAccess] = useState<AccessProfile | null>(null);
+  const [requesterRequests, setRequesterRequests] = useState(false);
   const [flight, setFlight] = useState<{
     from: PortfolioView;
     to: PortfolioView;
@@ -198,6 +203,7 @@ export default function Atlas() {
       fetchProjects()
         .then((body) => {
           setAccess(body.access || null);
+          setRequesterRequests(body.requesterRequests === true);
           setProjects(body.projects);
           const url = new URL(location.href);
           const requested = url.searchParams.get("project");
@@ -816,6 +822,8 @@ export default function Atlas() {
                 }}
                 onSave={save}
                 onReload={load}
+                superAdmin={!!access?.superAdmin}
+                requesterRequests={requesterRequests}
               />
             ) : view === "help" ? (
               <HelpCenter navigate={navigate} />
@@ -1396,6 +1404,7 @@ function ProjectForm({
   onSave: (fields: ProjectFields, existing?: Project) => Promise<unknown>;
 }) {
   const [fields, setFields] = useState<ProjectFields>(blank);
+  const locale = useLocale();
   // Opening the dialog, or switching its project while open, resets the form.
   const [shown, setShown] = useState<{
     open: boolean;
@@ -1552,7 +1561,7 @@ function ProjectForm({
               />
             </label>
             <label>
-              Onboarding stage
+              {t("onb.readiness.label", locale)}
               <select
                 value={fields.onboardingStage || ""}
                 onChange={(e) =>

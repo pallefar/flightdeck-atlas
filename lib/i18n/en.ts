@@ -147,6 +147,32 @@ export const en = {
   "onb.conflict.same": "Both versions hold the same values.",
   "onb.conflict.keepMine": "Keep mine (re-apply on top)",
   "onb.conflict.useTheirs": "Use theirs",
+  // The project page: the local readiness field (was "Onboarding stage"),
+  // and the FlightDeck card (plan 2026-09-25 J1).
+  "onb.readiness.label": "Readiness stage",
+  "onb.card.title": "FlightDeck",
+  "onb.card.prepare": "Prepare FlightDeck request",
+  "onb.card.prepare.text":
+    "Prepare a request to set this project up in FlightDeck. An OS admin decides; nothing is created automatically.",
+  "onb.card.continue": "Continue draft ({done} of {total} for you)",
+  "onb.card.continue.text":
+    "Your draft is saved in Atlas. Only the Atlas Super Admin sends it to FlightDeck.",
+  "onb.card.lastStage": "Last send: {stage}",
+  "onb.card.waitingSuperAdmin": "Waiting for Super Admin",
+  "onb.card.waitingSuperAdmin.text":
+    "FlightDeck has not confirmed the send yet. The Atlas Super Admin retries or closes it.",
+  "onb.card.waitingFlightDeck": "Waiting for FlightDeck review",
+  "onb.card.waitingFlightDeck.text":
+    "An OS admin decides; nothing is created automatically.",
+  "onb.card.fix": "Fix request",
+  "onb.card.fix.text":
+    "FlightDeck asked for more information. Update the draft; the Atlas Super Admin sends it again.",
+  "onb.card.created": "Project created",
+  "onb.card.created.text": "FlightDeck holds this project now.",
+  "onb.card.open": "Open in FlightDeck",
+  "onb.card.view": "View status",
+  "onb.card.close": "Close",
+  "onb.card.rowLink": "FlightDeck card",
 } as const;
 
 export type MessageKey = keyof typeof en;

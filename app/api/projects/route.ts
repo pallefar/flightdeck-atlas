@@ -16,6 +16,8 @@ import {
 } from "@/lib/server-projects";
 import { visibleProjects } from "@/lib/project-access";
 import { stampTimeEntries } from "@/lib/work-management";
+import { env } from "cloudflare:workers";
+import { requesterRequestsOn } from "@/lib/flightdeck/project-card";
 export const dynamic = "force-dynamic";
 export async function GET() {
   const auth = await authorize("projects.read");
@@ -24,6 +26,10 @@ export async function GET() {
     return json({
       access: auth.access,
       projects: await visibleProjects(auth.access),
+      // Whether editors see the project page's FlightDeck card (D-037
+      // item 4). Default off; it only shows a card, and every onboarding
+      // route keeps its own checks.
+      requesterRequests: requesterRequestsOn(env.ATLAS_REQUESTER_REQUESTS),
     });
   } catch {
     console.error("Atlas project list unavailable");
