@@ -1116,6 +1116,29 @@
   color: var(--foreground);
   font-weight: 600;
 }
+/* The waiting view (onb-atlas-status-timeline): observed log and earlier
+   sends, in the form's quiet hint style. */
+.fd-waiting {
+  display: grid;
+  gap: 6px;
+}
+.fd-waiting p {
+  margin: 0;
+}
+.fd-observed,
+.fd-history ol {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+}
+.fd-history h4 {
+  margin: 4px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--foreground);
+}
 .fd-banner {
   display: flex;
   gap: 10px;

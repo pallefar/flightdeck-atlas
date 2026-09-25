@@ -75,6 +75,7 @@ import {
   type OnboardingStatus,
   type OnboardingStep,
 } from "@/lib/flightdeck/onboarding";
+import { waitingView } from "@/lib/flightdeck/waiting";
 import { t, type Locale, type MessageKey } from "@/lib/i18n";
 import { en } from "@/lib/i18n/en";
 import { useLocale } from "@/lib/i18n/react";
@@ -388,6 +389,63 @@ export function OnboardingTimeline({ stage }: { stage: OnboardingStage }) {
   );
 }
 
+/** The waiting view (plan J4, onb-atlas-status-timeline): what Atlas saw
+ * and when, what happens next, an honest outage line, the owner's response
+ * policy if one is set (never a guessed ETA), and the project's earlier
+ * sends. Only the viewer's projection feeds it (lib/flightdeck/waiting.ts).
+ * `compact`: the card's lines only, without the log and the history. */
+export function WaitingDetails({
+  status,
+  superAdmin,
+  compact = false,
+}: {
+  status: OnboardingStatus;
+  superAdmin: boolean;
+  compact?: boolean;
+}) {
+  const locale = useLocale();
+  if (!status.operation) return null;
+  const view = waitingView(status, { superAdmin, locale, when });
+  return (
+    <div className="fd-waiting">
+      {view.outage && (
+        <div className="fd-banner warn" role="status">
+          <AlertTriangle size={16} />
+          <p>{view.outage}</p>
+        </div>
+      )}
+      {view.next && <p className="fd-hint">{view.next}</p>}
+      {view.eta && <p className="fd-hint">{view.eta}</p>}
+      {compact && view.freshness && (
+        <p className="fd-hint">{view.freshness}</p>
+      )}
+      {!compact && view.rows.length > 0 && (
+        <ol
+          className="fd-observed"
+          aria-label={t("onb.observed.aria", locale)}
+        >
+          {view.rows.map((row, i) => (
+            <li key={`${i}-${row.stage}`}>{row.text}</li>
+          ))}
+        </ol>
+      )}
+      {!compact && view.history.length > 0 && (
+        <section
+          className="fd-history"
+          aria-label={t("onb.history.title", locale)}
+        >
+          <h4>{t("onb.history.title", locale)}</h4>
+          <ol>
+            {view.history.map((line, i) => (
+              <li key={i}>{line}</li>
+            ))}
+          </ol>
+        </section>
+      )}
+    </div>
+  );
+}
+
 function StatusBanner({
   status,
   workspaces,
@@ -443,20 +501,21 @@ function StatusBanner({
         "The Atlas Super Admin closed this unconfirmed send, so the draft is open again. If FlightDeck did file it after all, the next send follows that request instead of filing a second one.";
       break;
   }
-  // "Last checked" belongs to a status that can still change on its own,
-  // which the server itself decides (pollable) — not to every locked draft.
-  const open = status.pollable;
+  // "Last checked" (Super Admin) or "Last update seen" (editor, whose view
+  // never checks) belongs to a status that can still change on its own,
+  // which the server itself decides (pollable), not to every locked draft.
+  const freshness = waitingView(status, { superAdmin, locale, when })
+    .freshness;
   return (
     <div className={`fd-banner ${tone}`}>
       {tone ? <AlertTriangle size={16} /> : <Check size={16} />}
       <p>
         {text.trim()}
         {status.notice && <span className="fd-hint"> {status.notice}</span>}
-        {open && (
+        {freshness && (
           <span className="fd-hint">
             {" "}
-            {checkedLine(op.checkedAt, locale)}.
-            {superAdmin ? "" : ` ${checkNote(locale)}`}
+            {freshness}.{superAdmin ? "" : ` ${checkNote(locale)}`}
           </span>
         )}
       </p>
@@ -1501,6 +1560,7 @@ export function OnboardingEditor({
           superAdmin={superAdmin}
         />
       )}
+      {status && <WaitingDetails status={status} superAdmin={superAdmin} />}
       {unknown ? (
         <div className={`fd-banner${failed ? " warn" : ""}`} role="status">
           {failed ? <AlertTriangle size={16} /> : <Clock size={16} />}

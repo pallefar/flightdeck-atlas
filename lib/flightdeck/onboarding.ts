@@ -1493,6 +1493,12 @@ export function timelineSteps(stage: OnboardingStage): TimelineStep[] {
       return [{ stage, state: "current" }];
   }
 }
+const observedTransitionSchema = z
+  .object({
+    stage: z.enum(onboardingStages),
+    observedAt: isoSchema.nullable(),
+  })
+  .strict();
 export const onboardingStatusSchema = z
   .object({
     operation: z
@@ -1539,6 +1545,31 @@ export const onboardingStatusSchema = z
     pollable: z.boolean(),
     notice: z.string().max(300).nullable(),
     retryAfter: z.number().int().positive().nullable(),
+    // The waiting view (plan J4, onb-atlas-status-timeline). Optional so a
+    // status built before these existed still reads; the route always sends
+    // them.
+    /** The current send's transitions as Atlas saw them, oldest first;
+     * observedAt null: the send predates the log ("before tracking"). */
+    transitions: z.array(observedTransitionSchema).max(50).optional(),
+    /** The project's earlier sends, newest first: revision (null when
+     * adopted), final stage and transitions. No destination, no ids. */
+    history: z
+      .array(
+        z
+          .object({
+            revision: z.number().int().positive().nullable(),
+            stage: z.enum(onboardingStages),
+            transitions: z.array(observedTransitionSchema).max(50),
+          })
+          .strict(),
+      )
+      .max(50)
+      .optional(),
+    /** Three read-backs in a row could not reach FlightDeck, the first at
+     * this time. The stage is unchanged. */
+    unreachableSince: isoSchema.nullable().optional(),
+    /** ONB_RESPONSE_POLICY_DAYS; null (no ETA) unless the owner set it. */
+    responsePolicyDays: z.number().int().min(1).max(60).nullable().optional(),
   })
   .strict();
 export type OnboardingStatus = z.infer<typeof onboardingStatusSchema>;

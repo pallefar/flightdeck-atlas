@@ -180,4 +180,38 @@ export const de: Record<MessageKey, string> = {
   "onb.prefill.checklist": "Vorschlag aus der Onboarding-Checkliste",
   "onb.prefill.atlas-project": "Aus dem Atlas-Projekt übernommen",
   "onb.card.rowLink": "FlightDeck-Karte",
+  // Die Warteansicht (onb-atlas-status-timeline, Plan 2026-09-25 J4).
+  "onb.observed.aria": "Was Atlas gesehen hat",
+  "onb.observed.row": "{stage}: {seen}",
+  "onb.observed.seen": "gesehen {when}",
+  "onb.observed.before": "vor Beginn der Aufzeichnung",
+  "onb.history.title": "Frühere Übermittlungen",
+  "onb.history.revision": "Revision {n}",
+  "onb.history.adopted": "Frühere Anfrage von FlightDeck",
+  "onb.history.row": "{send}: {stage} ({seen}).",
+  "onb.history.again": "Erneut gesendet als Revision {n}.",
+  "onb.history.againAdopted": "Erneut gesendet.",
+  "onb.outage": "FlightDeck ist seit {when} nicht erreichbar.",
+  "onb.eta.one": "Wird in der Regel innerhalb von 1 Arbeitstag beantwortet.",
+  "onb.eta.many":
+    "Wird in der Regel innerhalb von {n} Arbeitstagen beantwortet.",
+  "onb.check.seen": "Letzte Aktualisierung gesehen: {when}",
+  "onb.check.seenNever": "Noch keine Aktualisierung gesehen",
+  "onb.next.not-confirmed":
+    "Als Nächstes: Der Atlas-Super-Admin sendet erneut oder schließt die Übermittlung.",
+  "onb.next.submitted":
+    "Als Nächstes: Ein OS-Admin prüft die Anfrage in FlightDeck.",
+  "onb.next.linked": "Als Nächstes: FlightDeck richtet das Projekt ein.",
+  "onb.next.setup-in-progress":
+    "Als Nächstes: FlightDeck schließt die Einrichtung des Projekts ab.",
+  "onb.next.setup-complete":
+    "Als Nächstes: Im Projekt in FlightDeck arbeiten.",
+  "onb.next.needs-more-info":
+    "Als Nächstes: Den Entwurf aktualisieren und erneut um das Senden bitten.",
+  "onb.next.rejected":
+    "Als Nächstes: Nichts ist offen. Den Entwurf aktualisieren, um ihn erneut zu senden.",
+  "onb.next.not-sent":
+    "Als Nächstes: Beheben, was FlightDeck abgelehnt hat, dann erneut senden.",
+  "onb.next.closed":
+    "Als Nächstes: Der Entwurf ist wieder offen und kann erneut gesendet werden.",
 };

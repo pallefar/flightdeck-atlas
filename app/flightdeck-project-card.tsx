@@ -25,7 +25,7 @@ import { useWorkspace } from "./workspace-tools";
 import {
   OnboardingEditor,
   STATUS_POLL_MS,
-  checkedLine,
+  WaitingDetails,
   fetchStatus,
   nextStatusDelay,
   stageLabel,
@@ -185,7 +185,6 @@ function Card({
       );
       warn = view.on === "superAdmin";
       action = t("onb.card.view", locale);
-      extra = checkedLine(view.checkedAt, locale);
       break;
     case "fix":
       title = t("onb.card.fix", locale);
@@ -221,6 +220,11 @@ function Card({
             {extra && <span className="fd-hint"> {extra}</span>}
           </p>
         </div>
+        {/* Next step, outage, response policy and freshness; the log and
+            the earlier sends are in the form behind View status. */}
+        {!editing && status && view.kind !== "continue" && (
+          <WaitingDetails status={status} superAdmin={superAdmin} compact />
+        )}
         {message && (
           <p className="fd-hint" role="status">
             {message}

@@ -190,6 +190,13 @@ const EDITOR_KEYS = [
   "pollable",
   "notice",
   "retryAfter",
+  // The waiting view (onb-atlas-status-timeline, plan J4): the observed log,
+  // the earlier sends, the outage and the owner's response policy. None of
+  // them names a destination, a submission or a send id.
+  "transitions",
+  "history",
+  "unreachableSince",
+  "responsePolicyDays",
 ];
 
 test.describe("onboarding status projection per viewer", () => {
@@ -227,6 +234,12 @@ test.describe("onboarding status projection per viewer", () => {
         pollable: true,
         notice: null,
         retryAfter: null,
+        // Added by the waiting view (onb-atlas-status-timeline, plan J4
+        // "Super Admin: … last check, timeline"), after every existing key.
+        transitions: [],
+        history: [],
+        unreachableSince: null,
+        responsePolicyDays: null,
       }),
     );
     // A filed send the Super Admin sees with its credential detail as today.

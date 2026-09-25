@@ -18,5 +18,8 @@ declare namespace Cloudflare {
     /** Onboarding measures (hashes and moments only, no values). Off unless
      * exactly "true". */
     ONB_METRICS_ENABLED?: string;
+    /** Owner-set response policy in working days (1 to 60). Unset (the
+     * default): no ETA is shown. */
+    ONB_RESPONSE_POLICY_DAYS?: string;
   }
 }
