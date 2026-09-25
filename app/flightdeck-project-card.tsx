@@ -9,7 +9,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowUpRight, Check, Layers3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Project, ProjectFields } from "@/lib/projects";
-import type { OnboardingStatus } from "@/lib/flightdeck/onboarding";
+import type {
+  OnboardingStage,
+  OnboardingStatus,
+} from "@/lib/flightdeck/onboarding";
 import {
   CARD_ANCHOR,
   cardVisible,
@@ -21,12 +24,12 @@ import { useFlightDeckContext } from "./flightdeck-context-switcher";
 import { useWorkspace } from "./workspace-tools";
 import {
   OnboardingEditor,
+  STATUS_POLL_MS,
   checkedLine,
   fetchStatus,
+  nextStatusDelay,
   stageLabel,
 } from "./flightdeck-onboarding";
-
-const POLL_MS = 60_000;
 
 type SaveFn = (
   fields: ProjectFields,
@@ -72,30 +75,54 @@ function Card({
   const osOrigin = (
     workspace?.apps.find((x) => x.id === "flightdeck")?.url ?? ""
   ).replace(/\/+$/, "");
+  // The wait before the next read (nextStatusDelay: a minute, FlightDeck's
+  // Retry-After, or doubling after a failure) and the stage last shown.
+  const delay = useRef(STATUS_POLL_MS);
+  const shownStage = useRef<OnboardingStage | null | undefined>(undefined);
   const load = useCallback(
-    () =>
-      fetchStatus(project.id, superAdmin).then((next) => {
-        if (next) setStatus(next);
+    (refresh: boolean) =>
+      fetchStatus(project.id, refresh).then((next) => {
+        delay.current = nextStatusDelay(delay.current, next);
+        if (next) {
+          setStatus(next);
+          shownStage.current = next.operation?.stage ?? null;
+        }
         setFailed(!next);
-        return next;
       }),
-    [project.id, superAdmin],
+    [project.id],
   );
-  // Load on open and after each edit; reload every minute while FlightDeck
-  // may still move it (or while it could not be read). Only the Super
-  // Admin's read may ask the server to check FlightDeck (fetchStatus).
+  // Load on open and after each saved edit. Only the Super Admin's read may
+  // ask the server to check FlightDeck (fetchStatus).
   useEffect(() => {
-    let live = true;
-    let timer: number | undefined;
-    void load().then((next) => {
-      if (live && (!next || next.pollable))
-        timer = window.setTimeout(() => setAttempt((n) => n + 1), POLL_MS);
-    });
-    return () => {
-      live = false;
-      window.clearTimeout(timer);
-    };
-  }, [load, project.revision, attempt]);
+    void load(superAdmin);
+  }, [load, superAdmin, project.revision]);
+  // Read again while FlightDeck may still move it (or while it could not be
+  // read), whenever a read (the poll's, the open's or the form's) left it
+  // so; the delay honours Retry-After and backs off. While the form is open
+  // it reads the status itself and reports stage changes (onStage).
+  useEffect(() => {
+    if (editing || !(failed || status?.pollable)) return;
+    const timer = window.setTimeout(
+      () => void load(superAdmin).then(() => setAttempt((n) => n + 1)),
+      delay.current,
+    );
+    return () => window.clearTimeout(timer);
+  }, [status, failed, attempt, editing, superAdmin, load]);
+  // Stable: the form's status hook depends on it, and calls it after every
+  // read; a new function each render restarted the form's read, in a loop.
+  // The form has just read (and, for the Super Admin, checked) the status,
+  // so the card only re-reads the stored one, and only when the stage moved.
+  const onStage = useCallback(
+    (_id: string, stage: OnboardingStage | null) => {
+      if (stage !== shownStage.current) void load(false);
+    },
+    [load],
+  );
+  const onClose = useCallback(() => {
+    setEditing(false);
+    void load(false);
+    heading.current?.focus();
+  }, [load]);
   // The connection page's rows link here (#flightdeck).
   useEffect(() => {
     if (location.hash !== `#${CARD_ANCHOR}`) return;
@@ -232,12 +259,8 @@ function Card({
             busy={busy}
             onSave={onSave}
             onMessage={setMessage}
-            onClose={() => {
-              setEditing(false);
-              void load();
-              heading.current?.focus();
-            }}
-            onStage={() => void load()}
+            onClose={onClose}
+            onStage={onStage}
           />
         )}
       </div>
@@ -262,7 +285,7 @@ function CardEditor({
   onSave: SaveFn;
   onMessage: (message: string) => void;
   onClose: () => void;
-  onStage: () => void;
+  onStage: (id: string, stage: OnboardingStage | null) => void;
 }) {
   const context = useFlightDeckContext(superAdmin);
   return (
