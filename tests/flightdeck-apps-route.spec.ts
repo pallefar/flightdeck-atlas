@@ -321,7 +321,12 @@ test.describe("/api/flightdeck/apps?project= (the Slides tool)", () => {
   const superAdmin = async () => ({
     access: { userId: "u1", superAdmin: true },
   });
-  const linked = { workspaceId: "hr-de", osProjectId: "q3-launch" };
+  const OS_INSTANCE = "os-instance-a";
+  const linked = {
+    osInstanceId: OS_INSTANCE,
+    workspaceId: "hr-de",
+    osProjectId: "q3-launch",
+  };
   const request = (project: string) =>
     new Request(
       `http://atlas.test/api/flightdeck/apps?project=${encodeURIComponent(project)}`,
@@ -336,6 +341,9 @@ test.describe("/api/flightdeck/apps?project= (the Slides tool)", () => {
     }),
   ) =>
     reader({
+      async workspaces() {
+        return { state: "ok", data: { ...wsBody, instanceId: OS_INSTANCE } };
+      },
       async appsForProject(ws, project) {
         asked.push(`${ws}/${project}`);
         return answer(ws, project);
@@ -449,5 +457,51 @@ test.describe("/api/flightdeck/apps?project= (the Slides tool)", () => {
       await (await route.GET(request("x".repeat(200)))).json(),
     ).toMatchObject({ state: "not_linked", apps: [] });
     expect(looked).toBe(false);
+  });
+  test("fails closed: a link recorded on ANOTHER OS instance gives no link, even when the slugs match", async () => {
+    // Atlas re-pointed at a different FlightDeck while keeping its database:
+    // the same workspace/project slugs exist there, but they are not the
+    // project this Atlas project was linked to.
+    const asked: string[] = [];
+    const route = createAppsRoute({
+      authorize: superAdmin,
+      reader: () => osWith(asked),
+      origin: () => OS,
+      selection: async () => null,
+      linkOf: async () => ({ ...linked, osInstanceId: "os-instance-b" }),
+    });
+    const body = await (await route.GET(request("atlas-1"))).json();
+    expect(body).toMatchObject({ state: "instance_mismatch", apps: [] });
+    expect(JSON.stringify(body)).not.toContain("presentation-studio");
+    expect(asked).toEqual([]);
+  });
+
+  test("fails closed: an OS that does not publish its instance id, or cannot be read, gives no link", async () => {
+    const asked: string[] = [];
+    const withWorkspaces = (
+      workspaces: ContextReader["workspaces"],
+    ) =>
+      createAppsRoute({
+        authorize: superAdmin,
+        reader: () => ({ ...osWith(asked), workspaces }),
+        origin: () => OS,
+        selection: async () => null,
+        linkOf: async () => linked,
+      });
+    expect(
+      await (
+        await withWorkspaces(async () => ({ state: "ok", data: wsBody })).GET(
+          request("atlas-1"),
+        )
+      ).json(),
+    ).toMatchObject({ state: "instance_unknown", apps: [] });
+    expect(
+      await (
+        await withWorkspaces(async () => ({ state: "os_unreachable" })).GET(
+          request("atlas-1"),
+        )
+      ).json(),
+    ).toMatchObject({ state: "os_unreachable", apps: [] });
+    expect(asked).toEqual([]);
   });
 });

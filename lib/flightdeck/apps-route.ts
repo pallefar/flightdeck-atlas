@@ -22,10 +22,18 @@ export type AppsAuth =
   | { access: { userId: string; superAdmin: boolean }; error?: never }
   | { access?: never; error: Response };
 
-/** `not_linked` and `project_disabled` come only from a `?project=` read
- * (the Slides tool): the Atlas project has no OS link, or the linked OS
- * project is disabled. */
-export type AppsState = ContextState | "not_linked" | "project_disabled";
+/** `not_linked`, `project_disabled`, `instance_mismatch` and
+ * `instance_unknown` come only from a `?project=` read (the Slides tool): the
+ * Atlas project has no OS link, the linked OS project is disabled, the link
+ * was recorded on another OS instance than the configured one, or the
+ * configured OS does not publish its instance id so the link cannot be
+ * verified. */
+export type AppsState =
+  | ContextState
+  | "not_linked"
+  | "project_disabled"
+  | "instance_mismatch"
+  | "instance_unknown";
 export type AppsView = {
   state: AppsState;
   workspaceId: string | null;
@@ -35,8 +43,13 @@ export type AppsView = {
   apps: FlightdeckAppLink[];
   retryAfter: number | null;
 };
-/** The OS project an Atlas project is linked to (atlas_project_links). */
-export type ProjectLink = { workspaceId: string; osProjectId: string };
+/** The OS project an Atlas project is linked to (atlas_project_links),
+ * with the OS instance the link was recorded on. */
+export type ProjectLink = {
+  osInstanceId: string;
+  workspaceId: string;
+  osProjectId: string;
+};
 /** An Atlas project id worth looking up; anything else is not linked. */
 const ATLAS_PROJECT_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -103,6 +116,18 @@ export function createAppsRoute(deps: {
       return respond(view("not_linked"));
     const link = await deps.linkOf(atlasProjectId);
     if (!link) return respond(view("not_linked"));
+    // ⚠ Fails closed: the link names workspace/project SLUGS, which another
+    // FlightDeck instance can reuse. If Atlas is re-pointed at a different OS
+    // while keeping its database, a matching slug there is an unrelated
+    // project, so the link is used only when the configured OS publishes the
+    // very instance id the link was recorded on (as onboarding does before
+    // it records one). Unverifiable or different: no link.
+    const ws = await os.workspaces();
+    if (ws.state !== "ok")
+      return respond(view(ws.state, { retryAfter: ws.retryAfter ?? null }));
+    if (!ws.data.instanceId) return respond(view("instance_unknown"));
+    if (ws.data.instanceId !== link.osInstanceId)
+      return respond(view("instance_mismatch"));
     const res = await os.appsForProject(link.workspaceId, link.osProjectId);
     if (res.state !== "ok")
       return respond(

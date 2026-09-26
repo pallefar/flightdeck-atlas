@@ -24,12 +24,22 @@ const route = createAppsRoute({
     if (!installationId) return null;
     const row = await database()
       .prepare(
-        "SELECT workspace_id, os_project_id FROM atlas_project_links WHERE installation_id=? AND atlas_project_id=?",
+        "SELECT os_instance_id, workspace_id, os_project_id FROM atlas_project_links WHERE installation_id=? AND atlas_project_id=?",
       )
       .bind(installationId, atlasProjectId)
-      .first<{ workspace_id: string; os_project_id: string }>();
+      .first<{
+        os_instance_id: string;
+        workspace_id: string;
+        os_project_id: string;
+      }>();
+    // The instance id is kept so the route can refuse a link recorded on
+    // another FlightDeck instance than the configured one.
     return row
-      ? { workspaceId: row.workspace_id, osProjectId: row.os_project_id }
+      ? {
+          osInstanceId: row.os_instance_id,
+          workspaceId: row.workspace_id,
+          osProjectId: row.os_project_id,
+        }
       : null;
   },
 });
