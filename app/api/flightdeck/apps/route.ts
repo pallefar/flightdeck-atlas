@@ -6,12 +6,14 @@ import {
   atlasInstallationId,
   osOrigin,
   osReader,
+  osWhoami,
 } from "@/lib/flightdeck/os-server";
 export const dynamic = "force-dynamic";
 
 // Read-only: the FlightDeck OS sub-apps for the 9-dot app menu, and with
 // ?project=<Atlas project id> those of the OS project linked to it (the
-// project Slides tool). The rules live in lib/flightdeck/apps-route.ts; this
+// project Slides tool), and with ?mode=discovery the apps a requester can ask
+// for (the OS allowlisted app catalog). The rules live in lib/flightdeck/apps-route.ts; this
 // file only wires the Worker.
 const store = preferenceSelectionStore(database);
 const route = createAppsRoute({
@@ -19,6 +21,7 @@ const route = createAppsRoute({
   reader: osReader,
   origin: osOrigin,
   selection: (userId) => store.load(userId),
+  whoami: () => osWhoami(false),
   async linkOf(atlasProjectId) {
     const installationId = atlasInstallationId();
     if (!installationId) return null;
