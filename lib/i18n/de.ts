@@ -315,6 +315,9 @@ export const de: Record<MessageKey, string> = {
     "Kein FlightDeck-Projekt ausgewählt. Ein Super-Admin wählt es in der Seitenleiste.",
   "apps.fd.state.project_not_available":
     "Das ausgewählte FlightDeck-Projekt ist nicht verfügbar. Wählen Sie ein anderes.",
+  "apps.fd.state.confirm_project":
+    "Das in der Seitenleiste angezeigte FlightDeck-Projekt ist für Atlas noch nicht gespeichert. Verwenden Sie es, um seine Apps zu sehen.",
+  "apps.fd.confirm": "Dieses Projekt verwenden",
   "apps.fd.state.error": "FlightDeck-Apps konnten nicht geladen werden.",
   "apps.card.open": "In FlightDeck OS öffnen",
   "apps.card.openAria": "In FlightDeck OS öffnen: {label}",

@@ -278,6 +278,72 @@ test.describe("FlightdeckAppsSection states", () => {
         expect(html).not.toContain("<a ");
       });
 
+  // Round 2 (P2): a Super Admin with no SAVED selection sees the OS default
+  // workspace/project in the sidebar, but the directory reads only the saved
+  // one and answers no_project_selected. The section must offer to save the
+  // shown selection, never assume it is already saved.
+  test("an unsaved default selection offers 'Use this project' (en, de)", () => {
+    const input: SectionInput = {
+      ...base,
+      directory: { loading: false, state: "no_project_selected", data: null },
+    };
+    const view = flightdeckSection(input);
+    expect(view).toMatchObject({
+      kind: "message",
+      key: "apps.fd.state.confirm_project",
+      retry: false,
+      confirm: selected,
+    });
+    for (const [locale, dict] of [["en", en], ["de", de]] as const) {
+      const html = unescape(section(input, locale));
+      expect(html).toContain(dict["apps.fd.state.confirm_project"]);
+      expect(html).toMatch(
+        new RegExp(`<button[^>]*>${dict["apps.fd.confirm"]}</button>`),
+      );
+    }
+    expect(de["apps.fd.confirm"]).not.toBe(en["apps.fd.confirm"]);
+  });
+
+  test("a fallback project (saved one gone) is offered for saving too", () => {
+    const view = flightdeckSection({
+      ...base,
+      context: { loaded: true, state: "ok", selected, projectFallback: true },
+      directory: { loading: false, state: "project_not_available", data: null },
+    });
+    expect(view).toMatchObject({
+      key: "apps.fd.state.confirm_project",
+      confirm: selected,
+    });
+    // Without a fallback, project_not_available stays an honest message.
+    expect(
+      flightdeckSection({
+        ...base,
+        directory: { loading: false, state: "project_not_available", data: null },
+      }),
+    ).toMatchObject({ key: "apps.fd.state.project_not_available" });
+  });
+
+  test("no confirm while the context is not freshly confirmed by the OS", () => {
+    const view = flightdeckSection({
+      ...base,
+      context: { loaded: true, state: "os_unreachable", selected },
+      directory: { loading: false, state: "no_project_selected", data: null },
+    });
+    expect(view).toMatchObject({ key: "apps.fd.state.no_project_selected" });
+    expect("confirm" in view && view.confirm).toBeFalsy();
+  });
+
+  test("the confirm button is busy while the selection saves", () => {
+    const html = unescape(
+      section(
+        { ...base, directory: { loading: false, state: "no_project_selected", data: null } },
+        "en",
+        { confirming: true },
+      ),
+    );
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>/);
+  });
+
   test("the directory_unavailable words are the plan's, never a fallback to the old list", () => {
     expect(en["apps.fd.state.directory_unavailable"]).toBe(
       "App directory unavailable: FlightDeck OS needs an update",
@@ -427,6 +493,91 @@ test.describe("cards in the browser", () => {
 const baseUrl = process.env.ATLAS_BASE_URL ?? "";
 const isolated = /^http:\/\/(localhost|127\.0\.0\.1):\d+/.test(baseUrl) &&
   !/:(4173|5173)\b/.test(baseUrl);
+test.describe("the open menu: saving an unsaved default project", () => {
+  test.skip(!isolated, "needs ATLAS_BASE_URL on an isolated, non-live port");
+  test("'Use this project' PUTs the shown selection, then the cards load", async ({ browser }) => {
+    const context = await browser.newContext({ baseURL: baseUrl, reducedMotion: "reduce" });
+    const page = await context.newPage();
+    let saved = false;
+    const puts: unknown[] = [];
+    const ctx = {
+      state: "ok",
+      workspaces: [{ id: "te-ops", label: "TE Ops", enabled: true, isDefault: true }],
+      projects: [{ id: "rhineland-rollout", label: "Rhineland", enabled: true, isDefault: true }],
+      selected,
+      projectFallback: false,
+      retryAfter: null,
+      checkedAt: "2026-09-26T08:00:00.000Z",
+    };
+    await page.route("**/api/flightdeck/context", async (r) => {
+      if (r.request().method() === "PUT") {
+        puts.push(r.request().postDataJSON());
+        saved = true;
+      }
+      await r.fulfill({ json: ctx });
+    });
+    await page.route("**/api/flightdeck/apps/directory", (r) =>
+      r.fulfill({
+        json: saved
+          ? { ...withApps([app()]).directory.data, checkedAt: ctx.checkedAt }
+          : {
+              state: "no_project_selected",
+              workspaceId: null,
+              projectId: null,
+              locale: null,
+              apps: [],
+              retryAfter: null,
+              checkedAt: ctx.checkedAt,
+            },
+      }),
+    );
+    await page.route("**/api/projects", (r) =>
+      r.request().method() === "GET"
+        ? r.fulfill({
+            json: {
+              access: {
+                userId: "local_seedy",
+                email: "seedy@sites.test",
+                name: "QA",
+                roleId: "superadmin",
+                roleName: "Super Admin",
+                superAdmin: true,
+                permissions: ["projects.read"],
+              },
+              projects: [],
+              requesterRequests: false,
+            },
+          })
+        : r.continue(),
+    );
+    await page.route("**/api/workspace", (r) =>
+      r.request().method() === "GET"
+        ? r.fulfill({
+            json: {
+              email: "qa@example.test",
+              capacity: [],
+              apps: [],
+              teams: [],
+              teamOptions: [],
+              people: [],
+              roles: [],
+              notifications: [],
+              preferences: { digest: "all", favourites: [], recent: [] },
+              preferenceRevision: 0,
+            },
+          })
+        : r.continue(),
+    );
+    await page.goto("/");
+    await page.getByRole("button", { name: "Open apps", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Your apps" });
+    await dialog.getByRole("button", { name: en["apps.fd.confirm"] }).click();
+    await expect(dialog.locator('[data-app-id="maps"]')).toBeVisible();
+    expect(puts).toEqual([selected]);
+    await context.close();
+  });
+});
+
 test.describe("the open menu (screenshots)", () => {
   test.skip(!isolated, "needs ATLAS_BASE_URL on an isolated, non-live port");
   for (const locale of ["en", "de"] as const)

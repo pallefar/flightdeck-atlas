@@ -266,6 +266,17 @@ export function AppLauncher({
             busy={w.busy || !w.data}
             onPin={(id) => void preference("favourites", id)}
             onOpened={(id) => void preference("recent", id)}
+            confirming={context.saving}
+            onConfirm={(selection) =>
+              void context
+                .choose({
+                  osWorkspaceId: selection.osWorkspaceId,
+                  osProjectId: selection.osProjectId,
+                })
+                // Same selection, so the directory hook will not refetch by
+                // itself: read it again now that it is saved.
+                .then(() => directory.reload())
+            }
             onRetry={() =>
               void (context.selected?.osProjectId
                 ? directory.reload()

@@ -315,6 +315,9 @@ export const en = {
     "No FlightDeck project is selected. A super admin chooses it in the sidebar.",
   "apps.fd.state.project_not_available":
     "The selected FlightDeck project is not available. Choose another.",
+  "apps.fd.state.confirm_project":
+    "The FlightDeck project shown in the sidebar is not saved for Atlas yet. Use it to see its apps.",
+  "apps.fd.confirm": "Use this project",
   "apps.fd.state.error": "FlightDeck apps could not be loaded.",
   "apps.card.open": "Open in FlightDeck OS",
   "apps.card.openAria": "Open in FlightDeck OS: {label}",

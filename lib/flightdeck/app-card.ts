@@ -104,6 +104,8 @@ export type SectionInput = {
     loaded: boolean;
     state: ContextState | "check_failed" | null;
     selected: OsSelection | null;
+    /** The shown project replaces a saved one that is gone. */
+    projectFallback?: boolean;
   };
   directory: {
     loading: boolean;
@@ -151,7 +153,13 @@ const STATE_KEY: Record<SectionState, MessageKey> = {
 
 export type SectionView =
   | { kind: "loading" }
-  | { kind: "message"; key: MessageKey; retry: boolean }
+  | {
+      kind: "message";
+      key: MessageKey;
+      retry: boolean;
+      /** The shown-but-unsaved selection the viewer may save (see below). */
+      confirm?: OsSelection;
+    }
   | { kind: "cards"; apps: DirectoryApp[] };
 
 const message = (state: SectionState): SectionView => ({
@@ -179,6 +187,21 @@ export function flightdeckSection(input: SectionInput): SectionView {
         : asState(context.state === "check_failed" ? "error" : context.state),
     );
   if (directory.loading || directory.state === null) return { kind: "loading" };
+  // The context GET shows the OS default (or a fallback for a saved project
+  // that is gone) WITHOUT saving it, while the directory reads only the
+  // SAVED selection. Offer to save what is shown instead of a dead end. Only
+  // against a context the OS has just confirmed; the save (PUT) re-validates
+  // it against fresh OS lists before anything is stored.
+  const unsaved =
+    directory.state === "no_project_selected" ||
+    (directory.state === "project_not_available" && !!context.projectFallback);
+  if (unsaved && context.state === "ok")
+    return {
+      kind: "message",
+      key: "apps.fd.state.confirm_project",
+      retry: false,
+      confirm: context.selected,
+    };
   if (!directory.data || directory.state !== "ok")
     return message(asState(directory.state === "ok" ? "error" : directory.state));
   if (directory.data.apps.length === 0)

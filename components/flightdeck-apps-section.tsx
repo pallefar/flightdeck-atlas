@@ -15,6 +15,7 @@ import {
   fdPrefIdFits,
   type SectionView,
 } from "@/lib/flightdeck/app-card";
+import type { OsSelection } from "@/lib/flightdeck/context";
 
 export function FlightdeckAppsSection({
   view,
@@ -24,6 +25,8 @@ export function FlightdeckAppsSection({
   onPin,
   onOpened,
   onRetry,
+  onConfirm,
+  confirming = false,
   gridRef,
 }: {
   view: SectionView;
@@ -33,6 +36,10 @@ export function FlightdeckAppsSection({
   onPin: (prefId: string) => void;
   onOpened: (prefId: string) => void;
   onRetry: () => void;
+  /** Saves the shown-but-unsaved FlightDeck selection (view.confirm). */
+  onConfirm?: (selection: OsSelection) => void;
+  /** A selection save is in flight. */
+  confirming?: boolean;
   /** The card grid, for the launcher's anime.js entrance (lib/motion is
    * wired there, so this file also renders outside a Vite build). */
   gridRef?: Ref<HTMLDivElement>;
@@ -52,6 +59,17 @@ export function FlightdeckAppsSection({
           <p className="hub-muted" role="status">
             {t(view.key)}
           </p>
+          {view.confirm && (
+            <button
+              type="button"
+              className="app-card-action"
+              disabled={confirming || !onConfirm}
+              aria-busy={confirming || undefined}
+              onClick={() => view.confirm && onConfirm?.(view.confirm)}
+            >
+              {t("apps.fd.confirm")}
+            </button>
+          )}
           {view.retry && (
             <button type="button" className="app-card-action" onClick={onRetry}>
               {t("apps.fd.retry")}
