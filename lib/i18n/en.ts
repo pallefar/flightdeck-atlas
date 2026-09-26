@@ -290,6 +290,69 @@ export const en = {
   "decks.link.notLinked": "Not linked to FlightDeck",
   "decks.link.notLinkedHint":
     "Presentation Studio opens on the FlightDeck project this project is linked to. Send the project to FlightDeck from its FlightDeck card first.",
+  // Apps (apps-33): the 9-dot menu's FlightDeck OS section and its cards,
+  // the same card contract as the OS's SubAppCard (apps-07); the reason and
+  // party words mirror the OS's apps.card.* strings.
+  "apps.fd.heading": "FLIGHTDECK OS APPS",
+  "apps.fd.aria": "FlightDeck OS apps",
+  "apps.fd.loading": "Loading FlightDeck apps…",
+  "apps.fd.empty": "No FlightDeck apps are listed for this project.",
+  "apps.fd.noMatch": "No FlightDeck apps match your search.",
+  "apps.fd.retry": "Retry",
+  "apps.fd.state.not_configured": "FlightDeck OS is not connected to Atlas yet.",
+  "apps.fd.state.not_permitted":
+    "Your Atlas access does not include FlightDeck apps.",
+  "apps.fd.state.os_unreachable":
+    "FlightDeck OS is unreachable right now. Try again shortly.",
+  "apps.fd.state.unauthorized":
+    "FlightDeck OS refused Atlas's connection. Ask your admin.",
+  "apps.fd.state.rate_limited": "FlightDeck OS is busy. Try again shortly.",
+  "apps.fd.state.invalid_response": "FlightDeck OS sent an unexpected answer.",
+  "apps.fd.state.workspace_disabled": "The FlightDeck workspace is disabled.",
+  "apps.fd.state.directory_unavailable":
+    "App directory unavailable: FlightDeck OS needs an update",
+  "apps.fd.state.no_project_selected":
+    "No FlightDeck project is selected. A super admin chooses it in the sidebar.",
+  "apps.fd.state.project_not_available":
+    "The selected FlightDeck project is not available. Choose another.",
+  "apps.fd.state.error": "FlightDeck apps could not be loaded.",
+  "apps.card.open": "Open in FlightDeck OS",
+  "apps.card.openAria": "Open in FlightDeck OS: {label}",
+  "apps.card.seeMore": "See more",
+  "apps.card.seeMoreAria": "See more about {label}",
+  "apps.card.lockedAria": "{label}, see more",
+  "apps.card.accessNote": "Access is checked when you open it",
+  "apps.card.pin": "Pin {label}",
+  "apps.card.unpin": "Unpin {label}",
+  "apps.card.recent": "Recently opened",
+  "apps.card.reason.locked": "This app can't be opened here.",
+  "apps.card.reason.operator-off": "Turned off on this instance.",
+  "apps.card.reason.workspace-disabled": "This workspace is disabled.",
+  "apps.card.reason.project-archived": "This project is archived.",
+  "apps.card.reason.schema-missing":
+    "Its data store is not set up on this instance yet.",
+  "apps.card.reason.app-schema-behind":
+    "Waiting for its update to be adopted in this workspace.",
+  "apps.card.reason.app-schema-ahead":
+    "This version does not match this workspace's data.",
+  "apps.card.reason.coming-soon": "Coming soon.",
+  "apps.card.reason.no-identity":
+    "Needs sign-in accounts, which this instance does not use.",
+  "apps.card.reason.role": "Your role cannot open it here.",
+  "apps.card.reason.needs-owner-approval": "Waiting for the owner's approval.",
+  "apps.card.reason.needs-function-enable": "Not enabled for this Function yet.",
+  "apps.card.reason.not-enabled": "Not enabled in this project.",
+  "apps.card.party.operator": "Who can change this: the instance operator.",
+  "apps.card.party.owner": "Who can change this: the owner.",
+  "apps.card.party.workspace-admin": "Who can change this: a workspace admin.",
+  "apps.card.party.publisher": "Who can change this: the app's publisher.",
+  // Atlas's page for one FlightDeck OS app (apps-33 minimal; apps-34 adds the
+  // published release).
+  "apps.about.title": "About {label}",
+  "apps.about.back": "Back to Atlas",
+  "apps.about.version": "Version {version}",
+  "apps.about.notListed":
+    "This app is not listed for the selected FlightDeck project.",
 } as const;
 
 export type MessageKey = keyof typeof en;
