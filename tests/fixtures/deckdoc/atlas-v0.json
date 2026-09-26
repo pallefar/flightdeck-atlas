@@ -1,0 +1,40 @@
+{
+  "id": "5d0f3c1e-8a47-4c2b-9f61-2b7e4a9c0d13",
+  "revision": 4,
+  "updatedAt": "2026-09-20T14:05:11.000Z",
+  "title": "Project steering",
+  "audience": "Steering committee",
+  "period": "Q3 2026",
+  "template": "Project steering",
+  "shared": true,
+  "projectIds": ["atlas-proj-falcon", "atlas-proj-heron"],
+  "snapshots": [
+    { "id": "snap-1", "name": "Before the board", "revision": 3, "at": "2026-09-18T09:00:00.000Z" }
+  ],
+  "slides": [
+    {
+      "id": "0b6a2f4e-1c3d-4e5f-8a9b-0c1d2e3f4a5b",
+      "title": "Project steering",
+      "body": "Steering committee\nQ3 2026\n2 selected projects",
+      "notes": "Review the audience and data before sharing."
+    },
+    {
+      "id": "7c8d9e0f-1a2b-4c3d-9e4f-5a6b7c8d9e0f",
+      "title": "Executive summary",
+      "body": "Falcon is on track for the October go-live.\nHeron needs a decision on the vendor by 15 October.",
+      "notes": ""
+    },
+    {
+      "id": "2e3f4a5b-6c7d-4e8f-9a0b-1c2d3e4f5a6b",
+      "title": "Portfolio at a glance",
+      "body": "Falcon · green · 72% tasks complete\n\nHeron · amber · 40% tasks complete",
+      "notes": "Heron slipped two weeks since the last review."
+    },
+    {
+      "id": "9a0b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d",
+      "title": "Decisions & next steps",
+      "body": "Approve the Heron vendor shortlist (a < b is fine as text)\nConfirm the Falcon cut-over weekend",
+      "notes": ""
+    }
+  ]
+}

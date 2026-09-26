@@ -273,6 +273,15 @@ export const en = {
   // it cannot read (lib/pagedoc-atlas.ts).
   "pages.doc.tooNew": "This page needs an Atlas update",
   "pages.doc.unreadable": "This page cannot be shown",
+  // Presentations (deck-atlas-export): the owner-only export for the
+  // FlightDeck import.
+  "decks.export.button": "Export my presentations for FlightDeck",
+  "decks.export.hint":
+    "The file holds only presentations you own whose source projects you can still open.",
+  "decks.export.done": "Exported {count} presentations.",
+  "decks.export.withheld":
+    "{count} not exported: a source project is no longer available to you, the presentation could not be read, or the file limit was reached. They are listed under \"withheld\" in the file.",
+  "decks.export.failed": "The export failed. Try again.",
 } as const;
 
 export type MessageKey = keyof typeof en;

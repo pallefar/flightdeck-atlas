@@ -14,7 +14,7 @@ import { onboardingSummaryLine } from "../lib/flightdeck/onboarding";
 import { examples, type Project } from "../lib/projects";
 
 // One Atlas i18n module (x-atlas-i18n): every lane (onboarding, apps, pages,
-// CRM) adds keys under its own namespace; English and German must carry the
+// CRM, decks) adds keys under its own namespace; English and German must carry the
 // same keys, and German is marked for native review until someone signs it.
 
 const placeholders = (text: string) =>
@@ -26,7 +26,7 @@ test("en and de carry exactly the same keys, none empty, same placeholders", () 
   expect(Object.keys(de).sort()).toEqual(enKeys);
   expect(enKeys.length).toBeGreaterThan(0);
   for (const key of enKeys as MessageKey[]) {
-    expect(key, key).toMatch(/^(onb|apps|pages|crm)\./);
+    expect(key, key).toMatch(/^(onb|apps|pages|crm|decks)\./);
     expect(en[key].trim(), key).not.toBe("");
     expect(de[key].trim(), key).not.toBe("");
     expect(placeholders(de[key]), key).toEqual(placeholders(en[key]));
