@@ -89,6 +89,46 @@ export const osAppsResponseSchema = z
   })
   .strict();
 export type OsAppsResponse = z.infer<typeof osAppsResponseSchema>;
+
+/** The OS apps DIRECTORY for one workspace + SELECTED project (OS apps-29,
+ * GET /api/inbound/v1/context/workspaces/:ws/apps/directory?projectId&locale;
+ * vendored fixture tests/fixtures/inbound-apps-directory.v1.json). Strict: an
+ * undeclared key (consent internals, roles, user data) fails the whole
+ * answer. A new field arrives with a new `contract` number, which Atlas reads
+ * from whoami before it ever asks. `path` is only read for an enabled app
+ * (lib/flightdeck/apps-directory-route.ts); an app is a link, never a grant. */
+const osDirectoryEntrySchema = z
+  .object({
+    id: osIdSchema,
+    label: z.string().min(1).max(120),
+    icon: z.string().max(32),
+    version: z.string().max(64),
+    category: z.string().max(64).nullable(),
+    availability: z.enum(["available", "coming-soon"]).nullable(),
+    workspaceStatus: z.string().regex(/^[a-z][a-z-]{0,63}$/),
+    path: z
+      .string()
+      .regex(/^\/console\/apps\/[a-z0-9][a-z0-9-]{0,63}$/)
+      .optional(),
+    accessCheckedOnOpen: z.literal(true),
+    requestAccessEnabled: z.boolean(),
+    tagline: z.string().min(1).max(400).optional(),
+    releaseRevision: z.number().int().min(1).optional(),
+  })
+  .strict();
+export const osAppsDirectorySchema = z
+  .object({
+    contract: z.literal(1),
+    workspaceId: osIdSchema,
+    projectId: osIdSchema,
+    locale: z.enum(["en", "de"]),
+    apps: z
+      .array(osDirectoryEntrySchema)
+      .max(200)
+      .refine(uniqueIds, "Duplicate app id"),
+  })
+  .strict();
+export type OsAppsDirectory = z.infer<typeof osAppsDirectorySchema>;
 /** What /api/flightdeck/apps hands the browser: a link per app, no roles,
  * no credential. */
 export type FlightdeckAppLink = {
