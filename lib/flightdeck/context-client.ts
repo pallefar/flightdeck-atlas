@@ -37,6 +37,10 @@ import {
   type OnboardingEnvelope,
   type OsSubmissionStatus,
 } from "./onboarding";
+import {
+  FLIGHTDECK_CONTRACT_HEADER,
+  FLIGHTDECK_CONTRACT_RANGE,
+} from "./contract";
 
 export type ContextConfig = { baseUrl: string; token: string };
 export type ContextFailure = {
@@ -144,8 +148,9 @@ type Exchange = (
   | { state: "answered"; response: Response; body: unknown }
   | { state: "os_unreachable" }
 >;
-/** The one place Atlas talks to the OS. Only the bearer credential, Accept
- * and (for a POST) Content-Type are sent: no cookies, no X-Workspace-Id, no
+/** The one place Atlas talks to the OS. Only the bearer credential, Accept,
+ * the advertised contract range (X-FlightDeck-Contract, ./contract.ts) and
+ * (for a POST) Content-Type are sent: no cookies, no X-Workspace-Id, no
  * browser identity. The OS pins these routes to te-ops (§8b decision 3). */
 function exchanger(config: ContextConfig, options: ClientOptions): Exchange {
   const send: Fetcher = options.fetch || ((url, init) => fetch(url, init));
@@ -158,6 +163,7 @@ function exchanger(config: ContextConfig, options: ClientOptions): Exchange {
         headers: {
           Authorization: `Bearer ${config.token}`,
           Accept: "application/json",
+          [FLIGHTDECK_CONTRACT_HEADER]: FLIGHTDECK_CONTRACT_RANGE,
           ...(init.body === undefined
             ? {}
             : { "Content-Type": "application/json" }),

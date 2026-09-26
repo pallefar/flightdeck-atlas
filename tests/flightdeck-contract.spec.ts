@@ -184,6 +184,7 @@ test.describe("whoami transport", () => {
     expect(Object.keys(seen[0].init.headers as object).sort()).toEqual([
       "Accept",
       "Authorization",
+      "X-FlightDeck-Contract",
     ]);
     reply = () =>
       new Response(JSON.stringify({ error: "not found" }), {
