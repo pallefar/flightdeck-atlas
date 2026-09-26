@@ -138,6 +138,63 @@ export const osAppsDirectorySchema = z
   })
   .strict();
 export type OsAppsDirectory = z.infer<typeof osAppsDirectorySchema>;
+
+/** The OS allowlisted APP CATALOG (OS onb-inbound-apps-discovery,
+ * GET /api/inbound/v1/context/app-catalog[?workspaceId=&locale=]): the apps a
+ * requester can ASK for before the destination project exists. Strict, like
+ * the directory: an undeclared key fails the whole answer. Only the three
+ * catalog states exist; any other fails the answer (never guessed). The
+ * bridge page is always the OS's own `/console/app-info/<id>`, so a link
+ * built from it can only ever point at the configured OS, at that app. */
+export const OS_APP_CATALOG_STATES = [
+  "unavailable",
+  "available",
+  "awaiting-workspace-consent",
+] as const;
+export type OsAppCatalogState = (typeof OS_APP_CATALOG_STATES)[number];
+const osCatalogEntrySchema = z
+  .object({
+    id: osIdSchema,
+    label: z.string().min(1).max(120),
+    icon: z.string().max(32),
+    version: z.string().max(64),
+    category: z.string().max(64).nullable(),
+    availability: z.enum(["available", "coming-soon"]).nullable(),
+    tagline: z.string().min(1).max(400),
+    releaseRevision: z.number().int().min(1),
+    state: z.enum(OS_APP_CATALOG_STATES),
+    bridgePath: z.string().regex(/^\/console\/app-info\/[a-z0-9][a-z0-9-]{0,63}$/),
+  })
+  .strict()
+  .refine((e) => e.bridgePath === `/console/app-info/${e.id}`, {
+    path: ["bridgePath"],
+    message: "bridgePath must be /console/app-info/<id>",
+  });
+const catalogBase = {
+  contract: z.literal(1),
+  locale: z.enum(["en", "de"]),
+  apps: z
+    .array(osCatalogEntrySchema)
+    .max(200)
+    .refine(uniqueIds, "Duplicate app id"),
+};
+export const osAppCatalogSchema = z.discriminatedUnion("scope", [
+  z.object({ scope: z.literal("instance"), ...catalogBase }).strict(),
+  z
+    .object({
+      scope: z.literal("workspace"),
+      workspaceId: osIdSchema,
+      ...catalogBase,
+    })
+    .strict(),
+]);
+export type OsAppCatalog = z.infer<typeof osAppCatalogSchema>;
+/** One catalog entry as /api/flightdeck/apps?mode=discovery hands it to the
+ * browser: the OS's facts plus an absolute link to its information page. */
+export type FlightdeckCatalogApp = Omit<
+  OsAppCatalog["apps"][number],
+  "bridgePath"
+> & { detailsUrl: string };
 /** What /api/flightdeck/apps hands the browser: a link per app, no roles,
  * no credential. */
 export type FlightdeckAppLink = {

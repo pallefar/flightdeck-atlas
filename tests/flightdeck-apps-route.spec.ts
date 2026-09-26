@@ -505,3 +505,346 @@ test.describe("/api/flightdeck/apps?project= (the Slides tool)", () => {
     expect(asked).toEqual([]);
   });
 });
+
+// ── onb-atlas-apps-discovery-route: ?mode=discovery ───────────────────────
+// The apps a requester can ASK for before the destination project exists,
+// read from the OS allowlisted app catalog (OS onb-inbound-apps-discovery,
+// GET /api/inbound/v1/context/app-catalog). Instance-level for editors;
+// workspace-level (with that workspace's consent) for the Super Admin only.
+const catalogEntry = (
+  id: string,
+  state: "available" | "unavailable" | "awaiting-workspace-consent",
+) => ({
+  id,
+  label: id === "maps" ? "Maps" : "Flightdeck Sign",
+  icon: "🗺️",
+  version: "0.2.0",
+  category: "analytics",
+  availability: "available" as const,
+  tagline: "See where your people and sites are.",
+  releaseRevision: 2,
+  state,
+  bridgePath: `/console/app-info/${id}`,
+});
+const instanceCatalog = (locale: "en" | "de" = "en") => ({
+  scope: "instance" as const,
+  contract: 1 as const,
+  locale,
+  apps: [catalogEntry("maps", "available"), catalogEntry("docusign", "unavailable")],
+});
+const workspaceCatalog = (workspaceId = "te-ops") => ({
+  scope: "workspace" as const,
+  workspaceId,
+  contract: 1 as const,
+  locale: "en" as const,
+  apps: [
+    catalogEntry("maps", "available"),
+    catalogEntry("docusign", "awaiting-workspace-consent"),
+  ],
+});
+
+test.describe("context client: appCatalog()", () => {
+  const client = (answer: (url: string) => Response | Promise<Response>) =>
+    createContextClient(
+      { baseUrl: OS, token: "t".repeat(32) },
+      { fetch: async (url) => answer(url) },
+    );
+
+  test("asks the OS catalog instance-level without a workspace, and with ?workspaceId= only when given one", async () => {
+    const seen: string[] = [];
+    const r1 = await client((url) => {
+      seen.push(url);
+      return jsonResponse(instanceCatalog());
+    }).appCatalog!(null, "en");
+    expect(r1).toEqual({ state: "ok", data: instanceCatalog() });
+    const r2 = await client((url) => {
+      seen.push(url);
+      return jsonResponse(workspaceCatalog());
+    }).appCatalog!("te-ops", "en");
+    expect(r2).toEqual({ state: "ok", data: workspaceCatalog() });
+    expect(seen).toEqual([
+      `${OS}/api/inbound/v1/context/app-catalog?locale=en`,
+      `${OS}/api/inbound/v1/context/app-catalog?workspaceId=te-ops&locale=en`,
+    ]);
+  });
+
+  test("fails closed: an unknown key, a wrong echo, a foreign bridgePath, 401 and a 404 are never a list", async () => {
+    const bad = [
+      { ...instanceCatalog(), apps: [{ ...catalogEntry("maps", "available"), config: {} }] },
+      { ...instanceCatalog(), apps: [{ ...catalogEntry("maps", "available"), bridgePath: "/console/app-info/docusign" }] },
+      { ...instanceCatalog(), apps: [{ ...catalogEntry("maps", "available"), bridgePath: "https://evil.example/x" }] },
+      { ...instanceCatalog(), apps: [{ ...catalogEntry("maps", "available"), state: "launchable" }] },
+      instanceCatalog("de"),
+      workspaceCatalog(),
+    ];
+    for (const body of bad)
+      expect(await client(() => jsonResponse(body)).appCatalog!(null, "en")).toEqual({
+        state: "invalid_response",
+      });
+    // An answer for another workspace, or an instance answer to a workspace ask.
+    expect(
+      await client(() => jsonResponse(workspaceCatalog("hr-de"))).appCatalog!("te-ops", "en"),
+    ).toEqual({ state: "invalid_response" });
+    expect(
+      await client(() => jsonResponse(instanceCatalog())).appCatalog!("te-ops", "en"),
+    ).toEqual({ state: "invalid_response" });
+    expect(
+      await client(() => jsonResponse({}, 401)).appCatalog!(null, "en"),
+    ).toEqual({ state: "unauthorized" });
+    // Instance-level, the OS's uniform 404 means the feature is off for this
+    // credential; with a workspace it may also be a workspace not allowlisted.
+    expect(
+      await client(() => jsonResponse({ error: "not found" }, 404)).appCatalog!(null, "en"),
+    ).toEqual({ state: "feature_off" });
+    expect(
+      await client(() => jsonResponse({ error: "not found" }, 404)).appCatalog!("te-ops", "en"),
+    ).toEqual({ state: "workspace_not_found" });
+    expect(
+      await client(() =>
+        jsonResponse({ error: "workspace disabled", code: "workspace_disabled" }, 409),
+      ).appCatalog!("te-ops", "en"),
+    ).toEqual({ state: "workspace_disabled" });
+  });
+});
+
+test.describe("/api/flightdeck/apps?mode=discovery", () => {
+  const whoamiWith = (appDiscovery: boolean) => async () =>
+    ({
+      state: "ok" as const,
+      body: {
+        integrationId: "atlas",
+        features: { appDiscovery },
+      },
+    });
+  const editor = async () => ({ access: { userId: "u1", superAdmin: false } });
+  const superAdmin = async () => ({ access: { userId: "sa", superAdmin: true } });
+  const discovery = (over: {
+    authorize?: typeof editor;
+    whoami?: () => Promise<
+      | { state: "ok"; body: unknown }
+      | { state: "unauthorized" | "os_unreachable" | "rate_limited" | "invalid_response" }
+    >;
+    appCatalog?: ContextReader["appCatalog"];
+    asked?: (string | null)[];
+  } = {}) =>
+    createAppsRoute({
+      authorize: over.authorize ?? editor,
+      reader: () =>
+        reader({
+          async workspaces() {
+            throw Error("discovery must not read the workspace list");
+          },
+          async apps() {
+            throw Error("discovery must not read the legacy apps list");
+          },
+          appCatalog:
+            over.appCatalog ??
+            (async (ws, locale) => {
+              over.asked?.push(ws);
+              return {
+                state: "ok",
+                data: ws ? workspaceCatalog(ws) : instanceCatalog(locale),
+              };
+            }),
+        }),
+      origin: () => OS,
+      selection: async () => null,
+      whoami: () => over.whoami ?? whoamiWith(true),
+    });
+  const get = (qs: string) =>
+    new Request(`https://atlas.example/api/flightdeck/apps?${qs}`, {
+      headers: { "accept-language": "en" },
+    });
+
+  test("⭐ an editor gets the instance-level DTO list with details links into the OS", async () => {
+    const asked: (string | null)[] = [];
+    const res = await discovery({ asked }).GET(get("mode=discovery"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { apps: unknown[] };
+    expect(asked).toEqual([null]);
+    expect(body).toMatchObject({
+      mode: "discovery",
+      available: true,
+      state: "ok",
+      scope: "instance",
+      workspaceId: null,
+      locale: "en",
+    });
+    expect(body.apps).toEqual([
+      {
+        id: "maps",
+        label: "Maps",
+        icon: "🗺️",
+        version: "0.2.0",
+        category: "analytics",
+        availability: "available",
+        tagline: "See where your people and sites are.",
+        releaseRevision: 2,
+        state: "available",
+        detailsUrl: `${OS}/console/app-info/maps`,
+      },
+      {
+        id: "docusign",
+        label: "Flightdeck Sign",
+        icon: "🗺️",
+        version: "0.2.0",
+        category: "analytics",
+        availability: "available",
+        tagline: "See where your people and sites are.",
+        releaseRevision: 2,
+        state: "unavailable",
+        detailsUrl: `${OS}/console/app-info/docusign`,
+      },
+    ]);
+    expect(JSON.stringify(body)).not.toContain("Bearer");
+  });
+
+  test("fails closed: an editor passing &workspaceId= gets 403 before any OS read", async () => {
+    const asked: (string | null)[] = [];
+    let whoamiRead = false;
+    const res = await discovery({
+      asked,
+      whoami: async () => {
+        whoamiRead = true;
+        return { state: "ok", body: { integrationId: "atlas", features: { appDiscovery: true } } };
+      },
+    }).GET(get("mode=discovery&workspaceId=te-ops"));
+    expect(res.status).toBe(403);
+    expect(asked).toEqual([]);
+    expect(whoamiRead).toBe(false);
+  });
+
+  test("the Super Admin may pass &workspaceId= and gets that workspace's consent states", async () => {
+    const asked: (string | null)[] = [];
+    const body = (await (
+      await discovery({ asked, authorize: superAdmin }).GET(
+        get("mode=discovery&workspaceId=te-ops"),
+      )
+    ).json()) as { apps: { state: string }[] };
+    expect(asked).toEqual(["te-ops"]);
+    expect(body).toMatchObject({
+      mode: "discovery",
+      available: true,
+      scope: "workspace",
+      workspaceId: "te-ops",
+    });
+    expect(body.apps.map((a) => a.state)).toEqual([
+      "available",
+      "awaiting-workspace-consent",
+    ]);
+  });
+
+  test("without features.appDiscovery it answers {available:false, reason:'os-version'} and never asks for the catalog", async () => {
+    const asked: (string | null)[] = [];
+    const body = await (
+      await discovery({ asked, whoami: whoamiWith(false) }).GET(get("mode=discovery"))
+    ).json();
+    expect(asked).toEqual([]);
+    expect(body).toMatchObject({
+      mode: "discovery",
+      available: false,
+      reason: "os-version",
+      apps: [],
+    });
+    // An older OS whose whoami carries no features at all is the same.
+    const older = await (
+      await discovery({
+        asked,
+        whoami: async () => ({ state: "ok", body: { integrationId: "atlas" } }),
+      }).GET(get("mode=discovery"))
+    ).json();
+    expect(older).toMatchObject({ available: false, reason: "os-version" });
+    expect(asked).toEqual([]);
+  });
+
+  test("a 401 is 'not connected', never an empty list presented as success", async () => {
+    const onWhoami = await (
+      await discovery({ whoami: async () => ({ state: "unauthorized" }) }).GET(
+        get("mode=discovery"),
+      )
+    ).json();
+    expect(onWhoami).toMatchObject({
+      mode: "discovery",
+      available: false,
+      reason: "not-connected",
+      state: "unauthorized",
+      apps: [],
+    });
+    const onCatalog = await (
+      await discovery({ appCatalog: async () => ({ state: "unauthorized" }) }).GET(
+        get("mode=discovery"),
+      )
+    ).json();
+    expect(onCatalog).toMatchObject({
+      available: false,
+      reason: "not-connected",
+      apps: [],
+    });
+    // The OS switching the feature off between whoami and the read is the
+    // OS version answer, not an empty catalog.
+    const raced = await (
+      await discovery({ appCatalog: async () => ({ state: "feature_off" }) }).GET(
+        get("mode=discovery"),
+      )
+    ).json();
+    expect(raced).toMatchObject({ available: false, reason: "os-version", apps: [] });
+  });
+
+  test("not configured and an unreachable OS are honest, unavailable states", async () => {
+    const off = createAppsRoute({
+      authorize: editor,
+      reader: () => null,
+      origin: () => "",
+      selection: async () => null,
+      whoami: () => null,
+    });
+    expect(await (await off.GET(get("mode=discovery"))).json()).toMatchObject({
+      available: false,
+      reason: "not-configured",
+      apps: [],
+    });
+    expect(
+      await (
+        await discovery({ whoami: async () => ({ state: "os_unreachable" }) }).GET(
+          get("mode=discovery"),
+        )
+      ).json(),
+    ).toMatchObject({ available: false, reason: "os-unreachable", apps: [] });
+  });
+
+  test("the existing mode is unchanged, and an unknown mode is refused", async () => {
+    const route = createAppsRoute({
+      authorize: editor,
+      reader: () => reader(),
+      origin: () => OS,
+      selection: async () => null,
+      whoami: () => whoamiWith(true),
+    });
+    const plain = await (await route.GET(get(""))).json();
+    expect(plain).toMatchObject({ state: "ok", workspaceId: "te-ops" });
+    expect(plain).not.toHaveProperty("mode");
+    expect(plain).not.toHaveProperty("available");
+    expect((await route.GET(get("mode=everything"))).status).toBe(400);
+  });
+
+  test("an Atlas refusal passes straight through before any OS read", async () => {
+    let read = false;
+    const route = createAppsRoute({
+      authorize: async () => ({
+        error: Response.json({ error: "Sign in to continue." }, { status: 401 }),
+      }),
+      reader: () => {
+        read = true;
+        return reader();
+      },
+      origin: () => OS,
+      selection: async () => null,
+      whoami: () => {
+        read = true;
+        return whoamiWith(true);
+      },
+    });
+    expect((await route.GET(get("mode=discovery"))).status).toBe(401);
+    expect(read).toBe(false);
+  });
+});

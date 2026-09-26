@@ -115,6 +115,8 @@ export function createOsWiring(deps: {
           current((g) => at(g).appsDirectory!(id, project, locale)),
         appsForProject: (id, project) =>
           current((g) => at(g).appsForProject!(id, project)),
+        appCatalog: (id, locale) =>
+          current((g) => at(g).appCatalog!(id, locale)),
       };
     },
     /** The apps directory (keys carry the OS origin and a one-way

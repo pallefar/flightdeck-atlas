@@ -8,15 +8,31 @@
 // one person may open. That is safe to show to any Atlas member with
 // projects.read because the list is product names and links only: opening a
 // link still needs an OS sign-in and the OS's own role check.
+//
+// ?mode=discovery (onb-atlas-apps-discovery-route; plan 2026-09-25 lane A,
+// D-037 item 6): the apps a requester can ASK for before the destination
+// project exists, from the OS's allowlisted app catalog. Instance-level for
+// everyone the route admits; `&workspaceId=` (that workspace's consent) is
+// the Super Admin's alone, and anyone else gets 403 before the OS is asked.
+// It FAILS CLOSED: read only once whoami advertises features.appDiscovery
+// (otherwise `{available:false, reason:"os-version"}`), a refused credential
+// is "not connected", and no failure is ever an empty list presented as
+// success. The server-side credential is the only one used.
 import { json } from "../http";
+import { resolveRequestLocale } from "../i18n/server";
 import {
+  osIdSchema,
   pickWorkspace,
+  type ContextFailureState,
   type ContextState,
   type FlightdeckAppLink,
+  type FlightdeckCatalogApp,
+  type OsAppCatalog,
   type OsAppsResponse,
   type OsSelection,
 } from "./context";
-import type { ContextReader } from "./context-client";
+import type { ContextReader, WhoamiRead } from "./context-client";
+import { parseWhoamiFeatures } from "./features";
 
 export type AppsAuth =
   | { access: { userId: string; superAdmin: boolean }; error?: never }
@@ -53,6 +69,60 @@ export type ProjectLink = {
 /** An Atlas project id worth looking up; anything else is not linked. */
 const ATLAS_PROJECT_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
+/** Why the discovery list is not available. `os-version`: the OS does not
+ * offer app discovery to this credential (an older OS, or the feature off);
+ * `not-connected`: the OS refused the credential. */
+export type DiscoveryReason =
+  | "os-version"
+  | "not-connected"
+  | "not-configured"
+  | "os-unreachable"
+  | "rate-limited"
+  | "invalid-response"
+  | "workspace-not-found"
+  | "workspace-disabled";
+type DiscoveryFailure = ContextFailureState | "feature_off";
+const REASONS: Record<DiscoveryFailure, DiscoveryReason> = {
+  feature_off: "os-version",
+  unauthorized: "not-connected",
+  not_configured: "not-configured",
+  os_unreachable: "os-unreachable",
+  rate_limited: "rate-limited",
+  invalid_response: "invalid-response",
+  workspace_not_found: "workspace-not-found",
+  workspace_disabled: "workspace-disabled",
+};
+export type DiscoveryView =
+  | {
+      mode: "discovery";
+      available: true;
+      state: "ok";
+      scope: OsAppCatalog["scope"];
+      workspaceId: string | null;
+      locale: OsAppCatalog["locale"];
+      apps: FlightdeckCatalogApp[];
+      retryAfter: null;
+    }
+  | {
+      mode: "discovery";
+      available: false;
+      reason: DiscoveryReason;
+      state: DiscoveryFailure;
+      apps: [];
+      retryAfter: number | null;
+    };
+const unavailable = (
+  state: DiscoveryFailure,
+  retryAfter: number | null = null,
+): DiscoveryView => ({
+  mode: "discovery",
+  available: false,
+  reason: REASONS[state],
+  state,
+  apps: [],
+  retryAfter,
+});
+
 type OsApp = OsAppsResponse["apps"][number];
 const view = (
   state: AppsState,
@@ -74,6 +144,9 @@ export function createAppsRoute(deps: {
   selection: (userId: string) => Promise<OsSelection | null>;
   /** The OS project linked to an Atlas project, or null (not linked). */
   linkOf?: (atlasProjectId: string) => Promise<ProjectLink | null>;
+  /** The whoami read (os-server osWhoami), or null when FlightDeck is not
+   * configured. ?mode=discovery reads features.appDiscovery from it. */
+  whoami?: () => (() => Promise<WhoamiRead>) | null;
 }) {
   const respond = (v: AppsView) =>
     json({ ...v, checkedAt: new Date().toISOString() });
@@ -146,12 +219,67 @@ export function createAppsRoute(deps: {
     );
   }
 
+  /** ?mode=discovery: the allowlisted app catalog (see the header). */
+  async function discovery(
+    access: { superAdmin: boolean },
+    request: Request,
+    workspaceId: string | null,
+  ) {
+    const say = (v: DiscoveryView) =>
+      json({ ...v, checkedAt: new Date().toISOString() });
+    // ⚠ Fails closed: a workspace's consent is the Super Admin's view only
+    // (requesters cannot choose a destination). Refused before any OS read.
+    if (workspaceId !== null && !access.superAdmin)
+      return json(
+        {
+          error:
+            "Only the Super Admin can check apps for a workspace. Contact the Super Admin.",
+        },
+        403,
+      );
+    if (workspaceId !== null && !osIdSchema.safeParse(workspaceId).success)
+      return say(unavailable("workspace_not_found"));
+    const os = deps.reader(false);
+    const origin = deps.origin();
+    const whoami = deps.whoami?.() ?? null;
+    if (!os || !os.appCatalog || !origin || !whoami)
+      return say(unavailable("not_configured"));
+    const who = await whoami();
+    if (who.state !== "ok") return say(unavailable(who.state));
+    const features = parseWhoamiFeatures(who.body);
+    if (!features) return say(unavailable("invalid_response"));
+    if (!features.appDiscovery) return say(unavailable("feature_off"));
+    const res = await os.appCatalog(workspaceId, resolveRequestLocale(request));
+    if (res.state !== "ok")
+      return say(unavailable(res.state, res.retryAfter ?? null));
+    const { data } = res;
+    return say({
+      mode: "discovery",
+      available: true,
+      state: "ok",
+      scope: data.scope,
+      workspaceId: data.scope === "workspace" ? data.workspaceId : null,
+      locale: data.locale,
+      apps: data.apps.map(({ bridgePath, ...app }) => ({
+        ...app,
+        // bridgePath is /console/app-info/<id> (schema-checked), so the
+        // link can only name that app's page on the configured OS.
+        detailsUrl: `${origin}${bridgePath}`,
+      })),
+      retryAfter: null,
+    });
+  }
+
   async function GET(request?: Request) {
     const auth = await deps.authorize();
     if (auth.error) return auth.error;
-    const project = request
-      ? new URL(request.url).searchParams.get("project")
-      : null;
+    const params = request ? new URL(request.url).searchParams : null;
+    const mode = params?.get("mode") ?? null;
+    if (mode !== null && mode !== "discovery")
+      return json({ error: "Unknown mode." }, 400);
+    if (mode === "discovery" && request)
+      return discovery(auth.access, request, params!.get("workspaceId"));
+    const project = params?.get("project") ?? null;
     if (project !== null) return appsForProject(auth.access, project);
     const os = deps.reader(false);
     const origin = deps.origin();

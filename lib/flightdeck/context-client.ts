@@ -5,6 +5,7 @@
 // response or error, stored, or sent to the browser.
 import {
   emptyContext,
+  osAppCatalogSchema,
   osAppsDirectorySchema,
   osAppsResponseSchema,
   osIdSchema,
@@ -18,6 +19,7 @@ import {
   visibleProjects,
   type ContextFailureState,
   type ContextView,
+  type OsAppCatalog,
   type OsAppsDirectory,
   type OsAppsResponse,
   type OsProjectsResponse,
@@ -69,11 +71,25 @@ export interface ContextReader {
     workspaceId: string,
     projectId: string,
   ): Promise<ProjectAppsResult>;
+  /** The allowlisted app catalog (OS onb-inbound-apps-discovery): the apps
+   * a requester can ask for. `workspaceId` null is instance-level; a
+   * workspace adds that workspace's consent (the Super Admin path). Only
+   * read once whoami advertises features.appDiscovery. */
+  appCatalog?(
+    workspaceId: string | null,
+    locale: "en" | "de",
+  ): Promise<AppCatalogResult>;
 }
 /** An answer for one project: a list, a failure, or that project disabled. */
 export type ProjectAppsResult =
   | ContextResult<OsAppsResponse>
   | { state: "project_disabled"; retryAfter?: never };
+/** A catalog answer: the catalog, a failure, or (instance-level) the OS's
+ * uniform 404, which there can only mean the feature is off for this
+ * credential. */
+export type AppCatalogResult =
+  | ContextResult<OsAppCatalog>
+  | { state: "feature_off"; retryAfter?: never };
 
 export const WORKSPACES_PATH = "/api/inbound/v1/context/workspaces";
 export const projectsPath = (workspaceId: string) =>
@@ -88,6 +104,14 @@ export const appsDirectoryPath = (
   `${appsPath(workspaceId)}/directory?${new URLSearchParams({ projectId, locale })}`;
 export const projectAppsPath = (workspaceId: string, projectId: string) =>
   `${appsPath(workspaceId)}?${new URLSearchParams({ projectId })}`;
+export const APP_CATALOG_PATH = "/api/inbound/v1/context/app-catalog";
+export const appCatalogPath = (
+  workspaceId: string | null,
+  locale: "en" | "de",
+) =>
+  `${APP_CATALOG_PATH}?${new URLSearchParams(
+    workspaceId ? { workspaceId, locale } : { locale },
+  )}`;
 const TIMEOUT_MS = 5000;
 const MAX_BODY_CHARS = 1_000_000;
 // Same charset the OS enforces before it verifies a credential.
@@ -308,6 +332,36 @@ export function createContextClient(
         ? { state: "ok", data: parsed.data }
         : { state: "invalid_response" };
     },
+    async appCatalog(workspaceId, locale) {
+      if (workspaceId !== null && !osIdSchema.safeParse(workspaceId).success)
+        return { state: "workspace_not_found" };
+      const answer = await exchange(appCatalogPath(workspaceId, locale), {
+        method: "GET",
+      });
+      // Instance-level there is no workspace to be missing: the OS's uniform
+      // 404 means the route does not exist for this credential.
+      if (
+        workspaceId === null &&
+        answer.state === "answered" &&
+        answer.response.status === 404 &&
+        osNotFoundSchema.safeParse(answer.body).success
+      )
+        return { state: "feature_off" };
+      const result = read(answer, true);
+      if (result.state !== "ok") return result;
+      const parsed = osAppCatalogSchema.safeParse(result.body);
+      if (!parsed.success || parsed.data.locale !== locale)
+        return { state: "invalid_response" };
+      // The OS echoes what the answer is for; an instance answer to a
+      // workspace ask (or the reverse), or another workspace's answer, is
+      // refused, never shown as this one.
+      const data = parsed.data;
+      const matches =
+        workspaceId === null
+          ? data.scope === "instance"
+          : data.scope === "workspace" && data.workspaceId === workspaceId;
+      return matches ? { state: "ok", data } : { state: "invalid_response" };
+    },
   };
 }
 
@@ -415,7 +469,9 @@ export function createCachedReader(
   const ttlMs = Math.min(options.ttlMs ?? 10_000, CACHE_MAX_AGE_MS),
     now = options.now || Date.now,
     prefix = options.keyPrefix ?? "";
-  async function cached<R extends ContextResult<unknown> | ProjectAppsResult>(
+  async function cached<
+    R extends ContextResult<unknown> | ProjectAppsResult | AppCatalogResult,
+  >(
     key: string,
     load: () => Promise<R>,
   ): Promise<R> {
@@ -470,6 +526,14 @@ export function createCachedReader(
           appsForProject: (id: string, projectId: string) =>
             cached(projectAppsPath(id, projectId), () =>
               reader.appsForProject!(id, projectId),
+            ),
+        }
+      : {}),
+    ...(reader.appCatalog
+      ? {
+          appCatalog: (id: string | null, locale: "en" | "de") =>
+            cached(appCatalogPath(id, locale), () =>
+              reader.appCatalog!(id, locale),
             ),
         }
       : {}),
