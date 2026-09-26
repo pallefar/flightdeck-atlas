@@ -9,8 +9,22 @@
 // media, requirements). Enabling and requesting access never happen here.
 import { useT } from "@/lib/i18n/react";
 import { appCardModel, type SectionView } from "@/lib/flightdeck/app-card";
+import type { OsSelection } from "@/lib/flightdeck/context";
 
-export function OsAppAboutView({ id, view }: { id: string; view: SectionView }) {
+export function OsAppAboutView({
+  id,
+  view,
+  onConfirm,
+  confirming = false,
+}: {
+  id: string;
+  view: SectionView;
+  /** Saves the shown-but-unsaved FlightDeck selection (view.confirm). This
+   * page has no launcher and no sidebar, so it carries the action itself. */
+  onConfirm?: (selection: OsSelection) => void;
+  /** A selection save is in flight. */
+  confirming?: boolean;
+}) {
   const t = useT();
   const app = view.kind === "cards" ? view.apps.find((a) => a.id === id) : undefined;
   const m = app ? appCardModel(app) : null;
@@ -23,7 +37,20 @@ export function OsAppAboutView({ id, view }: { id: string; view: SectionView }) 
       {view.kind === "loading" ? (
         <p className="hub-muted">{t("apps.fd.loading")}</p>
       ) : view.kind === "message" ? (
-        <p role="status">{t(view.key)}</p>
+        <>
+          <p role="status">{t(view.key)}</p>
+          {view.confirm && (
+            <button
+              type="button"
+              className="app-card-action"
+              disabled={confirming || !onConfirm}
+              aria-busy={confirming || undefined}
+              onClick={() => view.confirm && onConfirm?.(view.confirm)}
+            >
+              {t("apps.fd.confirm")}
+            </button>
+          )}
+        </>
       ) : !app || !m ? (
         <p role="status">{t("apps.about.notListed")}</p>
       ) : (

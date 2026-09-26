@@ -18,5 +18,21 @@ export default function OsAppAbout({ id }: { id: string }) {
     query: "",
     favourites: [],
   });
-  return <OsAppAboutView id={id} view={view} />;
+  return (
+    <OsAppAboutView
+      id={id}
+      view={view}
+      confirming={context.saving}
+      onConfirm={(selection) =>
+        void context
+          .choose({
+            osWorkspaceId: selection.osWorkspaceId,
+            osProjectId: selection.osProjectId,
+          })
+          // Same selection, so the directory hook will not refetch by
+          // itself: read it again now that it is saved.
+          .then(() => directory.reload())
+      }
+    />
+  );
 }

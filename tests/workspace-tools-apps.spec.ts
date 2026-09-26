@@ -423,6 +423,46 @@ test.describe("/apps/os/<id> (minimal until apps-34)", () => {
     expect(open).toContain('target="_blank"');
     expect(open).toMatch(/rel="[^"]*noopener/);
   });
+  // Round 3 (P2): a direct About link opened before any selection is saved
+  // gets confirm_project. The page has no launcher and no sidebar, so it
+  // must carry the save action itself, never the message alone.
+  const unsaved: SectionInput = {
+    ...base,
+    directory: { loading: false, state: "no_project_selected", data: null },
+  };
+  test("an unsaved selection offers 'Use this project' on the About page (en, de)", () => {
+    for (const [locale, dict] of [["en", en], ["de", de]] as const) {
+      const html = about("maps", unsaved, locale);
+      expect(html).toContain(dict["apps.fd.state.confirm_project"]);
+      expect(html).toMatch(
+        new RegExp(`<button[^>]*>${dict["apps.fd.confirm"]}</button>`),
+      );
+    }
+  });
+  test("the About confirm button is busy while saving, disabled without a handler", () => {
+    const busy = unescape(
+      inLocale(
+        "en",
+        createElement(OsAppAboutView, {
+          id: "maps",
+          view: flightdeckSection(unsaved),
+          confirming: true,
+          onConfirm: () => {},
+        }),
+      ),
+    );
+    expect(busy).toMatch(/<button[^>]*disabled=""[^>]*aria-busy="true"[^>]*>/);
+    expect(about("maps", unsaved)).toMatch(/<button[^>]*disabled=""[^>]*>/);
+  });
+  test("the About route saves the shown selection, then re-reads the directory", () => {
+    const src = readFileSync(
+      new URL("../app/apps/os/[id]/os-app-about.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(src).toMatch(/onConfirm=\{[\s\S]*context\s*\.choose\(\{[\s\S]*osWorkspaceId: selection\.osWorkspaceId,[\s\S]*osProjectId: selection\.osProjectId,[\s\S]*\.then\(\(\) => directory\.reload\(\)\)/);
+    expect(src).toMatch(/confirming=\{context\.saving\}/);
+  });
+
   test("an unlisted app and a failed directory say so honestly", () => {
     expect(about("nope", withApps([app()]))).toContain(en["apps.about.notListed"]);
     expect(
