@@ -368,3 +368,60 @@ test("the Atlas brand, the globe brand and the build-progress back link return t
   await page.getByRole("link", { name: "← Back to Atlas" }).click();
   await expect(dashboard).toBeVisible();
 });
+
+// deck-atlas-link (plan 2026-09-26 R1-J1): the project Slides tool links to
+// Presentation Studio on the OS project LINKED to this Atlas project. The
+// OS answer is faked at /api/flightdeck/apps (the fake-OS handler cases are
+// in flightdeck-apps-route.spec.ts); the legacy editor stays below it.
+test("Slides tool: legacy banner links to the LINKED OS project; unlinked shows a notice; app off shows no banner", async ({
+  page,
+}) => {
+  const p = await create(page);
+  const OS = "http://127.0.0.1:4420";
+  const studioUrl = `${OS}/console/apps/presentation-studio?fdWorkspace=hr-de&fdProject=q3-launch`;
+  let answer: Record<string, unknown> = {
+    state: "ok",
+    workspaceId: "hr-de",
+    projectId: "q3-launch",
+    apps: [
+      {
+        id: "presentation-studio",
+        label: "Presentation Studio",
+        icon: "",
+        url: studioUrl,
+      },
+    ],
+    retryAfter: null,
+    checkedAt: new Date().toISOString(),
+  };
+  const asked: string[] = [];
+  await page.route("**/api/flightdeck/apps?**", (route) => {
+    asked.push(new URL(route.request().url()).searchParams.get("project")!);
+    return route.fulfill({ json: answer });
+  });
+  await page.goto(`/?project=${p.id}&work=slides`);
+  const link = page.getByRole("link", {
+    name: "Open in Presentation Studio",
+  });
+  await expect(link).toBeVisible();
+  expect(asked).toContain(p.id);
+  const href = new URL((await link.getAttribute("href"))!);
+  expect(href.searchParams.get("fdProject")).toBe("q3-launch");
+  expect(href.searchParams.get("fdWorkspace")).toBe("hr-de");
+  await expect(page.getByText("This is the legacy slide editor.")).toBeVisible();
+  // The legacy editor stays.
+  await expect(page.getByRole("button", { name: "Create outline" })).toBeVisible();
+
+  answer = { ...answer, state: "not_linked", workspaceId: null, projectId: null, apps: [] };
+  await page.reload();
+  await expect(page.getByText("Not linked to FlightDeck")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open in Presentation Studio" })).toHaveCount(0);
+
+  answer = { ...answer, state: "ok", workspaceId: "hr-de", projectId: "q3-launch", apps: [] };
+  await Promise.all([
+    page.waitForResponse("**/api/flightdeck/apps?**"),
+    page.reload(),
+  ]);
+  await expect(page.getByRole("button", { name: "Create outline" })).toBeVisible();
+  await expect(page.locator(".fd-slides-link")).toHaveCount(0);
+});

@@ -63,6 +63,15 @@ export const osWorkspaceDisabledSchema = z
     code: z.literal("workspace_disabled"),
   })
   .strict();
+/** The OS apps route's 409 for a `?projectId=` naming a disabled project of
+ * the workspace (deck-host-launch-project). */
+export const osProjectDisabledSchema = z
+  .object({
+    error: z.literal("project disabled"),
+    code: z.literal("project_disabled"),
+    projectId: osIdSchema,
+  })
+  .strict();
 export type OsContextEntry = z.infer<typeof entrySchema>;
 export type OsWorkspacesResponse = z.infer<typeof osWorkspacesResponseSchema>;
 export type OsProjectsResponse = z.infer<typeof osProjectsResponseSchema>;

@@ -86,9 +86,9 @@ export function createOsWiring(deps: {
     });
   /** Runs one read in the current generation; an ok answer that arrives
    * after a revocation is returned as "unauthorized". */
-  async function current<T>(
-    run: (g: number) => Promise<ContextResult<T>>,
-  ): Promise<ContextResult<T>> {
+  async function current<R extends { state: string }>(
+    run: (g: number) => Promise<R>,
+  ): Promise<R | { state: "unauthorized" }> {
     const g = generation;
     const value = await run(g);
     return g !== generation && value.state === "ok"
@@ -113,6 +113,8 @@ export function createOsWiring(deps: {
         apps: (id) => current((g) => at(g).apps!(id)),
         appsDirectory: (id, project, locale) =>
           current((g) => at(g).appsDirectory!(id, project, locale)),
+        appsForProject: (id, project) =>
+          current((g) => at(g).appsForProject!(id, project)),
       };
     },
     /** The apps directory (keys carry the OS origin and a one-way

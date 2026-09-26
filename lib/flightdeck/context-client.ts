@@ -9,6 +9,7 @@ import {
   osAppsResponseSchema,
   osIdSchema,
   osNotFoundSchema,
+  osProjectDisabledSchema,
   osProjectsResponseSchema,
   osWorkspaceDisabledSchema,
   osWorkspacesResponseSchema,
@@ -57,7 +58,18 @@ export interface ContextReader {
     projectId: string,
     locale: "en" | "de",
   ): Promise<ContextResult<OsAppsDirectory>>;
+  /** The sub-apps enabled in ONE project of that workspace, through the OS's
+   * validated `?projectId=` (deck-host-launch-project): the Slides tool's
+   * launch on the OS project linked to an Atlas project. */
+  appsForProject?(
+    workspaceId: string,
+    projectId: string,
+  ): Promise<ProjectAppsResult>;
 }
+/** An answer for one project: a list, a failure, or that project disabled. */
+export type ProjectAppsResult =
+  | ContextResult<OsAppsResponse>
+  | { state: "project_disabled"; retryAfter?: never };
 
 export const WORKSPACES_PATH = "/api/inbound/v1/context/workspaces";
 export const projectsPath = (workspaceId: string) =>
@@ -70,6 +82,8 @@ export const appsDirectoryPath = (
   locale: "en" | "de",
 ) =>
   `${appsPath(workspaceId)}/directory?${new URLSearchParams({ projectId, locale })}`;
+export const projectAppsPath = (workspaceId: string, projectId: string) =>
+  `${appsPath(workspaceId)}?${new URLSearchParams({ projectId })}`;
 const TIMEOUT_MS = 5000;
 const MAX_BODY_CHARS = 1_000_000;
 // Same charset the OS enforces before it verifies a credential.
@@ -180,6 +194,12 @@ export function createContextClient(
     notFound: boolean,
   ): Promise<{ state: "ok"; body: unknown } | ContextFailure> {
     const answer = await exchange(path, { method: "GET" });
+    return read(answer, notFound);
+  }
+  function read(
+    answer: Awaited<ReturnType<Exchange>>,
+    notFound: boolean,
+  ): { state: "ok"; body: unknown } | ContextFailure {
     if (answer.state !== "answered") return answer;
     const { response, body } = answer;
     if (response.status === 401 || response.status === 403)
@@ -253,6 +273,32 @@ export function createContextClient(
         parsed.data.workspaceId === workspaceId &&
         parsed.data.projectId === projectId &&
         parsed.data.locale === locale
+        ? { state: "ok", data: parsed.data }
+        : { state: "invalid_response" };
+    },
+    async appsForProject(workspaceId, projectId) {
+      if (
+        !osIdSchema.safeParse(workspaceId).success ||
+        !osIdSchema.safeParse(projectId).success
+      )
+        return { state: "workspace_not_found" };
+      const answer = await exchange(projectAppsPath(workspaceId, projectId), {
+        method: "GET",
+      });
+      if (
+        answer.state === "answered" &&
+        answer.response.status === 409 &&
+        osProjectDisabledSchema.safeParse(answer.body).success
+      )
+        return { state: "project_disabled" };
+      const result = read(answer, true);
+      if (result.state !== "ok") return result;
+      const parsed = osAppsResponseSchema.safeParse(result.body);
+      // An answer for another workspace or project (the default one, say) is
+      // never shown as this project's list.
+      return parsed.success &&
+        parsed.data.workspaceId === workspaceId &&
+        parsed.data.projectId === projectId
         ? { state: "ok", data: parsed.data }
         : { state: "invalid_response" };
     },
@@ -363,24 +409,27 @@ export function createCachedReader(
   const ttlMs = Math.min(options.ttlMs ?? 10_000, CACHE_MAX_AGE_MS),
     now = options.now || Date.now,
     prefix = options.keyPrefix ?? "";
-  async function cached<T>(
+  async function cached<R extends ContextResult<unknown> | ProjectAppsResult>(
     key: string,
-    load: () => Promise<ContextResult<T>>,
-  ): Promise<ContextResult<T>> {
+    load: () => Promise<R>,
+  ): Promise<R> {
     const started = now();
     const blocked = cache.get(RATE_LIMIT_KEY);
     if (blocked && blocked.until > started)
       return {
         state: "rate_limited",
         retryAfter: Math.max(1, Math.ceil((blocked.until - started) / 1000)),
-      };
+      } as R;
     const hit = cache.get(prefix + key);
     if (!options.fresh && hit?.value && hit.until > started)
-      return hit.value as ContextResult<T>;
+      return hit.value as R;
     const value = await load();
     if (cache.size > 200) cache.clear();
     if (value.state === "ok")
-      cache.set(prefix + key, { until: now() + ttlMs, value });
+      cache.set(prefix + key, {
+        until: now() + ttlMs,
+        value: value as ContextResult<unknown>,
+      });
     else if (value.state === "unauthorized") {
       if (prefix) clearCredential(cache, prefix);
       else cache.delete(key);
@@ -407,6 +456,14 @@ export function createCachedReader(
           appsDirectory: (id: string, project: string, locale: "en" | "de") =>
             cached(appsDirectoryPath(id, project, locale), () =>
               reader.appsDirectory!(id, project, locale),
+            ),
+        }
+      : {}),
+    ...(reader.appsForProject
+      ? {
+          appsForProject: (id: string, projectId: string) =>
+            cached(projectAppsPath(id, projectId), () =>
+              reader.appsForProject!(id, projectId),
             ),
         }
       : {}),
