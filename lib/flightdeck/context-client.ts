@@ -37,6 +37,12 @@ import {
   type OnboardingEnvelope,
   type OsSubmissionStatus,
 } from "./onboarding";
+import {
+  crmProjectionV1Schema,
+  crmRevisionV1Schema,
+  type CrmProjectionV1,
+  type CrmRevisionV1,
+} from "./crm-contract";
 
 export type ContextConfig = { baseUrl: string; token: string };
 export type ContextFailure = {
@@ -503,6 +509,103 @@ export function forgetCredential(cache: Map<string, unknown>): number {
       removed++;
     }
   return removed;
+}
+
+// ── read:crm — one OS project's CRM projection (OS crm-37, Atlas crm-40) ──
+
+export const crmProjectionPath = (workspaceId: string, projectId: string) =>
+  `${projectsPath(workspaceId)}/${encodeURIComponent(projectId)}/crm`;
+export const crmRevisionPath = (workspaceId: string, projectId: string) =>
+  `${crmProjectionPath(workspaceId, projectId)}/revision`;
+/** Why a CRM read has no data. `refused` is a 403 (the credential lacks
+ * `read:crm`): an answer about this scope, NOT a revoked credential, so it
+ * never clears the other readers' caches. `not_found` is the OS's uniform
+ * 404 (a closed gate, an unknown or disabled project). */
+export type CrmReadFailure = {
+  state:
+    | "unauthorized"
+    | "refused"
+    | "not_found"
+    | "workspace_disabled"
+    | "rate_limited"
+    | "os_unreachable"
+    | "invalid_response"
+    | "crm_not_ready"
+    | "crm_projection_invalid";
+  retryAfter?: number;
+};
+export type CrmReadResult<T> = { state: "ok"; data: T } | CrmReadFailure;
+export interface CrmClient {
+  projection(
+    workspaceId: string,
+    projectId: string,
+  ): Promise<CrmReadResult<CrmProjectionV1>>;
+  revision(
+    workspaceId: string,
+    projectId: string,
+  ): Promise<CrmReadResult<CrmRevisionV1>>;
+}
+/** The two CRM reads, never cached. The ids are the caller's STORED link's
+ * (lib/flightdeck/crm-route.ts), checked before they are joined into a path.
+ * Every answer is parsed with Atlas's strict copy of v1, and an answer for
+ * another project is refused, never shown as this one. */
+export function createCrmClient(
+  config: ContextConfig,
+  options: ClientOptions = {},
+): CrmClient {
+  const exchange = exchanger(config, options);
+  async function get<T extends { projectId: string }>(
+    path: string,
+    projectId: string,
+    parse: (body: unknown) => T | null,
+  ): Promise<CrmReadResult<T>> {
+    const answer = await exchange(path, { method: "GET" });
+    if (answer.state !== "answered") return { state: "os_unreachable" };
+    const { response, body } = answer;
+    const code =
+      body && typeof body === "object"
+        ? (body as { code?: unknown }).code
+        : undefined;
+    if (response.status === 401) return { state: "unauthorized" };
+    if (response.status === 403) return { state: "refused" };
+    if (response.status === 429)
+      return {
+        state: "rate_limited",
+        retryAfter: retryAfterFrom(response, body),
+      };
+    if (response.status === 404) return { state: "not_found" };
+    if (response.status === 409 && code === "workspace_disabled")
+      return { state: "workspace_disabled" };
+    if (response.status === 503 && code === "crm_not_ready")
+      return { state: "crm_not_ready" };
+    if (response.status === 503 && code === "crm_projection_invalid")
+      return { state: "crm_projection_invalid" };
+    if (response.status !== 200 || !isJson(response) || body === null)
+      return { state: "invalid_response" };
+    const data = parse(body);
+    return data && data.projectId === projectId
+      ? { state: "ok", data }
+      : { state: "invalid_response" };
+  }
+  const idsOk = (workspaceId: string, projectId: string) =>
+    osIdSchema.safeParse(workspaceId).success &&
+    osIdSchema.safeParse(projectId).success;
+  return {
+    async projection(workspaceId, projectId) {
+      if (!idsOk(workspaceId, projectId)) return { state: "not_found" };
+      return get(crmProjectionPath(workspaceId, projectId), projectId, (b) => {
+        const parsed = crmProjectionV1Schema.safeParse(b);
+        return parsed.success ? parsed.data : null;
+      });
+    },
+    async revision(workspaceId, projectId) {
+      if (!idsOk(workspaceId, projectId)) return { state: "not_found" };
+      return get(crmRevisionPath(workspaceId, projectId), projectId, (b) => {
+        const parsed = crmRevisionV1Schema.safeParse(b);
+        return parsed.success ? parsed.data : null;
+      });
+    },
+  };
 }
 
 // ── submit:proposal — the project-onboarding kind (plan §4.3, §4.6) ───────
