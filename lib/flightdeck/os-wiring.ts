@@ -9,6 +9,15 @@
 // (context lists, directory lists, the directory capability), the kept
 // Connections whoami and the kept feature flags. Only the credential-wide
 // rate-limit block survives, so a refusal never becomes a way to press the OS.
+//
+// A read IN FLIGHT across a revocation is discarded (review round 3): every
+// call notes the revocation generation it started in. If a revocation has
+// happened by the time its answer arrives, the answer was given for a
+// credential the OS has since refused, so an ok answer is returned as
+// "unauthorized" (no features, for the feature flags) and nothing it read is
+// cached or kept. Its view of the shared cache then records only the
+// credential-wide rate-limit block. Fails closed: the worst case is one
+// extra read.
 import {
   createCachedReader,
   createContextClient,
@@ -17,14 +26,17 @@ import {
   createWhoamiLoader,
   createWhoamiReader,
   forgetCredential,
+  RATE_LIMIT_KEY,
   type ContextConfig,
+  type ContextReader,
   type ContextResult,
   type Fetcher,
   type WhoamiRead,
 } from "./context-client";
-import { createDirectoryOs } from "./apps-directory-route";
+import { createDirectoryOs, type DirectoryOs } from "./apps-directory-route";
 import {
   createFeatureReader,
+  NO_FEATURES,
   type FeatureReader,
   type InboundFeatures,
 } from "./features";
@@ -48,49 +60,100 @@ export function createOsWiring(deps: {
   let keptWhoami: { at: number; value: WhoamiRead } | null = null;
   // One features read per isolate, kept at most five minutes.
   let featureReader: FeatureReader | null = null;
+  // Bumped by every revocation; a call started in an older one is late.
+  let generation = 0;
   const revoke = () => {
+    generation++;
     forgetCredential(cache);
     keptWhoami = null;
     featureReader = null;
   };
+  /** The shared cache as seen by a call that started in generation `g`:
+   * once a revocation has happened since, it records nothing but the
+   * credential-wide rate-limit block. */
+  const cacheFor = (g: number): Cache =>
+    new Proxy(cache, {
+      get(target, prop) {
+        if (prop === "set")
+          return (key: string, value: Parameters<Cache["set"]>[1]) => {
+            if (g === generation || key === RATE_LIMIT_KEY)
+              target.set(key, value);
+            return target;
+          };
+        const member = Reflect.get(target, prop, target);
+        return typeof member === "function" ? member.bind(target) : member;
+      },
+    });
+  /** Runs one read in the current generation; an ok answer that arrives
+   * after a revocation is returned as "unauthorized". */
+  async function current<T>(
+    run: (g: number) => Promise<ContextResult<T>>,
+  ): Promise<ContextResult<T>> {
+    const g = generation;
+    const value = await run(g);
+    return g !== generation && value.state === "ok"
+      ? { state: "unauthorized" }
+      : value;
+  }
   const refusing = { ...client, now, onRefused: revoke };
   return {
     /** Drops everything held for the credential (see the header). */
     revoke,
     /** The context reader. `fresh` bypasses cached lists. */
-    reader: (config: ContextConfig, fresh: boolean) =>
-      createCachedReader(createContextClient(config, client), cache, {
-        fresh,
-        now,
-        onRefused: revoke,
-      }),
+    reader(config: ContextConfig, fresh: boolean): ContextReader {
+      const at = (g: number) =>
+        createCachedReader(createContextClient(config, client), cacheFor(g), {
+          fresh,
+          now,
+          onRefused: revoke,
+        });
+      return {
+        workspaces: () => current((g) => at(g).workspaces()),
+        projects: (id) => current((g) => at(g).projects(id)),
+        apps: (id) => current((g) => at(g).apps!(id)),
+        appsDirectory: (id, project, locale) =>
+          current((g) => at(g).appsDirectory!(id, project, locale)),
+      };
+    },
     /** The apps directory (keys carry the OS origin and a one-way
      * fingerprint of the credential). */
-    directory: (config: ContextConfig) =>
-      createDirectoryOs({ config, cache, ...refusing }),
+    directory(config: ContextConfig): DirectoryOs {
+      const at = (g: number) =>
+        createDirectoryOs({ config, cache: cacheFor(g), ...refusing });
+      return {
+        capability: () => current((g) => at(g).capability()),
+        directory: (id, project, locale) =>
+          current((g) => at(g).directory(id, project, locale)),
+      };
+    },
     submissions: (config: ContextConfig) =>
       createGuardedSubmissions(createSubmissionClient(config, client), cache, {
         now,
         onRefused: revoke,
       }),
-    /** This credential's optional-feature flags, read before each send. */
-    features(config: ContextConfig): Promise<InboundFeatures> {
+    /** This credential's optional-feature flags, read before each send.
+     * A read that straddles a revocation answers no features. */
+    async features(config: ContextConfig): Promise<InboundFeatures> {
+      const g = generation;
       featureReader ??= createFeatureReader(
-        createWhoamiLoader(config, cache, refusing),
+        createWhoamiLoader(config, cacheFor(g), refusing),
         { now },
       );
-      return featureReader.read();
+      const value = await featureReader.read();
+      return g === generation ? value : NO_FEATURES;
     },
     /** The whoami read for the Connections line. `fresh` skips the kept
      * answer. */
     whoami(config: ContextConfig, fresh: boolean): () => Promise<WhoamiRead> {
-      const read = createWhoamiReader(config, cache, refusing);
       return async () => {
         const at = now();
         if (!fresh && keptWhoami && at - keptWhoami.at <= WHOAMI_KEEP_MS)
           return keptWhoami.value;
-        const value = await read();
-        // A refusal has already revoked (and so cleared keptWhoami).
+        const g = generation;
+        const value = await createWhoamiReader(config, cacheFor(g), refusing)();
+        if (g !== generation)
+          // Revoked meanwhile (possibly by this very read): keep nothing.
+          return value.state === "ok" ? { state: "unauthorized" } : value;
         keptWhoami = value.state === "ok" ? { at, value } : null;
         return value;
       };

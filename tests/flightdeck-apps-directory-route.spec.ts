@@ -628,6 +628,148 @@ test.describe("credential-wide revocation across every reader of the isolate", (
   });
 });
 
+// Review round 3: a read that STARTED before the revocation and succeeds
+// AFTER it (the OS answered before refusing) must not be returned as ok, and
+// must not repopulate any cache or kept answer.
+test.describe("in-flight reads that straddle a revocation are discarded", () => {
+  const config = { baseUrl: OS, token: TOKEN_A };
+  const WORKSPACES = {
+    integrationId: "atlas",
+    workspaces: [{ id: WS, label: "TE Ops", enabled: true, isDefault: true }],
+    generatedAt: "2026-09-26T08:00:00.000Z",
+  };
+  /** A fake OS whose answer is decided when a call ARRIVES (before or after
+   * `revoke`), but whose calls matching `hold` are only delivered on
+   * `release()`. */
+  function straddlingOs(hold: (u: URL) => boolean) {
+    let refusal = 0;
+    let calls = 0;
+    const held: (() => void)[] = [];
+    const inner = fakeOs();
+    const fetch = async (url: string) => {
+      calls++;
+      const u = new URL(url);
+      const answer = refusal
+        ? jsonResponse({ error: "revoked" }, refusal)
+        : u.pathname === "/api/inbound/v1/context/workspaces"
+          ? jsonResponse(WORKSPACES)
+          : u.pathname === "/api/inbound/v1/whoami"
+            ? jsonResponse({
+                ...whoamiBody({ "apps-directory": 1 }),
+                features: { decisionNote: true },
+              })
+            : await inner.fetch(url);
+      if (!refusal && hold(u))
+        await new Promise<void>((resolve) => held.push(resolve));
+      return answer;
+    };
+    const flush = () => new Promise((r) => setTimeout(r, 5));
+    return {
+      fetch,
+      calls: () => calls,
+      revoke: (status: number) => (refusal = status),
+      /** Waits (at most a second) until a matching call is being held. */
+      held: async () => {
+        for (let i = 0; i < 200 && !held.length; i++) await flush();
+        return held.length;
+      },
+      release: async () => {
+        held.splice(0).forEach((r) => r());
+        await flush();
+      },
+      flush,
+    };
+  }
+  const isWhoami = (u: URL) => u.pathname === "/api/inbound/v1/whoami";
+  const directoryRoute = (wiring: ReturnType<typeof createOsWiring>) =>
+    createAppsDirectoryRoute({
+      authorize: allowed,
+      os: () => wiring.directory(config),
+      origin: () => OS,
+      selection: saved,
+    });
+  /** The refusal another request sees while the held read is in flight. */
+  const refuseElsewhere = async (
+    os: ReturnType<typeof straddlingOs>,
+    wiring: ReturnType<typeof createOsWiring>,
+  ) => {
+    os.revoke(401);
+    expect((await wiring.reader(config, true).workspaces()).state).toBe(
+      "unauthorized",
+    );
+  };
+
+  test("a late directory capability is not served or cached", async () => {
+    const os = straddlingOs(isWhoami);
+    const cache: Cache = new Map();
+    const wiring = createOsWiring({ cache, fetch: os.fetch });
+    const late = wiring.directory(config).capability();
+    expect(await os.held()).toBe(1);
+    await refuseElsewhere(os, wiring);
+    await os.release();
+    expect((await late).state).not.toBe("ok");
+    const before = os.calls();
+    const next = await wiring.directory(config).capability();
+    expect(next.state).not.toBe("ok");
+    expect(os.calls()).toBeGreaterThan(before); // it asked the OS again
+    expect([...cache.keys()].filter((k) => k !== "rate-limit")).toEqual([]);
+  });
+
+  test("a late directory list is not served or cached", async () => {
+    const os = straddlingOs((u) => u.pathname.endsWith("/apps/directory"));
+    const wiring = createOsWiring({ cache: new Map(), fetch: os.fetch });
+    const late = directoryRoute(wiring).GET(request("de"));
+    expect(await os.held()).toBe(1);
+    await refuseElsewhere(os, wiring);
+    await os.release();
+    const lateView = await body(await late);
+    expect(lateView.state).not.toBe("ok");
+    expect(lateView.apps).toEqual([]);
+    const next = await body(await directoryRoute(wiring).GET(request("de")));
+    expect(next.state).not.toBe("ok");
+  });
+
+  test("a late context list is not served or cached", async () => {
+    const os = straddlingOs(
+      (u) => u.pathname === "/api/inbound/v1/context/workspaces",
+    );
+    const wiring = createOsWiring({ cache: new Map(), fetch: os.fetch });
+    const late = wiring.reader(config, false).workspaces();
+    expect(await os.held()).toBe(1);
+    os.revoke(401);
+    expect((await wiring.whoami(config, true)()).state).toBe("unauthorized");
+    await os.release();
+    expect((await late).state).not.toBe("ok");
+    expect((await wiring.reader(config, false).workspaces()).state).toBe(
+      "unauthorized",
+    );
+  });
+
+  test("a late Connections whoami is not returned ok or kept", async () => {
+    const os = straddlingOs(isWhoami);
+    const wiring = createOsWiring({ cache: new Map(), fetch: os.fetch });
+    const late = wiring.whoami(config, true)();
+    expect(await os.held()).toBe(1);
+    await refuseElsewhere(os, wiring);
+    await os.release();
+    expect((await late).state).not.toBe("ok");
+    expect((await wiring.whoami(config, false)()).state).toBe("unauthorized");
+  });
+
+  test("a late features read answers no features and is not kept", async () => {
+    const os = straddlingOs(isWhoami);
+    const wiring = createOsWiring({ cache: new Map(), fetch: os.fetch });
+    const late = wiring.features(config);
+    expect(await os.held()).toBe(1);
+    await refuseElsewhere(os, wiring);
+    await os.release();
+    expect(Object.values(await late).some(Boolean)).toBe(false);
+    const before = os.calls();
+    await wiring.features(config);
+    expect(os.calls()).toBeGreaterThan(before);
+  });
+});
+
 // Review round 2: the hook must mask, DURING RENDER, a snapshot that belongs
 // to another selection; the passive effect that clears it runs only after
 // that render has committed.

@@ -412,7 +412,8 @@ export function createCachedReader(
       : {}),
   };
 }
-const RATE_LIMIT_KEY = "rate-limit";
+/** The credential-wide rate-limit block's key in the isolate cache. */
+export const RATE_LIMIT_KEY = "rate-limit";
 /** The oldest a cached OS answer may be when it is served. */
 export const CACHE_MAX_AGE_MS = 5 * 60_000;
 /** Deletes every cache key under one credential's prefix (apps-32: a
