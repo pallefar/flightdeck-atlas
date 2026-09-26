@@ -23,6 +23,7 @@ export default function OsAppAbout({ id }: { id: string }) {
       id={id}
       view={view}
       confirming={context.saving}
+      confirmError={context.error}
       onConfirm={(selection) =>
         void context
           .choose({
@@ -31,7 +32,7 @@ export default function OsAppAbout({ id }: { id: string }) {
           })
           // Same selection, so the directory hook will not refetch by
           // itself: read it again now that it is saved.
-          .then(() => directory.reload())
+          .then((saved) => { if (saved) return directory.reload(); })
       }
     />
   );

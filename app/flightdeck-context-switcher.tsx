@@ -151,9 +151,9 @@ async function refresh(options: { keepError?: boolean } = {}) {
       });
   }
 }
-async function choose(next: SelectionRequest) {
+async function choose(next: SelectionRequest): Promise<boolean> {
   // One save at a time: a second PUT could land on the server first.
-  if (snapshot.saving) return;
+  if (snapshot.saving) return false;
   const mine = ++generation;
   update({ saving: true, pending: next, error: "" });
   try {
@@ -163,13 +163,13 @@ async function choose(next: SelectionRequest) {
       body: JSON.stringify(next),
     });
     const raw: unknown = await response.json().catch(() => null);
-    if (mine !== generation) return;
+    if (mine !== generation) return false;
     const body = contextResponseSchema.safeParse(raw);
     if (response.ok && body.success) {
       apply(body.data);
       update({ saving: false, pending: null });
       window.dispatchEvent(new Event(PREFERENCES_CHANGED_EVENT));
-      return;
+      return true;
     }
     const failure = contextErrorSchema.safeParse(raw);
     update({
@@ -180,7 +180,7 @@ async function choose(next: SelectionRequest) {
         : "The FlightDeck context could not be saved. Try again.",
     });
   } catch {
-    if (mine !== generation) return;
+    if (mine !== generation) return false;
     update({
       saving: false,
       pending: null,
@@ -189,6 +189,7 @@ async function choose(next: SelectionRequest) {
   }
   // Show what the OS now says (for example a workspace disabled meanwhile).
   void refresh({ keepError: true });
+  return false;
 }
 function subscribe(listener: () => void) {
   listeners.add(listener);

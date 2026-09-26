@@ -27,6 +27,7 @@ export function FlightdeckAppsSection({
   onRetry,
   onConfirm,
   confirming = false,
+  confirmError,
   gridRef,
 }: {
   view: SectionView;
@@ -40,6 +41,7 @@ export function FlightdeckAppsSection({
   onConfirm?: (selection: OsSelection) => void;
   /** A selection save is in flight. */
   confirming?: boolean;
+  confirmError?: string;
   /** The card grid, for the launcher's anime.js entrance (lib/motion is
    * wired there, so this file also renders outside a Vite build). */
   gridRef?: Ref<HTMLDivElement>;
@@ -52,6 +54,7 @@ export function FlightdeckAppsSection({
       data-state={view.kind === "message" ? view.key : view.kind}
     >
       <h3 className="eyebrow">{t("apps.fd.heading")}</h3>
+      {confirmError && <p role="alert">{confirmError}</p>}
       {view.kind === "loading" ? (
         <p className="hub-muted">{t("apps.fd.loading")}</p>
       ) : view.kind === "message" ? (

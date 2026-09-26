@@ -16,6 +16,7 @@ export function OsAppAboutView({
   view,
   onConfirm,
   confirming = false,
+  confirmError,
 }: {
   id: string;
   view: SectionView;
@@ -24,6 +25,7 @@ export function OsAppAboutView({
   onConfirm?: (selection: OsSelection) => void;
   /** A selection save is in flight. */
   confirming?: boolean;
+  confirmError?: string;
 }) {
   const t = useT();
   const app = view.kind === "cards" ? view.apps.find((a) => a.id === id) : undefined;
@@ -34,6 +36,7 @@ export function OsAppAboutView({
           this view, and a full load of / is what Atlas's shell expects. */}
       {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
       <a href="/">← {t("apps.about.back")}</a>
+      {confirmError && <p role="alert">{confirmError}</p>}
       {view.kind === "loading" ? (
         <p className="hub-muted">{t("apps.fd.loading")}</p>
       ) : view.kind === "message" ? (

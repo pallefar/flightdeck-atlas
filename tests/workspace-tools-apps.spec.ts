@@ -323,6 +323,16 @@ test.describe("FlightdeckAppsSection states", () => {
     ).toMatchObject({ key: "apps.fd.state.project_not_available" });
   });
 
+  test("a failed selection save is visible beside the launcher confirmation", () => {
+    const html = section(
+      { ...base, directory: { loading: false, state: "no_project_selected", data: null } },
+      "en",
+      { confirmError: "The selection could not be saved." },
+    );
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("The selection could not be saved.");
+  });
+
   test("no confirm while the context is not freshly confirmed by the OS", () => {
     const view = flightdeckSection({
       ...base,
@@ -459,8 +469,15 @@ test.describe("/apps/os/<id> (minimal until apps-34)", () => {
       new URL("../app/apps/os/[id]/os-app-about.tsx", import.meta.url),
       "utf8",
     );
-    expect(src).toMatch(/onConfirm=\{[\s\S]*context\s*\.choose\(\{[\s\S]*osWorkspaceId: selection\.osWorkspaceId,[\s\S]*osProjectId: selection\.osProjectId,[\s\S]*\.then\(\(\) => directory\.reload\(\)\)/);
+    expect(src).toMatch(/onConfirm=\{[\s\S]*context\s*\.choose\(\{[\s\S]*osWorkspaceId: selection\.osWorkspaceId,[\s\S]*osProjectId: selection\.osProjectId,[\s\S]*\.then\(\(saved\) => \{ if \(saved\) return directory\.reload\(\); \}\)/);
     expect(src).toMatch(/confirming=\{context\.saving\}/);
+  });
+
+  test("a failed selection save is visible on About even without the sidebar", () => {
+    const props = { id: "maps", view: flightdeckSection(unsaved), confirmError: "The selection could not be saved." };
+    const html = inLocale("en", createElement(OsAppAboutView, props));
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("The selection could not be saved.");
   });
 
   test("an unlisted app and a failed directory say so honestly", () => {
@@ -535,7 +552,7 @@ const isolated = /^http:\/\/(localhost|127\.0\.0\.1):\d+/.test(baseUrl) &&
   !/:(4173|5173)\b/.test(baseUrl);
 test.describe("the open menu: saving an unsaved default project", () => {
   test.skip(!isolated, "needs ATLAS_BASE_URL on an isolated, non-live port");
-  test("'Use this project' PUTs the shown selection, then the cards load", async ({ browser }) => {
+  test("'Use this project' shows a refused save and loads cards after a successful retry", async ({ browser }) => {
     const context = await browser.newContext({ baseURL: baseUrl, reducedMotion: "reduce" });
     const page = await context.newPage();
     let saved = false;
@@ -552,6 +569,10 @@ test.describe("the open menu: saving an unsaved default project", () => {
     await page.route("**/api/flightdeck/context", async (r) => {
       if (r.request().method() === "PUT") {
         puts.push(r.request().postDataJSON());
+        if (puts.length === 1) {
+          await r.fulfill({ status: 409, json: { state: "workspace_disabled", error: "The selection changed. Try again." } });
+          return;
+        }
         saved = true;
       }
       await r.fulfill({ json: ctx });
@@ -612,8 +633,12 @@ test.describe("the open menu: saving an unsaved default project", () => {
     await page.getByRole("button", { name: "Open apps", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Your apps" });
     await dialog.getByRole("button", { name: en["apps.fd.confirm"] }).click();
+    await expect(dialog.getByRole("alert")).toContainText("The selection changed. Try again.");
+    await expect(dialog.locator('[data-app-id="maps"]')).toHaveCount(0);
+    await dialog.getByRole("button", { name: en["apps.fd.confirm"] }).click();
     await expect(dialog.locator('[data-app-id="maps"]')).toBeVisible();
-    expect(puts).toEqual([selected]);
+    await expect(dialog.getByRole("alert")).toHaveCount(0);
+    expect(puts).toEqual([selected, selected]);
     await context.close();
   });
 });
