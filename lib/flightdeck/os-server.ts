@@ -10,6 +10,7 @@ import {
 } from "./context-client";
 import { NO_FEATURES, type InboundFeatures } from "./features";
 import { createOsWiring } from "./os-wiring";
+import { adminCardConfig } from "./admin-card";
 
 // One cache per isolate for the context lists and for the credential-wide
 // rate limit, shared by the context and onboarding routes: they spend the
@@ -70,6 +71,17 @@ export function osWhoami(fresh: boolean): (() => Promise<WhoamiRead>) | null {
  */
 export function osOrigin(): string {
   return (env.ATLAS_FLIGHTDECK_URL ?? "").trim().replace(/\/+$/, "");
+}
+/** The reserved 'FlightDeck Admin' card's config: the BROWSER-FACING admin
+ * url (ATLAS_FLIGHTDECK_ADMIN_URL — distinct from ATLAS_FLIGHTDECK_URL, which
+ * may be a loopback transport only this Worker can reach) and the Atlas role
+ * ids shown the card (ATLAS_FLIGHTDECK_ADMIN_ROLES). No credential is read.
+ * null when the url is unset or refused (not https, nor http on loopback). */
+export function osAdminCardConfig() {
+  return adminCardConfig({
+    url: env.ATLAS_FLIGHTDECK_ADMIN_URL,
+    roles: env.ATLAS_FLIGHTDECK_ADMIN_ROLES,
+  });
 }
 const INSTALLATION_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** Scopes Atlas's link records. Unset means the one local installation;

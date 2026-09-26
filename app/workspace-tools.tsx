@@ -30,6 +30,7 @@ import {
   filterFlightdeckApps,
   type FlightdeckAppLink,
 } from "@/lib/flightdeck/context";
+import { isReservedAppId } from "@/lib/flightdeck/admin-card";
 export type WorkspaceData = {
   email: string;
   capacity: { email: string; weeklyHours: number; leaveDays: string[] }[];
@@ -391,31 +392,48 @@ export function AppAdministration() {
         </p>
       )}
       <div className="suite-card-grid">
-        {w.data?.apps.map((a) => (
-          <button
-            className="suite-card app-admin-card"
-            key={a.id}
-            onClick={() => setDraft(a)}
-          >
-            <AppIcon app={a} />
-            <div>
-              <h3>{a.name}</h3>
-              <p>{a.description}</p>
-              <small>
-                {a.enabled ? "Enabled" : "Disabled"} ·{" "}
-                {a.audience === "all"
-                  ? "All admitted members"
-                  : "Selected members"}
-              </small>
-              <small>
-                {a.login === "flightdeck"
-                  ? "FlightDeck SSO pending"
-                  : "External login"}
-              </small>
+        {w.data?.apps.map((a) =>
+          isReservedAppId(a.id) ? (
+            // Built in and set by the operator's environment
+            // (ATLAS_FLIGHTDECK_ADMIN_URL); the server refuses edits to it.
+            <div className="suite-card app-admin-card" key={a.id}>
+              <AppIcon app={a} />
+              <div>
+                <h3>{a.name}</h3>
+                <p>{a.description}</p>
+                <small>
+                  Built in · shown to Super Admins and the roles set in
+                  ATLAS_FLIGHTDECK_ADMIN_ROLES
+                </small>
+                <small>FlightDeck checks access on arrival</small>
+              </div>
             </div>
-            <Settings2 size={17} />
-          </button>
-        ))}
+          ) : (
+            <button
+              className="suite-card app-admin-card"
+              key={a.id}
+              onClick={() => setDraft(a)}
+            >
+              <AppIcon app={a} />
+              <div>
+                <h3>{a.name}</h3>
+                <p>{a.description}</p>
+                <small>
+                  {a.enabled ? "Enabled" : "Disabled"} ·{" "}
+                  {a.audience === "all"
+                    ? "All admitted members"
+                    : "Selected members"}
+                </small>
+                <small>
+                  {a.login === "flightdeck"
+                    ? "FlightDeck SSO pending"
+                    : "External login"}
+                </small>
+              </div>
+              <Settings2 size={17} />
+            </button>
+          ),
+        )}
       </div>
       {draft && (
         <form

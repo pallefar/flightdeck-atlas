@@ -12,7 +12,11 @@ import {
   type AppEntry,
 } from "@/lib/collaboration";
 import { keptSelection } from "@/lib/flightdeck/context-route";
-import { osOrigin } from "@/lib/flightdeck/os-server";
+import { osAdminCardConfig, osOrigin } from "@/lib/flightdeck/os-server";
+import {
+  catalogWithAdminCard,
+  isReservedAppId,
+} from "@/lib/flightdeck/admin-card";
 import { markNoticeRead, noticesFor } from "@/lib/flightdeck/notices";
 export const dynamic = "force-dynamic";
 export async function GET() {
@@ -23,11 +27,19 @@ export async function GET() {
       teams = await teamList(),
       people = await directory(a.access);
     const rows = await db.prepare("SELECT * FROM atlas_apps").all();
-    const catalog = rows.results.map((r) => ({
-      ...JSON.parse(r.data as string),
-      id: r.id,
-      revision: r.revision,
-    })) as AppEntry[];
+    // A stored row under a reserved id (see POST) is dropped, and the
+    // built-in 'FlightDeck Admin' card is added only for a viewer who passes
+    // its visibility heuristic (lib/flightdeck/admin-card.ts) — the OS
+    // re-checks access on arrival.
+    const catalog = catalogWithAdminCard(
+      rows.results.map((r) => ({
+        ...JSON.parse(r.data as string),
+        id: r.id,
+        revision: r.revision,
+      })) as AppEntry[],
+      a.access,
+      osAdminCardConfig(),
+    );
     if (!catalog.some((x) => x.id === "flightdeck"))
       catalog.push(flightdeckApp);
     // Atlas ships a FEATURED built-in "FlightDeck OS" entry whose `url` is ""
@@ -44,6 +56,7 @@ export async function GET() {
     const apps = catalog
       .filter(
         (x) =>
+          isReservedAppId(x.id) ||
           a.access.superAdmin ||
           (x.enabled &&
             (x.audience === "all" ||
@@ -210,6 +223,14 @@ export async function POST(req: Request) {
       );
     if (b.action !== "app" && b.action !== "team")
       return json({ error: "Unknown operation." }, 400);
+    // Reserved built-in ids (the 'FlightDeck Admin' card) are configured by
+    // the operator's environment, never by a catalog edit: refused, so no
+    // row can create or override them.
+    if (b.action === "app" && isReservedAppId(b.id))
+      return json(
+        { error: "This app is built in and cannot be changed here." },
+        400,
+      );
     const data =
       b.action === "app" ? appSchema.parse(b.data) : teamSchema.parse(b.data);
     const people = await directory(a.access);
