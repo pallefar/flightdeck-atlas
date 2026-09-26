@@ -283,4 +283,10 @@ export const de: Record<MessageKey, string> = {
   "decks.export.withheld":
     "{count} nicht exportiert: Ein Quellprojekt ist für Sie nicht mehr verfügbar, die Präsentation war nicht lesbar oder die Dateigrenze war erreicht. Sie stehen in der Datei unter \"withheld\".",
   "decks.export.failed": "Der Export ist fehlgeschlagen. Bitte erneut versuchen.",
+  "decks.link.legacy":
+    "Dies ist der bisherige Folien-Editor. Die Präsentationen dieses Projekts öffnen sich jetzt in Presentation Studio in FlightDeck.",
+  "decks.link.open": "In Presentation Studio öffnen",
+  "decks.link.notLinked": "Nicht mit FlightDeck verknüpft",
+  "decks.link.notLinkedHint":
+    "Presentation Studio öffnet das FlightDeck-Projekt, mit dem dieses Projekt verknüpft ist. Senden Sie das Projekt zuerst über seine FlightDeck-Karte an FlightDeck.",
 };

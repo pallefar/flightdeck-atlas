@@ -191,9 +191,6 @@ export default function Atlas() {
     [query, setQuery] = useState(""),
     [filter, setFilter] = useState("All projects"),
     [error, setError] = useState(""),
-    [presentationProject, setPresentationProject] = useState<string | null>(
-      null,
-    ),
     [editing, setEditing] = useState<Project | null>(null),
     [creating, setCreating] = useState(false),
     [saving, setSaving] = useState(false),
@@ -845,11 +842,7 @@ export default function Atlas() {
                 onSave={save}
               />
             ) : view === "presentations" ? (
-              <PresentationStudio
-                projects={projects}
-                demo={demo}
-                initialProjectId={presentationProject}
-              />
+              <PresentationStudio projects={projects} demo={demo} />
             ) : view === "today" ? (
               <Today
                 projects={allData}

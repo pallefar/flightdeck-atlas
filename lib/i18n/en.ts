@@ -282,6 +282,14 @@ export const en = {
   "decks.export.withheld":
     "{count} not exported: a source project is no longer available to you, the presentation could not be read, or the file limit was reached. They are listed under \"withheld\" in the file.",
   "decks.export.failed": "The export failed. Try again.",
+  // Presentations (deck-atlas-link): the project Slides tool's link to
+  // Presentation Studio on the linked FlightDeck project.
+  "decks.link.legacy":
+    "This is the legacy slide editor. This project's presentations now open in Presentation Studio in FlightDeck.",
+  "decks.link.open": "Open in Presentation Studio",
+  "decks.link.notLinked": "Not linked to FlightDeck",
+  "decks.link.notLinkedHint":
+    "Presentation Studio opens on the FlightDeck project this project is linked to. Send the project to FlightDeck from its FlightDeck card first.",
 } as const;
 
 export type MessageKey = keyof typeof en;

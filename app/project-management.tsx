@@ -12,6 +12,7 @@ import ProjectStrategy from "./project-strategy";
 import ProjectDelivery from "./project-delivery";
 import ProjectWorkspace from "./project-workspace";
 import PresentationStudio from "./presentation-studio";
+import FlightdeckSlidesLink from "./flightdeck-slides-link";
 import WorkStudio, { LiveWorkStatus } from "./work-studio";
 import FeatureHelp from "./feature-help";
 
@@ -318,12 +319,17 @@ export default function ProjectManagement({
                     viewerEmail={viewerEmail}
                   />
                 ) : tool === "slides" ? (
-                  <PresentationStudio
-                    projects={[project]}
-                    scopedProjectId={project.id}
-                    demo={demo}
-                    initialProjectId={project.id}
-                  />
+                  <>
+                    {superAdmin && !demo && (
+                      <FlightdeckSlidesLink projectId={project.id} />
+                    )}
+                    <PresentationStudio
+                      projects={[project]}
+                      scopedProjectId={project.id}
+                      demo={demo}
+                      initialProjectId={project.id}
+                    />
+                  </>
                 ) : (
                   <WorkStudio
                     {...props}
