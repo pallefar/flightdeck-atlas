@@ -110,6 +110,7 @@ test("context transport sends only the bearer credential and maps every OS outco
   expect(seen[0].init.headers).toEqual({
     Authorization: `Bearer ${FAKE_CREDENTIAL}`,
     Accept: "application/json",
+    "X-FlightDeck-Contract": ">=1 <2",
   });
   expect(Object.keys(seen[0].init)).not.toContain("credentials");
 

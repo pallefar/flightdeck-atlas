@@ -746,7 +746,7 @@ test("a provenance entry saved ahead of its value never labels text the user wro
   expect(bare.onboarding?.prefill).toBeUndefined();
 });
 
-test("submit() POSTs the envelope with only the bearer credential and never X-Workspace-Id", async () => {
+test("submit() POSTs the envelope with only the bearer credential, the contract range and never X-Workspace-Id", async () => {
   const seen: { url: string; init: RequestInit }[] = [];
   let reply: () => Response | Promise<Response> = () =>
     fromFixture(os.submit.accepted);
@@ -778,6 +778,7 @@ test("submit() POSTs the envelope with only the bearer credential and never X-Wo
   expect(seen[0].init.headers).toEqual({
     Authorization: `Bearer ${FAKE_CREDENTIAL}`,
     Accept: "application/json",
+    "X-FlightDeck-Contract": ">=1 <2",
     "Content-Type": "application/json",
   });
   expect(
@@ -902,6 +903,7 @@ test("readSubmission() reads back only this submission, maps each OS state and d
   expect(seen[0].init.headers).toEqual({
     Authorization: `Bearer ${FAKE_CREDENTIAL}`,
     Accept: "application/json",
+    "X-FlightDeck-Contract": ">=1 <2",
   });
   const promoted = await read(() =>
     jsonResponse(200, {
