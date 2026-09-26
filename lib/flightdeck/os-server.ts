@@ -39,6 +39,12 @@ export function osDirectory() {
   const c = config();
   return c ? wiring.directory(c) : null;
 }
+/** The CRM reads (crm-40), never cached, or null when FlightDeck is not
+ * configured. Same credential-wide rate limit and revocation. */
+export function osCrm() {
+  const c = config();
+  return c ? wiring.crm(c) : null;
+}
 export function osSubmissions() {
   const c = config();
   return c ? wiring.submissions(c) : null;

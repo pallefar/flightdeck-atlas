@@ -21,6 +21,7 @@
 import {
   createCachedReader,
   createContextClient,
+  createCrmClient,
   createGuardedSubmissions,
   createSubmissionClient,
   createWhoamiLoader,
@@ -30,6 +31,8 @@ import {
   type ContextConfig,
   type ContextReader,
   type ContextResult,
+  type CrmClient,
+  type CrmReadResult,
   type Fetcher,
   type WhoamiRead,
 } from "./context-client";
@@ -128,6 +131,42 @@ export function createOsWiring(deps: {
         capability: () => current((g) => at(g).capability()),
         directory: (id, project, locale) =>
           current((g) => at(g).directory(id, project, locale)),
+      };
+    },
+    /** The CRM reads (crm-40). Never cached: every card poll asks the OS,
+     * which verifies the credential twice per read. They spend the same
+     * credential-wide rate limit (a recorded 429 is honoured without asking
+     * the OS), a 401 revokes everything held for the credential, and an ok
+     * answer that straddles a revocation comes back "unauthorized". A 403
+     * (no read:crm) is about this scope only and revokes nothing. */
+    crm(config: ContextConfig): CrmClient {
+      const crmClient = createCrmClient(config, client);
+      const guard = <T,>(
+        read: () => Promise<CrmReadResult<T>>,
+      ): Promise<CrmReadResult<T>> =>
+        current(async (g): Promise<CrmReadResult<T>> => {
+          const started = now();
+          const blocked = cache.get(RATE_LIMIT_KEY);
+          if (blocked && blocked.until > started)
+            return {
+              state: "rate_limited",
+              retryAfter: Math.max(
+                1,
+                Math.ceil((blocked.until - started) / 1000),
+              ),
+            };
+          const value = await read();
+          if (value.state === "unauthorized") revoke();
+          else if (value.state === "rate_limited")
+            cacheFor(g).set(RATE_LIMIT_KEY, {
+              until: now() + (value.retryAfter ?? 60) * 1000,
+            });
+          return value;
+        });
+      return {
+        projection: (ws, project) =>
+          guard(() => crmClient.projection(ws, project)),
+        revision: (ws, project) => guard(() => crmClient.revision(ws, project)),
       };
     },
     submissions: (config: ContextConfig) =>

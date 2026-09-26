@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "projectId": "nordwind-rollout",
+  "revision": 17,
+  "companies": [
+    {
+      "id": "co_01",
+      "name": "Nordwind Logistik GmbH",
+      "domain": "nordwind-logistik.example"
+    },
+    {
+      "id": "co_02",
+      "name": "Nordwind Holding AG",
+      "domain": "nordwind-holding.example"
+    },
+    {
+      "id": "co_03",
+      "name": "Hafenblick Consulting",
+      "domain": null
+    },
+    {
+      "id": "co_04",
+      "name": "3M Beispiel GmbH",
+      "domain": "beispiel-3m.example"
+    },
+    {
+      "id": "co_05",
+      "name": "Studio 54 Events",
+      "domain": "studio54.example"
+    }
+  ],
+  "companiesOverflow": 2,
+  "primaryDeal": {
+    "id": "deal_07",
+    "stageName": "Proposal",
+    "stageKind": "open",
+    "status": "open",
+    "version": 4
+  },
+  "otherOpenDealCount": 1,
+  "contacts": [
+    {
+      "initials": "anna.schmidt@nordwind-logistik.example",
+      "role": "champion"
+    },
+    {
+      "initials": "J. v. B.",
+      "role": "decision_maker"
+    },
+    {
+      "initials": "M. K.",
+      "role": "influencer"
+    },
+    {
+      "initials": "L. O.",
+      "role": "influencer"
+    },
+    {
+      "initials": "P. W.",
+      "role": "user"
+    }
+  ],
+  "contactsOverflow": 1,
+  "stages": [
+    {
+      "id": "st_lead",
+      "name": "Qualified",
+      "kind": "open",
+      "position": 0
+    },
+    {
+      "id": "st_disc",
+      "name": "Discovery",
+      "kind": "open",
+      "position": 1
+    },
+    {
+      "id": "st_prop",
+      "name": "Proposal",
+      "kind": "open",
+      "position": 2
+    },
+    {
+      "id": "st_nego",
+      "name": "Negotiation",
+      "kind": "open",
+      "position": 3
+    },
+    {
+      "id": "st_lost",
+      "name": "Lost",
+      "kind": "lost",
+      "position": 4
+    },
+    {
+      "id": "st_won",
+      "name": "Won",
+      "kind": "won",
+      "position": 4
+    }
+  ]
+}
