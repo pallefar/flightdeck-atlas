@@ -244,6 +244,138 @@ button.suite-card:hover {
   top: 8px;
   color: #d97500;
 }
+/* apps-33: the FlightDeck OS section's cards (components/AppCard.tsx). A
+   locked card is quieter through its surface and border, never through
+   opacity: its text keeps full contrast. Its one link is stretched over the
+   card with ::after, so a click anywhere on it opens the bridge page. */
+.app-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+  margin: 12px 0 18px;
+}
+.app-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 14px 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--card);
+  color: var(--card-foreground);
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
+}
+.app-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px #0e233622;
+}
+.app-card.locked {
+  background: var(--muted);
+  border-style: dashed;
+  border-color: var(--input);
+  color: var(--foreground);
+}
+.app-card.locked:hover {
+  box-shadow: none;
+}
+.app-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding-right: 22px;
+}
+.app-card .app-icon {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+}
+.app-card.locked .app-monogram {
+  background: var(--secondary);
+  color: var(--foreground);
+  box-shadow: none;
+}
+.app-card-title {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.app-card-line,
+.app-card-note,
+.app-card-reason {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.app-card-note {
+  color: var(--muted-foreground);
+}
+.app-card-reason {
+  color: var(--foreground);
+}
+.app-card-lock {
+  display: inline;
+  vertical-align: -2px;
+  margin-right: 5px;
+}
+.app-card-stretch {
+  color: inherit;
+  text-decoration: none;
+}
+.app-card-stretch::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.app-card.locked:hover .app-card-stretch {
+  text-decoration: underline;
+}
+.app-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 4px;
+}
+.app-card-action {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.app-card-action.primary {
+  color: var(--foreground);
+  text-decoration-color: var(--primary);
+  text-decoration-thickness: 2px;
+}
+.app-card .app-pin {
+  z-index: 1;
+}
+.app-card a:focus-visible,
+.app-card button:focus-visible,
+.flightdeck-apps-message button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.flightdeck-apps-message {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  margin: 10px 0 16px;
+}
+.flightdeck-apps-message p {
+  margin: 0;
+}
 .app-admin-card {
   display: flex;
   align-items: center;

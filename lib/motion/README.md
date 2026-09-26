@@ -46,9 +46,10 @@ here, or the two apps stop sharing one motion language.
 
 ## What Atlas animates with it
 
-**Nothing yet.** Every motion Atlas has is its own CSS (the table below). The layer is here so
-that JS-driven motion in Atlas, when it comes, speaks the OS's language. Until something imports
-it, the bundler leaves it and animejs out of Atlas's bundle.
+**One entrance.** The 9-dot menu's FlightDeck OS app cards (`app/workspace-tools.tsx`, apps-33)
+arrive with `useArrive` (`atlas-arrive`, staggered) when a list appears. Like every helper it
+does nothing under reduced motion, in automation or with motion switched off. Every other motion
+Atlas has is its own CSS (the table below).
 
 The two helpers Atlas once called went when the OS matched Atlas:
 

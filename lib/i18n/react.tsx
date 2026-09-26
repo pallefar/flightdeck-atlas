@@ -1,4 +1,7 @@
 "use client";
+/** @jsxImportSource react */
+// (The pragma keeps React's own JSX runtime when a Playwright spec renders
+// the provider in Node, as tests/workspace-tools-apps.spec.ts does.)
 import { createContext, useCallback, useContext } from "react";
 import {
   DEFAULT_LOCALE,
