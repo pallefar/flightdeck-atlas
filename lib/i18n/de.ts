@@ -357,4 +357,6 @@ export const de: Record<MessageKey, string> = {
   "apps.about.version": "Version {version}",
   "apps.about.notListed":
     "Diese App ist für das ausgewählte FlightDeck-Projekt nicht aufgeführt.",
+  "account.menu.aria": "Kontomenü",
+  "account.menu.admin": "Admin-App",
 };

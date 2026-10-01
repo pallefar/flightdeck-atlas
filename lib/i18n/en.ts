@@ -356,6 +356,8 @@ export const en = {
   "apps.about.version": "Version {version}",
   "apps.about.notListed":
     "This app is not listed for the selected FlightDeck project.",
+  "account.menu.aria": "Account menu",
+  "account.menu.admin": "Admin app",
 } as const;
 
 export type MessageKey = keyof typeof en;

@@ -232,6 +232,23 @@ button {
   color: #858f98;
   margin-top: 3px;
 }
+.profile-button {
+  width: 100%;
+  background: none;
+  border-width: 1px 0 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.profile-button:hover,
+.profile-button[data-state="open"] {
+  background: rgba(127, 140, 152, 0.12);
+}
+.profile-chevron {
+  margin-left: auto;
+  opacity: 0.6;
+}
 .main-shell {
   margin-left: 224px;
 }

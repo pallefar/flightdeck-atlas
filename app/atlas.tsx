@@ -72,6 +72,7 @@ import WellbeingPage, {
 import FlightDeckConnection from "./flightdeck-connection";
 import { FlightDeckPromo } from "./flightdeck-onboarding";
 import AccessManagement from "./access-management";
+import AccountMenu from "./account-menu";
 import type { AccessProfile } from "@/lib/access-policy";
 import Ideas from "./ideas";
 import AtlasNavigation from "./atlas-navigation";
@@ -523,16 +524,14 @@ export default function Atlas() {
             <div className="system-label">
               <span className="tiny-orbit" /> A WIDER PERSPECTIVE
             </div>
-            <div className="profile">
-              <span className="avatar">ME</span>
-              <div>
-                <strong>{access?.name || "My workspace"}</strong>
-                <small>
-                  {access?.roleName ||
-                    (demo ? "Exploring demo projects" : "Personal projects")}
-                </small>
-              </div>
-            </div>
+            <AccountMenu
+              name={access?.name || "My workspace"}
+              role={
+                access?.roleName ||
+                (demo ? "Exploring demo projects" : "Personal projects")
+              }
+              email={access?.email}
+            />
           </div>
         </aside>
         <div className="main-shell">
