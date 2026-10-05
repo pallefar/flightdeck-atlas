@@ -46,7 +46,7 @@ npm run lint
 npx playwright test
 ```
 
-`npm run lint` must report no errors; warnings are listed but do not fail it. `tests/lint.spec.ts` runs the same script, so `npx playwright test` also fails on a lint error. Do not disable a rule or add an `eslint-disable` comment to get it green. The browser tests use an already running local server at port 5173 and Chrome. They create and remove temporary projects and access fixtures in the local database. The SDK adapter, context and onboarding tests use fixtures (`tests/fixtures/os-project-onboarding.json` records the OS onboarding contract) and never contact FlightDeck.
+`npm run lint` must report no errors; warnings are listed but do not fail it. `tests/lint.spec.ts` runs the same script, so `npx playwright test` also fails on a lint error. Do not disable a rule or add an `eslint-disable` comment to get it green. The browser tests use an already running local server at port 5173 and Chrome. Set `ATLAS_BASE_URL` to use a separately owned preview; set `ATLAS_D1_STATE_DIR` to its persisted local state directory when it differs from `.wrangler/state`. They create and remove temporary projects and access fixtures in the local database. The SDK adapter, context and onboarding tests use fixtures (`tests/fixtures/os-project-onboarding.json` records the OS onboarding contract) and never contact FlightDeck.
 
 ## FlightDeck integration
 
@@ -77,7 +77,13 @@ Configure it in the ignored `.env.local` for development (or as deployment secre
 - **Ask the Super Admin to send** (plan J3, behind `ATLAS_REQUESTER_REQUESTS`, default off): `PUT /api/projects/:id` with `{"scope":"onboarding","action":"ask","revision":r}` stores the send request marker for revision `r`, in the signed-in editor's name, only while `r` is still the project's revision (else 409 `revision_changed` with the current one) and never on a draft FlightDeck may hold (409 `draft_locked`). Asking again replaces a stale or withdrawn marker. `"action":"withdraw"` with the open ask's revision withdraws it, for the asker or the Super Admin only (another editor gets 403). Ordinary saves never write the marker (400 `send_request_action`); they keep it and mark it stale when the draft changes. The marker never sends anything: only the Super Admin presses Send.
 - **Send enforcement** (plan J3): while an open ask is stale (the draft changed after it), the Super Admin's send is refused 409 `changed_since_ask` (with `askedRevision` and the current `revision`) unless the body adds `"confirmDiff":true` and `"baseRevision"` equal to the current revision, confirming the changes were reviewed; the current revision is then sent. The revision check and the reservation are one conditional statement, so a save that lands between them is refused (409) before anything reaches FlightDeck. Retries still resend the reserved bytes under the same key.
 
-**Still disconnected:** FlightDeck SSO and delegated per-user identity, per-user OS membership filtering, import from FlightDeck (`/api/flightdeck/import` returns `503 flightdeck_not_connected`), sync and AI. The private preview’s platform identity is not FlightDeck SSO.
+### Vision OS assessment integration
+
+The reserved **Vision OS** standalone card is visible only to the two trusted owner identities. It opens `ATLAS_FLIGHTDECK_VISION_URL`, or the validated `ATLAS_FLIGHTDECK_URL` origin with `/console/vision?standalone=1`; production should configure the browser-facing HTTPS URL separately when the server origin is private. Other administrators receive no private launcher. The card is never added to shared OS machine app directories.
+
+A confirmed Atlas project link can read only the approved assessment status, actions and goals through the existing scoped OS credential. Activation, advancing delivery stages and material changes require an OS prepare check before the Atlas save. The winning Atlas revision queues a minimal status commit atomically in D1; a failed send remains visible with **Retry sync**. Ordinary task work continues for an existing enrolled HR project awaiting its next release assessment. No source documents, private answers or assessment notes cross this boundary. Apply migration `0013_aberrant_moonstone.sql` before running this update against an existing database. See [the Vision integration handover](docs/HANDOVER-2026-10-05-VISION-OS.md) for the paired OS contract and migration steps.
+
+**Still disconnected:** FlightDeck SSO and delegated per-user identity, per-user OS membership filtering, full project import/sync (`/api/flightdeck/import` returns `503 flightdeck_not_connected`) and AI. The private preview’s platform identity is not FlightDeck SSO.
 
 ## Map and motion
 
