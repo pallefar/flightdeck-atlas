@@ -26,7 +26,7 @@ test("en and de carry exactly the same keys, none empty, same placeholders", () 
   expect(Object.keys(de).sort()).toEqual(enKeys);
   expect(enKeys.length).toBeGreaterThan(0);
   for (const key of enKeys as MessageKey[]) {
-    expect(key, key).toMatch(/^(onb|apps|pages|crm|decks)\./);
+    expect(key, key).toMatch(/^(onb|apps|pages|crm|decks|account)\./);
     expect(en[key].trim(), key).not.toBe("");
     expect(de[key].trim(), key).not.toBe("");
     expect(placeholders(de[key]), key).toEqual(placeholders(en[key]));
@@ -140,6 +140,9 @@ test.describe("rendered", () => {
         locale: browserLocale,
       });
       const page = await context.newPage();
+      // This test exercises the optional focus/onboarding card, which the
+      // Compact Workspace default hides until the viewer enables it.
+      await page.addInitScript(() => localStorage.setItem("atlas-settings-v1", JSON.stringify({ dashboard: { showFocus: true } })));
       try {
         await page.goto("/");
         await expect(page.locator("html")).toHaveAttribute("lang", locale);

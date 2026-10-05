@@ -15,7 +15,7 @@ test("projects persist across reloads, tasks update, stale writes conflict, and 
 }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Everything in motion." }),
+    page.getByRole("heading", { name: "Projects", exact: true }),
   ).toBeVisible();
   expect((await request.get("/api/projects")).status()).toBe(401);
   await page
@@ -149,7 +149,7 @@ test("mobile dashboard stays within viewport and both views are reachable", asyn
   ).toBeVisible();
   await page.getByRole("tab", { name: "Dashboard", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Everything in motion." }),
+    page.getByRole("heading", { name: "Projects", exact: true }),
   ).toBeVisible();
 });
 test("TE branding and theme preference survive reload without hydration errors", async ({

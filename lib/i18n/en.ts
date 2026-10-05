@@ -2,6 +2,26 @@
 // (onb.*, apps.*, pages.*, crm.*); a lane adds its own keys here and in de.ts
 // in the same change. Placeholders are {name}; t() fills them.
 export const en = {
+  "apps.compact.project": "Project",
+  "apps.compact.sponsor": "Sponsor",
+  "apps.compact.status": "Status",
+  "apps.compact.priority": "Priority",
+  "apps.compact.target": "Target date",
+  "apps.compact.progress": "Progress",
+  "apps.compact.details": "Project details",
+  "apps.compact.open": "Open workspace",
+  "apps.compact.empty": "Not set",
+  "apps.compact.close": "Close project details",
+  "apps.compact.next": "Next action",
+  "apps.compact.tasks": "Tasks",
+  "apps.compact.updates": "Recent activity",
+  "apps.compact.none": "No activity recorded.",
+  "apps.compact.archived": "Archived",
+  "apps.compact.accessible": "Accessible projects",
+  "apps.compact.projects": "Projects",
+  "apps.compact.subtitle": "Projects, progress and next actions.",
+  "apps.compact.leave": "Discard unsaved task changes?",
+
   // Onboarding (To FlightDeck): stage names shared by the form, the
   // timeline and the Connections list.
   "onb.stage.not-confirmed": "Not confirmed",

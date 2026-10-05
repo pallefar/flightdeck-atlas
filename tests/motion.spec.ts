@@ -198,6 +198,8 @@ function expectStraightSwap(frames: Nums[], from: Nums | null, final: Nums) {
 }
 
 async function openDashboard(page: Page) {
+  // Exercise optional summary tiles and animated cards explicitly; compact defaults keep them off.
+  await page.addInitScript(() => localStorage.setItem("atlas-settings-v1", JSON.stringify({ dashboard: { layout: "cards", showMetrics: true } })));
   await page.goto("/");
   await expect(page.locator(".nav-item").first()).toBeEnabled();
   // The shell mounts again once it knows who is signed in; let that settle.
@@ -519,6 +521,7 @@ test.describe("sidebar groups, with motion", () => {
 });
 
 test("Atlas's own CSS motion stays the reference", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("atlas-settings-v1", JSON.stringify({ dashboard: { layout: "cards", showMetrics: true } })));
   await page.goto("/");
   await expect(page.locator(".nav-item").first()).toBeEnabled();
   const css = await page.evaluate(() => {

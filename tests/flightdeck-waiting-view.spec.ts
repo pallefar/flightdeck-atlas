@@ -37,7 +37,8 @@ test.beforeAll(async () => {
     format: "iife",
     jsx: "automatic",
     alias: { "@": ROOT },
-    define: { "process.env.NODE_ENV": '"development"' },
+    // Match Vite's default environment for the isolated browser bundle.
+    define: { "process.env.NODE_ENV": '"development"', "import.meta.env": "{}" },
     loader: { ".css": "empty" },
     logLevel: "silent",
   });

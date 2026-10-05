@@ -35,7 +35,9 @@ test.beforeAll(async () => {
     format: "iife",
     jsx: "automatic",
     alias: { "@": ROOT },
-    define: { "process.env.NODE_ENV": '"development"' },
+    // Vite supplies import.meta.env in the app. This isolated esbuild fixture
+    // must provide the same empty development environment to the motion layer.
+    define: { "process.env.NODE_ENV": '"development"', "import.meta.env": "{}" },
     loader: { ".css": "empty" },
     logLevel: "silent",
   });

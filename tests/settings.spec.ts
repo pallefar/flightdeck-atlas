@@ -10,7 +10,7 @@ test("dashboard settings apply, persist, and reset without changing project data
   const dialog = page.getByRole("dialog", { name: "Workspace settings" });
   await dialog
     .getByLabel("Project layout", { exact: true })
-    .selectOption("list");
+    .selectOption("cards");
   await dialog
     .getByLabel("Project order", { exact: true })
     .selectOption("name");
@@ -18,9 +18,9 @@ test("dashboard settings apply, persist, and reset without changing project data
   await dialog.getByRole("switch", { name: "Focus panel" }).click();
   await dialog.getByLabel("Appearance", { exact: true }).selectOption("dark");
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
-  await expect(page.locator(".project-grid")).toHaveClass(/project-list/);
-  await expect(page.locator(".metrics")).toHaveCount(0);
-  await expect(page.locator(".focus-panel")).toHaveCount(0);
+  await expect(page.locator(".project-grid")).not.toHaveClass(/project-list/);
+  await expect(page.locator(".metrics")).toBeVisible();
+  await expect(page.locator(".focus-panel")).toBeVisible();
   await expect(page.locator(".project-card").first()).toContainText(
     "Casa Horizon",
   );
@@ -28,17 +28,17 @@ test("dashboard settings apply, persist, and reset without changing project data
   await expect(
     page.getByRole("button", { name: /Open (Project Eye )?settings/ }),
   ).toBeEnabled();
-  await expect(page.locator(".project-grid")).toHaveClass(/project-list/);
-  await expect(page.locator(".metrics")).toHaveCount(0);
+  await expect(page.locator(".project-grid")).not.toHaveClass(/project-list/);
+  await expect(page.locator(".metrics")).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await page.getByRole("button", { name: /Open (Project Eye )?settings/ }).click();
   await dialog
     .getByRole("button", { name: "Reset dashboard", exact: true })
     .click();
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
-  await expect(page.locator(".project-grid")).not.toHaveClass(/project-list/);
-  await expect(page.locator(".metrics")).toBeVisible();
-  await expect(page.locator(".focus-panel")).toBeVisible();
+  await expect(page.locator(".project-grid")).toHaveClass(/project-list/);
+  await expect(page.locator(".metrics")).toHaveCount(0);
+  await expect(page.locator(".focus-panel")).toHaveCount(0);
   await expect(page.locator(".project-card")).toHaveCount(4);
 });
 
@@ -97,7 +97,7 @@ test("globe settings change the map and instant journey, persist, and honor expl
   await expect(page.locator(".journey-dialog")).toHaveCount(0);
   await page.goto("/?view=dashboard");
   await expect(
-    page.getByRole("heading", { name: "Everything in motion." }),
+    page.getByRole("heading", { name: "Projects", exact: true }),
   ).toBeVisible();
   expect(errors).toEqual([]);
 });
@@ -117,7 +117,7 @@ test("settings recover from invalid storage and fit a small mobile screen", asyn
   const dialog = page.getByRole("dialog", { name: "Workspace settings" });
   await expect(
     dialog.getByLabel("Project layout", { exact: true }),
-  ).toHaveValue("cards");
+  ).toHaveValue("list");
   await dialog.getByRole("button", { name: "Project Eye", exact: true }).click();
   await dialog
     .getByLabel("Camera & workspace journey", { exact: true })

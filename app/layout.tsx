@@ -11,6 +11,7 @@ import "./suite.css";
 import "./work-management.css";
 import "./work-studio.css";
 import "./navigation.css";
+import "./compact-workspace.css";
 import "../lib/pagedoc/pagedoc.css";
 import "./pagedoc-host.css";
 import { headers } from "next/headers";

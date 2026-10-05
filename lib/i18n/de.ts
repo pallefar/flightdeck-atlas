@@ -6,6 +6,26 @@ import type { MessageKey } from "./en";
 export const DE_REVIEW_STATUS = "needs native review" as const;
 
 export const de: Record<MessageKey, string> = {
+  "apps.compact.project": "Projekt",
+  "apps.compact.sponsor": "Sponsor",
+  "apps.compact.status": "Status",
+  "apps.compact.priority": "Priorität",
+  "apps.compact.target": "Zieltermin",
+  "apps.compact.progress": "Fortschritt",
+  "apps.compact.details": "Projektdetails",
+  "apps.compact.open": "Arbeitsbereich öffnen",
+  "apps.compact.empty": "Nicht angegeben",
+  "apps.compact.close": "Projektdetails schließen",
+  "apps.compact.next": "Nächste Aktion",
+  "apps.compact.tasks": "Aufgaben",
+  "apps.compact.updates": "Letzte Aktivitäten",
+  "apps.compact.none": "Keine Aktivitäten aufgezeichnet.",
+  "apps.compact.archived": "Archiviert",
+  "apps.compact.accessible": "Zugängliche Projekte",
+  "apps.compact.projects": "Projekte",
+  "apps.compact.subtitle": "Projekte, Fortschritt und nächste Aktionen.",
+  "apps.compact.leave": "Ungespeicherte Aufgabenänderungen verwerfen?",
+
   "onb.stage.not-confirmed": "Nicht bestätigt",
   "onb.stage.submitted": "Eingereicht",
   "onb.stage.linked": "Verknüpft",

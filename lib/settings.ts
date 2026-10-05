@@ -2,12 +2,12 @@ import { z } from "zod";
 
 export const SETTINGS_KEY = "atlas-settings-v1";
 export const dashboardSettingsSchema = z.object({
-  layout: z.enum(["cards", "list", "board"]).catch("cards"),
+  layout: z.enum(["cards", "list", "board"]).catch("list"),
   sort: z.enum(["updated", "name", "due"]).catch("updated"),
-  showPlanner: z.boolean().catch(true),
-  showMetrics: z.boolean().catch(true),
-  showFocus: z.boolean().catch(true),
-  showWellbeing: z.boolean().catch(true),
+  showPlanner: z.boolean().catch(false),
+  showMetrics: z.boolean().catch(false),
+  showFocus: z.boolean().catch(false),
+  showWellbeing: z.boolean().catch(false),
 });
 export const globeSettingsSchema = z.object({
   mode: z.enum(["explore", "scan"]).catch("explore"),

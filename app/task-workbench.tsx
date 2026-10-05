@@ -18,6 +18,9 @@ import { filteredTasks, loggedMinutes } from "@/lib/work-management";
 import type { TaskView } from "@/lib/work-model";
 import { localDate } from "@/lib/briefing";
 import FeatureHelp from "./feature-help";
+import { registerLeaveGuard, stableJson } from "@/lib/flightdeck/autosave-ux";
+import { t } from "@/lib/i18n";
+import { useLocale } from "@/lib/i18n/react";
 const states = [
   { id: "todo", label: "To do" },
   { id: "doing", label: "Doing" },
@@ -32,7 +35,9 @@ export default function TaskWorkbench({
   onReload,
   initialLayout = "list",
   onLayoutChange,
+  active = true,
 }: {
+  active?: boolean;
   initialLayout?: TaskView["layout"];
   onLayoutChange?: (layout: TaskView["layout"]) => void;
   project: Project;
@@ -84,6 +89,20 @@ export default function TaskWorkbench({
   const [editing, setEditing] = useState<Task | null>(null),
     [step, setStep] = useState("");
   const [draftBase, setDraftBase] = useState<Project | null>(null);
+  const locale = useLocale();
+  const originalTask = editing && draftBase?.tasks.find((t) => t.id === editing.id);
+  const dirty = !!editing && stableJson(editing) !== stableJson(originalTask ? { ...originalTask, checklist: originalTask.checklist || [] } : null);
+  const leaveMessage = t("apps.compact.leave", locale);
+  useEffect(() => {
+    if (!dirty || !active) return;
+    const off = registerLeaveGuard(() => leaveMessage);
+    const unload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", unload);
+    return () => { off(); window.removeEventListener("beforeunload", unload); };
+  }, [dirty, active, leaveMessage]);
+  function closeTask() {
+    if (!dirty || window.confirm(leaveMessage)) setEditing(null);
+  }
   const searchRef = useRef<HTMLInputElement>(null),
     wasEditing = useRef(false);
   useEffect(() => {
@@ -164,7 +183,7 @@ export default function TaskWorkbench({
   function card(t: Task) {
     return (
       <article
-        className={`workbench-task ${t.done ? "is-done" : ""}`}
+        className={`workbench-task ${t.done ? "is-done" : ""} ${editing?.id === t.id ? "selected-task" : ""}`}
         key={t.id}
         draggable={layout === "board" && !readOnly && !busy && !editing}
         onDragStart={(e) => {
@@ -190,7 +209,7 @@ export default function TaskWorkbench({
               type="checkbox"
               aria-label={t.title}
               checked={t.done}
-              disabled={readOnly || busy}
+              disabled={readOnly || busy || !!editing}
               onChange={() => void saveTask({ ...t, done: !t.done })}
             />
             <strong>{t.title}</strong>
@@ -198,7 +217,7 @@ export default function TaskWorkbench({
           {
             <button
               aria-label={`${readOnly ? "View" : "Edit"} ${t.title}`}
-              disabled={busy}
+              disabled={busy || !!editing}
               onClick={() => {
                 openTask(t);
               }}
@@ -272,7 +291,7 @@ export default function TaskWorkbench({
         <select
           aria-label={`Workflow for ${t.title}`}
           value={taskState(t)}
-          disabled={readOnly || busy}
+          disabled={readOnly || busy || !!editing}
           onChange={(e) => changeState(t, e.target.value)}
         >
           {states.map((s) => (
@@ -286,6 +305,7 @@ export default function TaskWorkbench({
   }
   return (
     <fieldset className="task-workbench" disabled={busy}>
+      <fieldset className="task-workbench-controls" disabled={!!editing}>
       {project.tasks.some((t) => t.archived) && (
         <details className="advanced-filter">
           <summary>
@@ -337,6 +357,7 @@ export default function TaskWorkbench({
             <button
               key={l}
               aria-pressed={layout === l}
+              disabled={!!editing}
               onClick={() => {
                 setLayout(l);
                 onLayoutChange?.(l);
@@ -513,9 +534,12 @@ export default function TaskWorkbench({
           Clear filters
         </button>
       </details>
-      {editing ? (
+      </fieldset>
+      <div className={`task-detail-layout ${editing ? "has-task-details" : ""}`}>
+      {editing && (
         <form
           className="task-detail-editor"
+          onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeTask(); } }}
           onSubmit={(e) => {
             e.preventDefault();
             void saveTask(editing);
@@ -534,7 +558,7 @@ export default function TaskWorkbench({
               <button
                 type="button"
                 aria-label="Close task details"
-                onClick={() => setEditing(null)}
+                onClick={closeTask}
               >
                 <X size={18} />
               </button>
@@ -912,7 +936,7 @@ export default function TaskWorkbench({
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setEditing(null)}
+                onClick={closeTask}
               >
                 Cancel
               </Button>
@@ -951,20 +975,20 @@ export default function TaskWorkbench({
             <Button
               type="button"
               variant="outline"
-              onClick={() => setEditing(null)}
+              onClick={closeTask}
             >
               Back to tasks
             </Button>
           )}
         </form>
-      ) : (
-        <>
+      )}
+        <fieldset className="task-workbench-content" disabled={!!editing}>
           {layout === "table" ? (
             <TaskTable
               project={project}
               tasks={visible}
               readOnly={readOnly}
-              busy={busy}
+              busy={busy || !!editing}
               members={members}
               onSave={onSave}
               onEdit={openTask}
@@ -976,7 +1000,7 @@ export default function TaskWorkbench({
               tasks={visible}
               onEdit={openTask}
               readOnly={readOnly}
-              busy={busy}
+              busy={busy || !!editing}
               onSave={onSave}
             />
           ) : layout === "board" ? (
@@ -1057,8 +1081,8 @@ export default function TaskWorkbench({
               {moveNotice}
             </p>
           )}
-        </>
-      )}
+        </fieldset>
+      </div>
       {!readOnly && !editing && (
         <form
           className="add-action-form"

@@ -259,6 +259,7 @@ export default function ProjectManagement({
               <div hidden={!tasks}>
                 <TaskWorkbench
                   {...props}
+                  active={tasks}
                   initialLayout={
                     tool === "kanban"
                       ? "board"
