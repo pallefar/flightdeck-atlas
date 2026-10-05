@@ -20,11 +20,18 @@ menu feature (`25f92c2`) after fetching all repository refs.
 
 ## Validation
 
-The final full local Playwright run passed **569 checks, 2 skipped** (571 total).
+The final full local Playwright run passed **570 checks, 2 skipped** (572 total).
 TypeScript, production build and full lint pass; lint retains 29 existing
 warnings. Ten Compact Workspace cases cover actual records, keyboard focus,
 read-only/draft save behavior, EN/DE at 390/1440 widths, timeline guards and
 Globe/header geometry. Independent review findings were repaired and rechecked.
+
+The OS app-directory and app-bridge fixtures are now copied byte for byte with
+SHA256 pins after Maps 0.2.5 and KG 0.3.2 were released. The focused contract tests
+passed 112 checks; the subsequent full suite includes this fixture update.
+Atlas's full release-bridge reader (`apps-34`) remains pending. Added coverage
+checks fixture provenance, matching directory metadata and the existing PageDoc
+schema; it does not claim that reader is implemented.
 
 Browser fixtures are synthetic and isolated. Private local D1 migrations,
 `.env.local`, browser outputs and test databases are not committed.
