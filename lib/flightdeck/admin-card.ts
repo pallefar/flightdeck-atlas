@@ -14,7 +14,7 @@
 import { flightdeckApp, type AppEntry } from "@/lib/collaboration";
 
 export const FLIGHTDECK_ADMIN_ID = "flightdeck-admin";
-const RESERVED = new Set([FLIGHTDECK_ADMIN_ID]);
+const RESERVED = new Set([FLIGHTDECK_ADMIN_ID, "vision-os"]);
 
 /** An id no catalog write may create or override. */
 export function isReservedAppId(id: unknown) {

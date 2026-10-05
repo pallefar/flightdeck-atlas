@@ -241,7 +241,7 @@ export function AppLauncher({
                       <AppIcon app={a} />
                       <strong>{a.name}</strong>
                       <small>
-                        {a.login === "flightdeck"
+                        {a.id === "vision-os" ? "Private · FlightDeck sign-in" : a.login === "flightdeck"
                           ? "Shared sign-in pending"
                           : "External app"}
                       </small>
@@ -368,8 +368,7 @@ export function AppAdministration() {
                 <h3>{a.name}</h3>
                 <p>{a.description}</p>
                 <small>
-                  Built in · shown to Super Admins and the roles set in
-                  ATLAS_FLIGHTDECK_ADMIN_ROLES
+                  {a.id === "vision-os" ? "Built in · owner identities only" : "Built in · shown to Super Admins and the roles set in ATLAS_FLIGHTDECK_ADMIN_ROLES"}
                 </small>
                 <small>FlightDeck checks access on arrival</small>
               </div>

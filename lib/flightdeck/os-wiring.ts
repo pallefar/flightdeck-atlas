@@ -22,6 +22,7 @@ import {
   createCachedReader,
   createContextClient,
   createCrmClient,
+  createVisionClient,
   createGuardedSubmissions,
   createSubmissionClient,
   createWhoamiLoader,
@@ -35,6 +36,8 @@ import {
   type CrmReadResult,
   type Fetcher,
   type WhoamiRead,
+  type VisionClient,
+  type VisionResult,
 } from "./context-client";
 import { createDirectoryOs, type DirectoryOs } from "./apps-directory-route";
 import {
@@ -168,6 +171,20 @@ export function createOsWiring(deps: {
           guard(() => crmClient.projection(ws, project)),
         revision: (ws, project) => guard(() => crmClient.revision(ws, project)),
       };
+    },
+    /** No private Vision read. Approved projection and delivery proposals
+     * share credential revocation and rate limits with the existing bridge. */
+    vision(config: ContextConfig): VisionClient {
+      const client = createVisionClient(config, deps.fetch ? { fetch: deps.fetch } : {});
+      const guard = (read: () => Promise<VisionResult>): Promise<VisionResult> => current(async (g): Promise<VisionResult> => {
+        const blocked = cache.get(RATE_LIMIT_KEY);
+        if (blocked && blocked.until > now()) return { state: "rate_limited", retryAfter: Math.max(1, Math.ceil((blocked.until - now()) / 1000)) };
+        const value = await read();
+        if (value.state === "unauthorized") revoke();
+        if (value.state === "rate_limited") cacheFor(g).set(RATE_LIMIT_KEY, { until: now() + (value.retryAfter ?? 60) * 1000 });
+        return value;
+      });
+      return { projection: (ws, project) => guard(() => client.projection(ws, project)), delivery: (ws, project, payload) => guard(() => client.delivery(ws, project, payload)) };
     },
     submissions: (config: ContextConfig) =>
       createGuardedSubmissions(createSubmissionClient(config, client), cache, {

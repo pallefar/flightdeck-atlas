@@ -5751,7 +5751,7 @@ test("a stage list Atlas could not read locks the row instead of offering to dro
 /** Runs `fn` against the dev server's local D1 database (the miniflare
  * sqlite file that holds the onboarding tables). */
 function devDb<T>(fn: (db: DatabaseSync) => T): T {
-  const folder = ".wrangler/state/v3/d1/miniflare-D1DatabaseObject";
+  const folder = `${process.env.ATLAS_D1_STATE_DIR ?? ".wrangler/state"}/v3/d1/miniflare-D1DatabaseObject`;
   for (const file of readdirSync(folder).filter(
     (p) => p.endsWith(".sqlite") && p !== "metadata.sqlite",
   )) {

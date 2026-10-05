@@ -23,6 +23,7 @@ import { downloadText } from "@/lib/briefing";
 import { t } from "@/lib/i18n";
 import { useLocale } from "@/lib/i18n/react";
 import FlightDeckProjectCard from "./flightdeck-project-card";
+import VisionProjectStatus from "./vision-project-status";
 export default function ProjectWorkspace({
   project,
   demo,
@@ -123,6 +124,7 @@ export default function ProjectWorkspace({
         </p>
       )}
       {!demo && <LiveWorkStatus project={project} onReload={onReload} />}
+      {!demo && !embedded && <VisionProjectStatus projectId={project.id} revision={project.revision} canEdit={!readOnly} />}
       <div className="workspace-meta">
         <span
           className={`status ${project.status.toLowerCase().replaceAll(" ", "-")}`}

@@ -12,7 +12,8 @@ import {
   type AppEntry,
 } from "@/lib/collaboration";
 import { keptSelection } from "@/lib/flightdeck/context-route";
-import { osAdminCardConfig, osOrigin } from "@/lib/flightdeck/os-server";
+import { osAdminCardConfig, osOrigin, osVisionCardConfig } from "@/lib/flightdeck/os-server";
+import { catalogWithVisionCard } from "@/lib/flightdeck/vision-card";
 import {
   catalogWithAdminCard,
   isReservedAppId,
@@ -31,7 +32,7 @@ export async function GET() {
     // built-in 'FlightDeck Admin' card is added only for a viewer who passes
     // its visibility heuristic (lib/flightdeck/admin-card.ts) — the OS
     // re-checks access on arrival.
-    const catalog = catalogWithAdminCard(
+    const catalog = catalogWithVisionCard(catalogWithAdminCard(
       rows.results.map((r) => ({
         ...JSON.parse(r.data as string),
         id: r.id,
@@ -39,7 +40,7 @@ export async function GET() {
       })) as AppEntry[],
       a.access,
       osAdminCardConfig(),
-    );
+    ), a.access, osVisionCardConfig());
     if (!catalog.some((x) => x.id === "flightdeck"))
       catalog.push(flightdeckApp);
     // Atlas ships a FEATURED built-in "FlightDeck OS" entry whose `url` is ""

@@ -315,3 +315,11 @@ export const projectLinks = sqliteTable(
     ),
   ],
 );
+/** Latest committed delivery projection, retried until OS acknowledges it.
+ * Written in the same D1 batch as its project revision; no private Vision data. */
+export const visionDeliveryOutbox = sqliteTable("atlas_vision_delivery_outbox", {
+  projectId: text("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
+  atlasRevision: integer("atlas_revision").notNull(),
+  data: text("data").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});

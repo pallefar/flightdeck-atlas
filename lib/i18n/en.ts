@@ -2,6 +2,22 @@
 // (onb.*, apps.*, pages.*, crm.*); a lane adds its own keys here and in de.ts
 // in the same change. Placeholders are {name}; t() fills them.
 export const en = {
+  "apps.vision.title": "Vision assessment",
+  "apps.vision.unavailable": "FlightDeck assessment check is unavailable. Delivery changes require a current check.",
+  "apps.vision.open": "Open Vision",
+  "apps.vision.goals": "Approved goals",
+  "apps.vision.stage": "Review needed for",
+  "apps.vision.syncPending": "Project saved. FlightDeck status synchronization is pending.",
+  "apps.vision.retry": "Retry sync",
+  "apps.vision.retrying": "Retrying…",
+  "apps.vision.checked": "Checked",
+  "apps.vision.status.not_required": "Not required",
+  "apps.vision.status.required": "Assessment required",
+  "apps.vision.status.pending": "Awaiting approval",
+  "apps.vision.status.needs_changes": "Changes required",
+  "apps.vision.status.approved": "Approved",
+  "apps.vision.status.review_due": "Review required",
+  "apps.vision.status.unavailable": "Unavailable",
   "apps.compact.project": "Project",
   "apps.compact.sponsor": "Sponsor",
   "apps.compact.status": "Status",

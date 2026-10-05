@@ -12,7 +12,7 @@ import { portfolioAdvice } from "../lib/advisor";
 import { createDeck } from "../lib/presentations";
 const cleanup: { table: string; id: string }[] = [];
 test.afterAll(() => {
-  const folder = ".wrangler/state/v3/d1/miniflare-D1DatabaseObject";
+  const folder = `${process.env.ATLAS_D1_STATE_DIR ?? ".wrangler/state"}/v3/d1/miniflare-D1DatabaseObject`;
   for (const file of readdirSync(folder).filter(
     (f) => f.endsWith(".sqlite") && f !== "metadata.sqlite",
   )) {

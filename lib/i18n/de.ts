@@ -6,6 +6,22 @@ import type { MessageKey } from "./en";
 export const DE_REVIEW_STATUS = "needs native review" as const;
 
 export const de: Record<MessageKey, string> = {
+  "apps.vision.title": "Vision-Bewertung",
+  "apps.vision.unavailable": "Die FlightDeck-Bewertungsprüfung ist nicht verfügbar. Lieferstatusänderungen erfordern eine aktuelle Prüfung.",
+  "apps.vision.open": "Vision öffnen",
+  "apps.vision.goals": "Genehmigte Ziele",
+  "apps.vision.stage": "Prüfung erforderlich für",
+  "apps.vision.syncPending": "Projekt gespeichert. Die Synchronisierung des FlightDeck-Status steht noch aus.",
+  "apps.vision.retry": "Erneut synchronisieren",
+  "apps.vision.retrying": "Erneuter Versuch…",
+  "apps.vision.checked": "Geprüft",
+  "apps.vision.status.not_required": "Nicht erforderlich",
+  "apps.vision.status.required": "Bewertung erforderlich",
+  "apps.vision.status.pending": "Genehmigung ausstehend",
+  "apps.vision.status.needs_changes": "Änderungen erforderlich",
+  "apps.vision.status.approved": "Genehmigt",
+  "apps.vision.status.review_due": "Prüfung erforderlich",
+  "apps.vision.status.unavailable": "Nicht verfügbar",
   "apps.compact.project": "Projekt",
   "apps.compact.sponsor": "Sponsor",
   "apps.compact.status": "Status",

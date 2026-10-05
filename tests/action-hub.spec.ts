@@ -5,7 +5,7 @@ import { readdirSync } from "node:fs";
 const accessFixtures: { name: string; email: string }[] = [];
 test.afterAll(() => {
   if (!accessFixtures.length) return;
-  const folder = ".wrangler/state/v3/d1/miniflare-D1DatabaseObject";
+  const folder = `${process.env.ATLAS_D1_STATE_DIR ?? ".wrangler/state"}/v3/d1/miniflare-D1DatabaseObject`;
   for (const file of readdirSync(folder).filter(
     (p) => p.endsWith(".sqlite") && p !== "metadata.sqlite",
   )) {

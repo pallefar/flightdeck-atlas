@@ -1,5 +1,12 @@
 /* Approved Compact Workspace shell. Existing semantic theme colors and
    functional selectors remain authoritative; globe/editor geometry is scoped. */
+.vision-project-status { margin: 12px 0; padding: 12px 14px; border: 1px solid var(--border); border-left: 3px solid #005c6e; border-radius: 8px; background: var(--card); font-size: 13px; overflow-wrap: anywhere; }
+.vision-project-status header { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.vision-project-status header > span { color: var(--muted-foreground); }
+.vision-project-status header > a { margin-left: auto; display: inline-flex; gap: 5px; align-items: center; min-height: 36px; }
+.vision-project-status p, .vision-project-status ul { margin: 8px 0; }
+.vision-project-status small { color: var(--muted-foreground); }
+.vision-project-status button { border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; min-height: 36px; }
 .atlas-shell { --atlas-sidebar: 220px; --atlas-header: 52px; }
 .atlas-shell > .sidebar { width: 220px; padding: 16px 12px 12px; }
 .atlas-shell > .main-shell { margin-left: 220px; }
