@@ -395,4 +395,6 @@ export const de: Record<MessageKey, string> = {
     "Diese App ist für das ausgewählte FlightDeck-Projekt nicht aufgeführt.",
   "account.menu.aria": "Kontomenü",
   "account.menu.admin": "Admin-App",
+  "account.menu.vision": "Vision OS",
+  "account.menu.visionHint": "Öffnet Vision OS; separat bei FlightDeck OS anmelden.",
 };

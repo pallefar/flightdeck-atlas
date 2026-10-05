@@ -1373,6 +1373,13 @@ export default function Atlas() {
             }
             navigate={navigate}
           />
+          <div className="mobile-account-menu mt-4">
+            <AccountMenu
+              name={access?.name || "My workspace"}
+              role={access?.roleName || (demo ? "Exploring demo projects" : "Personal projects")}
+              email={access?.email}
+            />
+          </div>
         </DialogContent>
       </Dialog>
     </WellbeingProvider>

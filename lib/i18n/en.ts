@@ -394,6 +394,8 @@ export const en = {
     "This app is not listed for the selected FlightDeck project.",
   "account.menu.aria": "Account menu",
   "account.menu.admin": "Admin app",
+  "account.menu.vision": "Vision OS",
+  "account.menu.visionHint": "Opens Vision OS; sign in separately to FlightDeck OS.",
 } as const;
 
 export type MessageKey = keyof typeof en;

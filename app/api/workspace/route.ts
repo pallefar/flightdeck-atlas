@@ -13,7 +13,7 @@ import {
 } from "@/lib/collaboration";
 import { keptSelection } from "@/lib/flightdeck/context-route";
 import { osAdminCardConfig, osOrigin, osVisionCardConfig } from "@/lib/flightdeck/os-server";
-import { catalogWithVisionCard } from "@/lib/flightdeck/vision-card";
+import { catalogWithVisionCard, visionMenuUrl } from "@/lib/flightdeck/vision-card";
 import {
   catalogWithAdminCard,
   isReservedAppId,
@@ -108,6 +108,7 @@ export async function GET() {
       : [];
     return json({
       email: a.access.email,
+      accountMenu: { visionUrl: visionMenuUrl(a.access.superAdmin, catalog) },
       capacity,
       apps,
       teams: teams.filter(

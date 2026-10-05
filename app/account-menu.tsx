@@ -1,6 +1,6 @@
 "use client";
-import { useState } from "react";
-import { ChevronUp, ShieldCheck } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronUp, Compass, ShieldCheck } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,13 +10,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { FLIGHTDECK_ADMIN_ID } from "@/lib/flightdeck/admin-card";
+import { visionCardConfig } from "@/lib/flightdeck/vision-card";
 import { t } from "@/lib/i18n";
 import { useLocale } from "@/lib/i18n/react";
 
-/** The signed-in person in the sidebar, as a menu. The "Admin app" entry is
- * the server's reserved FlightDeck Admin launcher card: /api/workspace only
- * includes it for a viewer the server decided may see it, so this component
- * adds no rule of its own and shows nothing when the card is absent. */
+/** Private launch decisions come from the current authorized workspace
+ * response. Navigation forwards no Atlas credentials; the OS checks its own session. */
 export default function AccountMenu({
   name,
   role,
@@ -28,24 +27,44 @@ export default function AccountMenu({
 }) {
   const locale = useLocale();
   const [adminUrl, setAdminUrl] = useState<string | null>(null);
+  const [visionUrl, setVisionUrl] = useState<string | null>(null);
+  const pending = useRef<AbortController | null>(null);
 
-  async function loadAdminLink() {
+  useEffect(() => () => pending.current?.abort(), []);
+
+  function clearLinks() {
+    pending.current?.abort();
+    pending.current = null;
+    setAdminUrl(null);
+    setVisionUrl(null);
+  }
+
+  async function loadLinks() {
+    clearLinks();
+    const controller = new AbortController();
+    pending.current = controller;
     try {
-      const r = await fetch("/api/workspace");
-      if (!r.ok) return setAdminUrl(null);
+      const r = await fetch("/api/workspace", { signal: controller.signal, cache: "no-store" });
+      if (!r.ok) return;
       const body = (await r.json()) as {
         apps?: { id: string; url?: string }[];
+        accountMenu?: { visionUrl?: string | null };
       };
+      if (controller.signal.aborted || pending.current !== controller) return;
       setAdminUrl(
         body.apps?.find((a) => a.id === FLIGHTDECK_ADMIN_ID)?.url ?? null,
       );
+      setVisionUrl(visionCardConfig(body.accountMenu?.visionUrl ?? undefined)?.url ?? null);
     } catch {
-      setAdminUrl(null);
+      if (!controller.signal.aborted && pending.current === controller) {
+        setAdminUrl(null);
+        setVisionUrl(null);
+      }
     }
   }
 
   return (
-    <DropdownMenu onOpenChange={(open) => open && void loadAdminLink()}>
+    <DropdownMenu onOpenChange={(open) => open ? void loadLinks() : clearLinks()}>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
@@ -81,6 +100,17 @@ export default function AccountMenu({
               <a href={adminUrl} target="_blank" rel="noopener noreferrer">
                 <ShieldCheck size={15} aria-hidden />
                 {t("account.menu.admin", locale)}
+              </a>
+            </DropdownMenuItem>
+          </>
+        )}
+        {visionUrl && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <a href={visionUrl} target="_blank" rel="noopener noreferrer" title={t("account.menu.visionHint", locale)}>
+                <Compass size={15} aria-hidden />
+                {t("account.menu.vision", locale)}
               </a>
             </DropdownMenuItem>
           </>

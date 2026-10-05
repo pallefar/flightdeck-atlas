@@ -27,3 +27,11 @@ export function catalogWithVisionCard(catalog: AppEntry[], viewer: VisionViewer,
   const card = visionCardFor(viewer, config);
   return card ? [...kept, card] : kept;
 }
+
+/** Use only the authorized server catalog, after stored reserved cards have
+ * been discarded. The account action also requires the current Atlas role. */
+export function visionMenuUrl(superAdmin: boolean, catalog: AppEntry[]): string | null {
+  if (!superAdmin) return null;
+  const card = catalog.find((entry) => entry.id === VISION_APP_ID && "reserved" in entry && entry.reserved === true);
+  return visionCardConfig(card?.url)?.url ?? null;
+}

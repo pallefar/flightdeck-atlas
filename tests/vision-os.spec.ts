@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { flightdeckApp } from "../lib/collaboration";
-import { visionCardFor, visionCardConfig, catalogWithVisionCard, VISION_APP_ID } from "../lib/flightdeck/vision-card";
+import { visionCardFor, visionCardConfig, catalogWithVisionCard, visionMenuUrl, VISION_APP_ID } from "../lib/flightdeck/vision-card";
 import { visionProjectionSchema, visionTransition, projectionRefusal, type VisionProjection } from "../lib/flightdeck/vision";
 
 const owner = { userId: "trusted-provider-principal", email: "karsten.haldan@gmail.com", superAdmin: false };
@@ -34,6 +34,31 @@ test("a stored forged Vision row is hidden even from a general administrator", (
   expect(catalogWithVisionCard([flightdeckApp, forged], { ...owner, email: "admin@example.test", superAdmin: true }, visionCardConfig(url))).toEqual([flightdeckApp]);
   expect(catalogWithVisionCard([forged], owner, visionCardConfig(url))).toHaveLength(1);
   expect(catalogWithVisionCard([forged], owner, null)).toEqual([]);
+});
+
+test("the account action requires both current Super Admin role and an owner-approved reserved card", () => {
+  const config = visionCardConfig(url);
+  for (const email of ["karsten.haldan@gmail.com", "karsten.haldan@te.com"]) {
+    const allowed = catalogWithVisionCard([], { ...owner, email, superAdmin: true }, config);
+    expect(visionMenuUrl(true, allowed)).toBe(url);
+    expect(visionMenuUrl(false, allowed)).toBeNull();
+  }
+  const forged = { ...flightdeckApp, id: VISION_APP_ID, url, reserved: true };
+  for (const viewer of [{ ...owner, email: "admin@example.test", superAdmin: true }, { ...owner, email: "member@example.test", superAdmin: false }]) {
+    const catalog = catalogWithVisionCard([forged], viewer, config);
+    expect(visionMenuUrl(!!viewer.superAdmin, catalog)).toBeNull();
+  }
+  expect(visionMenuUrl(true, [{ ...flightdeckApp, id: VISION_APP_ID, url }])).toBeNull();
+});
+
+test("the account action validates URLs and retains a browser-only loopback destination unchanged", () => {
+  for (const value of [undefined, "", "javascript:alert(1)", "http://os.example.test/console/vision", "https://owner:secret@os.example.test/console/vision"]) {
+    const catalog = catalogWithVisionCard([], { ...owner, superAdmin: true }, visionCardConfig(value));
+    expect(visionMenuUrl(true, catalog)).toBeNull();
+  }
+  const local = "http://127.0.0.1:4173/console/vision?standalone=1";
+  const catalog = catalogWithVisionCard([], { ...owner, superAdmin: true }, visionCardConfig(local));
+  expect(visionMenuUrl(true, catalog)).toBe(local);
 });
 
 test("the approved projection rejects private fields, incoherent enrollment and unknown states", () => {
