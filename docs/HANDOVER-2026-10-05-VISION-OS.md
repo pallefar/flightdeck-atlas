@@ -1,5 +1,7 @@
 # Atlas ↔ Vision OS handover — 5 October 2026
 
+For the subsequent live deployment, applied production migrations and current connection limitations, read [Atlas live cutover](HANDOVER-2026-10-05-ATLAS-LIVE-CUTOVER.md). The implementation and validation history below is retained as recorded before cutover.
+
 Vision OS is a private standalone host app in the paired FlightDeck OS repository. Atlas shares only approved assessment status, required actions and approved goals, and synchronizes the status of a confirmed linked project. Atlas does not embed the private dashboard or copy its source library.
 
 Both repositories use branch `feat/vision-os-2026-10-05`. The tested Atlas implementation is [`53aea1e89c67cef6c20dc5ac968e7fa7a79e7757`](https://github.com/pallefar/flightdeck-atlas/commit/53aea1e89c67cef6c20dc5ac968e7fa7a79e7757), paired with OS [`069f9dd016bf54b38879e10d88f31e963a730244`](https://github.com/pallefar/project-contract/commit/069f9dd016bf54b38879e10d88f31e963a730244). Branch heads include documentation-only handover commits after these code pins. Verify both fetched heads retain the pinned commits before migrating.
