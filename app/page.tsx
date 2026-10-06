@@ -1,6 +1,6 @@
 import Atlas from "./atlas";
 import { getAccess } from "@/lib/access";
-import { requireChatGPTUser } from "./chatgpt-auth";
+import { chatGPTSignInAvailable, requireChatGPTUser } from "./chatgpt-auth";
 export const dynamic = "force-dynamic";
 export default async function Home({
   searchParams,
@@ -42,6 +42,17 @@ export default async function Home({
     if (typeof value === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(value))
       returnParams.set(key, value);
   }
+  if (!chatGPTSignInAvailable())
+    return (
+      <main className="document-page">
+        <h1>Sign-in is not available in this deployment</h1>
+        <p>
+          Atlas signs people in only through its hosted deployment. This
+          server is not configured as that deployment, so no one can sign in
+          here.
+        </p>
+      </main>
+    );
   await requireChatGPTUser(returnParams.size ? `/?${returnParams}` : "/");
   let access;
   try {

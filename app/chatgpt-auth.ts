@@ -1,5 +1,7 @@
+import { env } from "cloudflare:workers";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { isIdentityHeaderTrusted } from "@/lib/identity-source";
 
 export type ChatGPTUser = {
   userId: string;
@@ -18,7 +20,17 @@ const SIGN_IN_PATH = "/signin-with-chatgpt";
 const SIGN_OUT_PATH = "/signout-with-chatgpt";
 const CALLBACK_PATH = "/callback";
 
+/** True only where something in front of the Worker owns the identity
+ * headers: the vite dev shim or the Sites-hosted deployment. */
+export function chatGPTSignInAvailable(): boolean {
+  return isIdentityHeaderTrusted({
+    devShim: typeof __ATLAS_DEV_SHIM__ !== "undefined" && __ATLAS_DEV_SHIM__,
+    deployment: env.ATLAS_DEPLOYMENT,
+  });
+}
+
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
+  if (!chatGPTSignInAvailable()) return null;
   const requestHeaders = await headers();
   const userId = requestHeaders.get(USER_ID_HEADER);
   const email = requestHeaders.get(USER_EMAIL_HEADER);

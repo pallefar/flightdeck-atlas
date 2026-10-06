@@ -2,6 +2,10 @@ declare namespace Cloudflare {
   interface Env {
     DB?: D1Database;
     ATLAS_SUPERADMIN_EMAIL?: string;
+    /** Exactly "hosted" when the Worker runs behind the Sites hosting
+     * dispatcher, which owns the oai-authenticated-user-* headers. Unset
+     * (self-hosting, `npm start`) means those headers are never trusted. */
+    ATLAS_DEPLOYMENT?: string;
     BUCKET?: R2Bucket;
     /** FlightDeck OS origin for the read-only inbound context API. */
     ATLAS_FLIGHTDECK_URL?: string;

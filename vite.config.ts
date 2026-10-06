@@ -51,6 +51,10 @@ export default defineConfig(async ({ command }) => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    // Identity headers are trusted only behind the dev shim (serve) or the
+    // Sites dispatcher (runtime ATLAS_DEPLOYMENT=hosted); see
+    // lib/identity-source.ts. A build never carries the shim.
+    define: { __ATLAS_DEV_SHIM__: JSON.stringify(command === "serve") },
     server: {
       ...(managedLinux
         ? { host: "0.0.0.0", allowedHosts: ["terminal.local"] }
