@@ -192,3 +192,79 @@ export function projectOptionText(
 }
 export const workspaceOptionText = (workspace: OsContextEntry) =>
   `${workspace.label || workspace.id}${workspace.enabled ? "" : " (disabled)"}`;
+
+// ── Credential health: GET /api/inbound/v1/whoami ─────────────────────────
+
+/** The scopes Atlas's credential needs, and what each one does for Atlas. */
+export const ATLAS_SCOPES = ["read:context", "submit:proposal"] as const;
+export const SCOPE_PURPOSE: Record<(typeof ATLAS_SCOPES)[number], string> = {
+  "read:context": "Atlas cannot read the FlightDeck workspace and project lists.",
+  "submit:proposal": "Atlas cannot send onboarding requests to FlightDeck.",
+};
+/** Amber from this many days before expiry. The OS mints for 7 days by
+ * default and at most 30 (server/inbound/tokens.ts). */
+export const CREDENTIAL_WARN_DAYS = 7;
+const DAY_MS = 86_400_000;
+const credentialSchema = z
+  .object({
+    integrationId: integrationIdSchema,
+    scopes: z.array(z.string().max(64)).max(32),
+    expiresAt: isoSchema,
+  })
+  .strict();
+/** The OS whoami answer, validated strictly: an unknown key rejects it.
+ * `limits` is what the OS sends beside the three fields Atlas uses. */
+export const osWhoamiSchema = credentialSchema
+  .extend({
+    limits: z
+      .object({
+        maxPayloadBytes: z.number().int().positive(),
+        requestsPerMinute: z.number().int().positive(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type OsWhoami = z.infer<typeof osWhoamiSchema>;
+export type AtlasCredential = z.infer<typeof credentialSchema>;
+
+export const credentialStates = [
+  "ok",
+  "not_configured",
+  "not_permitted",
+  "os_unreachable",
+  "unauthorized",
+  "rate_limited",
+  "invalid_response",
+] as const;
+export type CredentialState = (typeof credentialStates)[number];
+/** What /api/flightdeck/credential returns. It never carries the credential
+ * itself: only its integration id, scopes and expiry. */
+export const credentialResponseSchema = z
+  .object({
+    state: z.enum(credentialStates),
+    credential: credentialSchema.nullable(),
+    retryAfter: z.number().int().positive().nullable(),
+    checkedAt: isoSchema,
+  })
+  .strict();
+export type CredentialResponse = z.infer<typeof credentialResponseSchema>;
+
+/** Expired once now >= expiresAt (the OS's own rule), amber within
+ * CREDENTIAL_WARN_DAYS, and every scope Atlas needs that is not granted. */
+export function credentialHealth(
+  credential: AtlasCredential,
+  now: number,
+): { tone: "ok" | "expiring" | "expired"; daysLeft: number; missing: string[] } {
+  const left = Date.parse(credential.expiresAt) - now;
+  return {
+    tone:
+      left <= 0
+        ? "expired"
+        : left <= CREDENTIAL_WARN_DAYS * DAY_MS
+          ? "expiring"
+          : "ok",
+    daysLeft: Math.max(0, Math.ceil(left / DAY_MS)),
+    missing: ATLAS_SCOPES.filter((s) => !credential.scopes.includes(s)),
+  };
+}

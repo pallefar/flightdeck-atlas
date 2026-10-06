@@ -1,19 +1,26 @@
 import { test, expect, type Page, type Request } from "@playwright/test";
 import {
+  ATLAS_SCOPES,
   contextResponseSchema,
+  credentialHealth,
+  credentialResponseSchema,
   projectOptionText,
   type OsContextEntry,
   type OsSelection,
 } from "../lib/flightdeck/context";
 import {
   chooseContext,
+  createCachedCredential,
   createCachedReader,
   createContextClient,
+  createCredentialClient,
   loadContext,
   readContextConfig,
   type ContextReader,
+  type CredentialReader,
   type Fetcher,
 } from "../lib/flightdeck/context-client";
+import { createCredentialRoute } from "../lib/flightdeck/context-route";
 
 // Neither the unit checks nor the browser checks below contact FlightDeck OS:
 // the OS transport is a fake, and browser calls to /api/flightdeck/context are
@@ -1029,4 +1036,365 @@ test("Connections shows no FlightDeck developer reference to a signed-in user wh
   await expect(
     page.locator('a[href*="console/help?article=developers"]'),
   ).toHaveCount(0);
+});
+
+// ── Credential health: GET /api/inbound/v1/whoami ─────────────────────────
+// The OS caps an inbound credential at 30 days (default 7) and refuses it
+// with a uniform 401 once it has expired. Atlas reads its own credential's
+// scopes and expiry so the Super Admin rotates it before the sidebar and
+// onboarding go dark. whoami is stubbed: nothing here contacts the OS.
+const DAY_MS = 86_400_000;
+const whoamiBody = (overrides: Record<string, unknown> = {}) => ({
+  integrationId: "atlas",
+  scopes: ["read:context", "submit:proposal"],
+  expiresAt: "2026-09-29T08:00:00.000Z",
+  limits: { maxPayloadBytes: 65536, requestsPerMinute: 30 },
+  ...overrides,
+});
+const credentialIn = (days: number, scopes: string[] = [...ATLAS_SCOPES]) => ({
+  integrationId: "atlas",
+  scopes,
+  expiresAt: new Date(Date.now() + days * DAY_MS).toISOString(),
+});
+
+test("whoami transport sends only the bearer credential, parses strictly and maps every OS outcome", async () => {
+  const seen: { url: string; init: RequestInit }[] = [];
+  let reply: () => Response | Promise<Response> = () =>
+    jsonResponse(200, whoamiBody());
+  const client = createCredentialClient(config, {
+    fetch: async (url, init) => {
+      seen.push({ url, init });
+      return reply();
+    },
+    timeoutMs: 50,
+  });
+  expect(await client.whoami()).toEqual({
+    state: "ok",
+    data: whoamiBody(),
+  });
+  expect(seen[0].url).toBe("http://127.0.0.1:4173/api/inbound/v1/whoami");
+  expect(seen[0].init).toMatchObject({
+    method: "GET",
+    cache: "no-store",
+    redirect: "manual",
+  });
+  expect(seen[0].init.headers).toEqual({
+    Authorization: `Bearer ${FAKE_CREDENTIAL}`,
+    Accept: "application/json",
+  });
+  expect(Object.keys(seen[0].init)).not.toContain("credentials");
+  const outcome = async (make: () => Response | Promise<Response>) => {
+    reply = make;
+    return client.whoami();
+  };
+  // limits is optional; everything else is required and strictly shaped.
+  const { limits: _limits, ...bare } = whoamiBody();
+  void _limits;
+  expect(await outcome(() => jsonResponse(200, bare))).toEqual({
+    state: "ok",
+    data: bare,
+  });
+  for (const body of [
+    whoamiBody({ token: FAKE_CREDENTIAL }),
+    whoamiBody({ scopes: "read:context" }),
+    whoamiBody({ expiresAt: "next week" }),
+    whoamiBody({ integrationId: "Atlas Prod" }),
+    whoamiBody({ limits: { requestsPerMinute: 30, extra: 1 } }),
+    { integrationId: "atlas", scopes: [] },
+  ])
+    expect(await outcome(() => jsonResponse(200, body))).toEqual({
+      state: "invalid_response",
+    });
+  expect(
+    await outcome(() => jsonResponse(401, { error: "invalid credential" })),
+  ).toEqual({ state: "unauthorized" });
+  expect(
+    await outcome(() =>
+      jsonResponse(
+        429,
+        { error: "too many requests", retryAfterSeconds: 7 },
+        { "Retry-After": "7" },
+      ),
+    ),
+  ).toEqual({ state: "rate_limited", retryAfter: 7 });
+  expect(await outcome(() => jsonResponse(500, {}))).toEqual({
+    state: "invalid_response",
+  });
+  expect(
+    await outcome(
+      () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: "https://elsewhere.example/" },
+        }),
+    ),
+  ).toEqual({ state: "invalid_response" });
+  expect(
+    await outcome(() => {
+      throw new TypeError("fetch failed");
+    }),
+  ).toEqual({ state: "os_unreachable" });
+});
+
+test("whoami is cached and shares the credential-wide rate limit with the context reads", async () => {
+  let clock = 0,
+    calls = 0;
+  const cache = new Map();
+  const who: CredentialReader = {
+    whoami: async () => {
+      calls++;
+      return { state: "ok", data: whoamiBody() };
+    },
+  };
+  const cached = createCachedCredential(who, cache, { now: () => clock });
+  await cached.whoami();
+  await cached.whoami();
+  expect(calls).toBe(1);
+  // A context read that hits the OS rate limit holds whoami back too.
+  clock = 61_000;
+  const limited: ContextReader = {
+    workspaces: async () => ({ state: "rate_limited", retryAfter: 20 }),
+    projects: async () => ({ state: "rate_limited", retryAfter: 20 }),
+  };
+  await createCachedReader(limited, cache, { now: () => clock }).workspaces();
+  expect(await cached.whoami()).toEqual({
+    state: "rate_limited",
+    retryAfter: 20,
+  });
+  expect(calls).toBe(1);
+  // And a rate-limited whoami holds the context reads back.
+  clock = 90_000;
+  const busy: CredentialReader = {
+    whoami: async () => ({ state: "rate_limited", retryAfter: 30 }),
+  };
+  expect(
+    await createCachedCredential(busy, cache, { now: () => clock }).whoami(),
+  ).toEqual({ state: "rate_limited", retryAfter: 30 });
+  const os = fakeOs();
+  expect(
+    await createCachedReader(os, cache, { now: () => clock }).workspaces(),
+  ).toEqual({ state: "rate_limited", retryAfter: 30 });
+  expect(os.calls).toEqual([]);
+  clock = 121_000;
+  expect((await cached.whoami()).state).toBe("ok");
+  expect(calls).toBe(2);
+});
+
+test("credential health warns within seven days, names missing scopes and turns red once expired", () => {
+  const now = Date.parse("2026-09-24T08:00:00.000Z");
+  const cred = (days: number, scopes: string[] = [...ATLAS_SCOPES]) => ({
+    integrationId: "atlas",
+    scopes,
+    expiresAt: new Date(now + days * DAY_MS).toISOString(),
+  });
+  expect(credentialHealth(cred(3), now)).toEqual({
+    tone: "expiring",
+    daysLeft: 3,
+    missing: [],
+  });
+  expect(credentialHealth(cred(7), now).tone).toBe("expiring");
+  expect(credentialHealth(cred(7.5), now)).toEqual({
+    tone: "ok",
+    daysLeft: 8,
+    missing: [],
+  });
+  expect(credentialHealth(cred(30), now).tone).toBe("ok");
+  // The OS's own rule: expired once now >= expiresAt.
+  expect(credentialHealth(cred(0), now).tone).toBe("expired");
+  expect(credentialHealth(cred(-1), now).tone).toBe("expired");
+  expect(credentialHealth(cred(20, ["read:context"]), now).missing).toEqual([
+    "submit:proposal",
+  ]);
+  expect(credentialHealth(cred(20, []), now).missing).toEqual([
+    "read:context",
+    "submit:proposal",
+  ]);
+  expect(
+    credentialHealth(
+      cred(20, ["read:context", "submit:proposal", "future:scope"]),
+      now,
+    ).missing,
+  ).toEqual([]);
+});
+
+function credentialRoute(
+  superAdmin: boolean,
+  reader: CredentialReader | null,
+) {
+  return createCredentialRoute({
+    authorize: async () => ({ access: { userId: "u-1", superAdmin } }),
+    credential: () => reader,
+  });
+}
+
+test("the credential route answers only the Super Admin and never carries the token", async () => {
+  let calls = 0;
+  const reader = (result: Awaited<ReturnType<CredentialReader["whoami"]>>) => ({
+    whoami: async () => {
+      calls++;
+      return result;
+    },
+  });
+  const read = async (response: Response) => {
+    const text = await response.text();
+    expect(text).not.toContain(FAKE_CREDENTIAL);
+    expect(text).not.toMatch(/token|bearer|limits/i);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    return credentialResponseSchema.parse(JSON.parse(text));
+  };
+  const ok = reader({ state: "ok", data: whoamiBody() });
+  // A signed-in user who is not Super Admin learns nothing, and the OS is
+  // not asked.
+  expect(await read(await credentialRoute(false, ok).GET())).toMatchObject({
+    state: "not_permitted",
+    credential: null,
+  });
+  expect(calls).toBe(0);
+  const denied = await createCredentialRoute({
+    authorize: async () => ({
+      error: Response.json({ error: "Sign in to continue." }, { status: 401 }),
+    }),
+    credential: () => ok,
+  }).GET();
+  expect(denied.status).toBe(401);
+  expect(calls).toBe(0);
+  expect(await read(await credentialRoute(true, null).GET())).toMatchObject({
+    state: "not_configured",
+    credential: null,
+  });
+  // The projection keeps integrationId, scopes and expiresAt only.
+  expect(await read(await credentialRoute(true, ok).GET())).toMatchObject({
+    state: "ok",
+    credential: {
+      integrationId: "atlas",
+      scopes: ["read:context", "submit:proposal"],
+      expiresAt: "2026-09-29T08:00:00.000Z",
+    },
+    retryAfter: null,
+  });
+  expect(calls).toBe(1);
+  for (const [result, expected] of [
+    [{ state: "unauthorized" }, { state: "unauthorized", retryAfter: null }],
+    [
+      { state: "rate_limited", retryAfter: 12 },
+      { state: "rate_limited", retryAfter: 12 },
+    ],
+    [{ state: "os_unreachable" }, { state: "os_unreachable" }],
+    [{ state: "invalid_response" }, { state: "invalid_response" }],
+  ] as const)
+    expect(
+      await read(await credentialRoute(true, reader(result)).GET()),
+    ).toMatchObject({ ...expected, credential: null });
+});
+
+/** Answers the browser's /api/flightdeck/credential with the real route
+ * handler over a stubbed whoami. */
+async function mockCredential(page: Page) {
+  const state = {
+    result: {
+      state: "ok",
+      data: credentialIn(20),
+    } as Awaited<ReturnType<CredentialReader["whoami"]>>,
+    gets: 0,
+  };
+  await page.route("**/api/flightdeck/credential", async (route) => {
+    state.gets++;
+    const response = await credentialRoute(true, {
+      whoami: async () => state.result,
+    }).GET();
+    await route.fulfill({
+      status: response.status,
+      contentType: "application/json",
+      body: await response.text(),
+    });
+  });
+  return state;
+}
+const credentialRow = (page: Page) =>
+  page.locator(".connection-status", { hasText: "Atlas credential:" });
+
+test("Connections shows the Super Admin the credential's scopes, integration id and expiry, amber within seven days", async ({
+  page,
+}) => {
+  const direct = watchOsRequests(page);
+  await mockContext(page);
+  const who = await mockCredential(page);
+  who.result = { state: "ok", data: credentialIn(3, ["read:context"]) };
+  await page.goto("/?view=connection");
+  const row = credentialRow(page);
+  const chip = row.locator(".status");
+  await expect(chip).toHaveText("Expires in 3 days");
+  await expect(chip).toHaveClass(/\bon-hold\b/);
+  await expect(row).toContainText("Integration id: atlas");
+  await expect(row).toContainText("Scopes: read:context");
+  await expect(row).toContainText(/expires \d{1,2} \w{3} \d{4}/);
+  await expect(row).toContainText(
+    "Missing submit:proposal: Atlas cannot send onboarding requests to FlightDeck.",
+  );
+  await expect(row).toContainText("FlightDeck Settings → Inbound API");
+  await expect(row).not.toContainText(FAKE_CREDENTIAL);
+
+  // Healthy: no warning, no missing line.
+  who.result = { state: "ok", data: credentialIn(20) };
+  await page.reload();
+  await expect(chip).toHaveText("Valid");
+  await expect(chip).toHaveClass(/\bcompleted\b/);
+  await expect(row).toContainText("Scopes: read:context, submit:proposal");
+  await expect(row).not.toContainText("Missing");
+
+  // A 401 from whoami: expired, revoked or switched off. Red, with the remedy.
+  who.result = { state: "unauthorized" };
+  await page.reload();
+  await expect(chip).toHaveText("Expired or refused");
+  await expect(chip).toHaveClass(/\bexpired\b/);
+  await expect(row).toContainText(
+    "Mint a new credential in FlightDeck Settings → Inbound API",
+  );
+  await expect(row).not.toContainText("Integration id");
+  expect(direct).toEqual([]);
+});
+
+test("Connections shows no credential health to a signed-in user who is not Super Admin", async ({
+  page,
+}) => {
+  const who = await mockCredential(page);
+  await page.route("**/api/projects", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const res = await route.fetch();
+    const body = (await res.json()) as {
+      access?: { superAdmin: boolean; roleName: string };
+    };
+    if (body.access)
+      body.access = {
+        ...body.access,
+        superAdmin: false,
+        roleName: "Project member (test)",
+      };
+    await route.fulfill({ response: res, json: body });
+  });
+  await page.goto("/?view=connection");
+  await expect(page.getByText("Project member (test)")).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByText("Atlas credential:")).toHaveCount(0);
+  expect(who.gets).toBe(0);
+});
+
+test("the live credential route is signed-in only and free of the credential", async ({
+  page,
+  request,
+}) => {
+  const leaks = /token|bearer|ATLAS_FLIGHTDECK|INBOUND/i;
+  const anonymous = await request.get("/api/flightdeck/credential");
+  expect(anonymous.status()).toBe(401);
+  expect(await anonymous.text()).not.toMatch(leaks);
+  await page.goto("/?view=connection");
+  await expect(page.getByText("Atlas credential:")).toBeVisible();
+  const result = await page.evaluate(async () => {
+    const r = await fetch("/api/flightdeck/credential");
+    return { status: r.status, body: await r.text() };
+  });
+  expect(result.status).toBe(200);
+  expect(result.body).not.toMatch(leaks);
+  const body = credentialResponseSchema.parse(JSON.parse(result.body));
+  expect(body.state).not.toBe("not_permitted");
 });
