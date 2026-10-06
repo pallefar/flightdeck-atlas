@@ -21,6 +21,7 @@ import {
 import { createOsWiring } from "../lib/flightdeck/os-wiring";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { parsePageDoc } from "../lib/pagedoc/schema/index.js";
 
 // apps-32: Atlas's consumer of the OS apps DIRECTORY (OS apps-29,
 // GET /api/inbound/v1/context/workspaces/:ws/apps/directory?projectId&locale).
@@ -150,6 +151,23 @@ test.describe("the vendored OS fixture", () => {
         apps: [{ ...fixture.apps[0], visibleToRoles: ["admin"] }],
       }).success,
     ).toBe(false);
+  });
+  test("the bridge fixture is pinned, agrees with directory metadata and its published PageDoc parses", () => {
+    // The full release bridge reader (apps-34) is pending; this pins the
+    // generated OS response and checks the schema Atlas already consumes.
+    const bytes = readFileSync(new URL("./fixtures/inbound-apps-bridge.v1.json", import.meta.url));
+    const pin = readFileSync(new URL("./fixtures/inbound-apps-bridge.v1.sha256", import.meta.url), "utf8").trim();
+    expect(createHash("sha256").update(bytes).digest("hex")).toBe(pin);
+    const bridge = JSON.parse(bytes.toString("utf8"));
+    const app = fixture.apps.find((entry) => entry.id === bridge.appId);
+    expect(app).toBeDefined();
+    expect(bridge).toMatchObject({
+      contract: 1, workspaceId: fixture.workspaceId, projectId: fixture.projectId,
+      label: app!.label, icon: app!.icon, version: app!.version,
+      releaseRevision: app!.releaseRevision, locale: fixture.locale,
+    });
+    expect(bridge.release.doc.status).toBe("ok");
+    expect(parsePageDoc(bridge.release.doc.doc).ok).toBe(true);
   });
 });
 

@@ -13,6 +13,8 @@ declare namespace Cloudflare {
     /** Browser-facing FlightDeck Admin url for the reserved launcher card
      * (https, or http on loopback only). Unset: no card. */
     ATLAS_FLIGHTDECK_ADMIN_URL?: string;
+    /** Owner-only standalone Vision browser URL; no credential. */
+    ATLAS_FLIGHTDECK_VISION_URL?: string;
     /** Comma-separated Atlas role ids also shown the admin card (Atlas
      * superAdmins always are). A visibility heuristic, not an entitlement. */
     ATLAS_FLIGHTDECK_ADMIN_ROLES?: string;

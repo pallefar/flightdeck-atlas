@@ -38,6 +38,8 @@ import {
 import type { AccessProfile } from "@/lib/access-policy";
 import { applyWorkRules, stampTimeEntries } from "@/lib/work-management";
 import { projectSchema, type Project } from "@/lib/projects";
+import { prepareVisionSave, retryVisionSync } from "@/lib/flightdeck/vision-wiring";
+import { deliveryPayload, visionOutboxStatement } from "@/lib/flightdeck/vision-sync";
 export const dynamic = "force-dynamic";
 export async function DELETE(
   request: Request,
@@ -228,6 +230,8 @@ export async function PUT(
         },
         400,
       );
+    const vision = await prepareVisionSave(auth.access, previous, recorded);
+    if (!vision.ok) return json({ error: vision.error, code: vision.code }, 409);
     const statements = [
       db
         .prepare(
@@ -243,6 +247,8 @@ export async function PUT(
           ...guardValues(dependencyGuards),
         ),
     ];
+    if (vision.read) statements.push(visionOutboxStatement(db, vision.read.link,
+      deliveryPayload(vision.read.link, vision.read.projection, { ...recorded, id, revision: revision + 1 }, "commit", vision.change), updatedAt));
     for (const notice of processed.notices)
       statements.push(
         db
@@ -277,7 +283,12 @@ export async function PUT(
       recorded,
       updatedAt,
     );
-    return json({ project: (await projectFor(auth.access, id))!.project });
+    let visionSyncPending = false;
+    if (vision.read) {
+      try { visionSyncPending = !(await retryVisionSync(auth.access, id)); }
+      catch { visionSyncPending = true; }
+    }
+    return json({ project: (await projectFor(auth.access, id))!.project, visionSyncPending });
   } catch {
     console.error("Atlas project update unavailable");
     return json(
@@ -386,13 +397,17 @@ async function saveOnboarding(
         updatedAt,
       ).activity.slice(-200),
     };
-    const result = await db
+    const vision = await prepareVisionSave(access, previous, { ...previous, onboarding });
+    if (!vision.ok) return json({ error: vision.error, code: vision.code }, 409);
+    const statements = [db
       .prepare(
         "UPDATE atlas_projects SET data = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND revision = ?" +
           DRAFT_NOT_HELD_SQL,
       )
-      .bind(JSON.stringify(data), updatedAt, id, previous.revision)
-      .run();
+      .bind(JSON.stringify(data), updatedAt, id, previous.revision)];
+    if (vision.read) statements.push(visionOutboxStatement(db, vision.read.link,
+      deliveryPayload(vision.read.link, vision.read.projection, { ...previous, revision: previous.revision + 1 }, "commit", vision.change), updatedAt));
+    const [result] = await db.batch(statements);
     if (!result.meta.changes)
       return json(
         {
@@ -409,7 +424,12 @@ async function saveOnboarding(
       { onboarding },
       updatedAt,
     );
-    return json({ project: (await projectFor(access, id))!.project });
+    let visionSyncPending = false;
+    if (vision.read) {
+      try { visionSyncPending = !(await retryVisionSync(access, id)); }
+      catch { visionSyncPending = true; }
+    }
+    return json({ project: (await projectFor(access, id))!.project, visionSyncPending });
   } catch {
     console.error("Atlas onboarding update unavailable");
     return json(

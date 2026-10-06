@@ -49,6 +49,7 @@ import {
   type CrmProjectionV1,
   type CrmRevisionV1,
 } from "./crm-contract";
+import { visionProjectionSchema, visionDeliverySchema, type VisionProjection, type VisionDelivery } from "./vision";
 
 export type ContextConfig = { baseUrl: string; token: string };
 export type ContextFailure = {
@@ -219,6 +220,35 @@ function exchanger(config: ContextConfig, options: ClientOptions): Exchange {
 }
 const isJson = (response: Response) =>
   !!response.headers.get("content-type")?.includes("application/json");
+
+export type VisionResult = { state: "ok"; data: VisionProjection } | { state: "unauthorized" | "refused" | "not_found" | "rate_limited" | "os_unreachable" | "invalid_response" | "review_required"; retryAfter?: number };
+export interface VisionClient {
+  projection(workspaceId: string, projectId: string): Promise<VisionResult>;
+  delivery(workspaceId: string, projectId: string, payload: VisionDelivery): Promise<VisionResult>;
+}
+/** Uses the same credential-only transport as every other OS boundary. */
+export function createVisionClient(config: ContextConfig, options: ClientOptions = {}): VisionClient {
+  const exchange = exchanger(config, options);
+  async function run(workspaceId: string, projectId: string, payload?: VisionDelivery): Promise<VisionResult> {
+    if (!osIdSchema.safeParse(workspaceId).success || !osIdSchema.safeParse(projectId).success) return { state: "not_found" };
+    const checked = payload === undefined ? null : visionDeliverySchema.safeParse(payload);
+    if (checked && !checked.success) return { state: "invalid_response" };
+    const path = `${projectsPath(workspaceId)}/${encodeURIComponent(projectId)}/vision${payload ? "/delivery" : ""}`;
+    const result = await exchange(path, { method: payload ? "POST" : "GET", ...(checked?.success ? { body: JSON.stringify(checked.data) } : {}) });
+    if (result.state !== "answered") return { state: "os_unreachable" };
+    const { response, body } = result;
+    if (response.status === 401) return { state: "unauthorized" };
+    if (response.status === 403) return { state: "refused" };
+    if (response.status === 404) return { state: "not_found" };
+    if (response.status === 429) return { state: "rate_limited", retryAfter: retryAfterFrom(response, body) };
+    if (response.status === 409) return { state: "review_required" };
+    if (response.status !== 200 || !isJson(response)) return { state: "invalid_response" };
+    const parsed = visionProjectionSchema.safeParse(body);
+    if (!parsed.success || parsed.data.workspaceId !== workspaceId || parsed.data.projectId !== projectId) return { state: "invalid_response" };
+    return { state: "ok", data: parsed.data };
+  }
+  return { projection: (ws, project) => run(ws, project), delivery: (ws, project, payload) => run(ws, project, payload) };
+}
 
 export function createContextClient(
   config: ContextConfig,

@@ -46,6 +46,7 @@ test("readiness requires complete input; deadline completion is once-only and ne
 test("personal check-in and timer survive views and reload, then offer a break", async ({
   page,
 }) => {
+  await page.addInitScript(() => localStorage.setItem("atlas-settings-v1", JSON.stringify({ dashboard: { showWellbeing: true } })));
   await page.clock.install({ time: new Date("2026-09-17T10:00:00Z") });
   await page.goto("/?view=wellbeing");
   await page.getByRole("button", { name: "Mood: Good", exact: true }).click();

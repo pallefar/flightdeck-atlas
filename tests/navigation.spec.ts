@@ -89,7 +89,7 @@ test("shared links, resources and presentations keep explicit project boundaries
     .getByRole("button", { name: "Back to all projects", exact: true })
     .click();
   await expect(
-    page.getByRole("heading", { name: "Everything in motion." }),
+    page.getByRole("heading", { name: "Projects", exact: true }),
   ).toBeVisible();
   await expect(
     page

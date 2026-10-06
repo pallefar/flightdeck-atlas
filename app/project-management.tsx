@@ -15,6 +15,7 @@ import PresentationStudio from "./presentation-studio";
 import FlightdeckSlidesLink from "./flightdeck-slides-link";
 import WorkStudio, { LiveWorkStatus } from "./work-studio";
 import FeatureHelp from "./feature-help";
+import VisionProjectStatus from "./vision-project-status";
 
 export default function ProjectManagement({
   projects,
@@ -187,6 +188,7 @@ export default function ProjectManagement({
               {project.status} · {progress(project)}% complete
             </span>
           </div>
+          {!demo && <VisionProjectStatus projectId={project.id} revision={project.revision} canEdit={!readOnly} />}
           <div className="management-context">
             <label>
               Working project
@@ -259,6 +261,7 @@ export default function ProjectManagement({
               <div hidden={!tasks}>
                 <TaskWorkbench
                   {...props}
+                  active={tasks}
                   initialLayout={
                     tool === "kanban"
                       ? "board"

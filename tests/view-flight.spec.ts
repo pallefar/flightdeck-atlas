@@ -51,6 +51,6 @@ test("reduced motion skips camera travel and arrow keys select the other tab", a
   await page.keyboard.press("Home");
   await expect(dashboard).toHaveAttribute("aria-selected", "true");
   await expect(
-    page.getByRole("heading", { name: "Everything in motion." }),
+    page.getByRole("heading", { name: "Projects", exact: true }),
   ).toBeVisible();
 });

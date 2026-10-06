@@ -11,6 +11,7 @@ import {
 import { NO_FEATURES, type InboundFeatures } from "./features";
 import { createOsWiring } from "./os-wiring";
 import { adminCardConfig } from "./admin-card";
+import { visionCardConfig } from "./vision-card";
 
 // One cache per isolate for the context lists and for the credential-wide
 // rate limit, shared by the context and onboarding routes: they spend the
@@ -44,6 +45,10 @@ export function osDirectory() {
 export function osCrm() {
   const c = config();
   return c ? wiring.crm(c) : null;
+}
+export function osVision() {
+  const c = config();
+  return c ? wiring.vision(c) : null;
 }
 export function osSubmissions() {
   const c = config();
@@ -88,6 +93,11 @@ export function osAdminCardConfig() {
     url: env.ATLAS_FLIGHTDECK_ADMIN_URL,
     roles: env.ATLAS_FLIGHTDECK_ADMIN_ROLES,
   });
+}
+/** Separate owner-only launcher; never part of the shared OS app directory. */
+export function osVisionCardConfig() {
+  const base = osOrigin();
+  return visionCardConfig(env.ATLAS_FLIGHTDECK_VISION_URL || (base ? `${base}/console/vision?standalone=1` : undefined));
 }
 const INSTALLATION_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** Scopes Atlas's link records. Unset means the one local installation;

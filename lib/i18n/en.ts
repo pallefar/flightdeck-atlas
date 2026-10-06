@@ -2,6 +2,42 @@
 // (onb.*, apps.*, pages.*, crm.*); a lane adds its own keys here and in de.ts
 // in the same change. Placeholders are {name}; t() fills them.
 export const en = {
+  "apps.vision.title": "Vision assessment",
+  "apps.vision.unavailable": "FlightDeck assessment check is unavailable. Delivery changes require a current check.",
+  "apps.vision.open": "Open Vision",
+  "apps.vision.goals": "Approved goals",
+  "apps.vision.stage": "Review needed for",
+  "apps.vision.syncPending": "Project saved. FlightDeck status synchronization is pending.",
+  "apps.vision.retry": "Retry sync",
+  "apps.vision.retrying": "Retrying…",
+  "apps.vision.checked": "Checked",
+  "apps.vision.status.not_required": "Not required",
+  "apps.vision.status.required": "Assessment required",
+  "apps.vision.status.pending": "Awaiting approval",
+  "apps.vision.status.needs_changes": "Changes required",
+  "apps.vision.status.approved": "Approved",
+  "apps.vision.status.review_due": "Review required",
+  "apps.vision.status.unavailable": "Unavailable",
+  "apps.compact.project": "Project",
+  "apps.compact.sponsor": "Sponsor",
+  "apps.compact.status": "Status",
+  "apps.compact.priority": "Priority",
+  "apps.compact.target": "Target date",
+  "apps.compact.progress": "Progress",
+  "apps.compact.details": "Project details",
+  "apps.compact.open": "Open workspace",
+  "apps.compact.empty": "Not set",
+  "apps.compact.close": "Close project details",
+  "apps.compact.next": "Next action",
+  "apps.compact.tasks": "Tasks",
+  "apps.compact.updates": "Recent activity",
+  "apps.compact.none": "No activity recorded.",
+  "apps.compact.archived": "Archived",
+  "apps.compact.accessible": "Accessible projects",
+  "apps.compact.projects": "Projects",
+  "apps.compact.subtitle": "Projects, progress and next actions.",
+  "apps.compact.leave": "Discard unsaved task changes?",
+
   // Onboarding (To FlightDeck): stage names shared by the form, the
   // timeline and the Connections list.
   "onb.stage.not-confirmed": "Not confirmed",
@@ -358,6 +394,8 @@ export const en = {
     "This app is not listed for the selected FlightDeck project.",
   "account.menu.aria": "Account menu",
   "account.menu.admin": "Admin app",
+  "account.menu.vision": "Vision OS",
+  "account.menu.visionHint": "Opens Vision OS; sign in separately to FlightDeck OS.",
 } as const;
 
 export type MessageKey = keyof typeof en;

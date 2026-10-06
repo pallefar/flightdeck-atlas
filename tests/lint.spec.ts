@@ -16,10 +16,14 @@ type LintResult = {
 test("npm run lint reports no ESLint errors", () => {
   test.setTimeout(240_000);
   const root = fileURLToPath(new URL("..", import.meta.url));
+  const lintEnv = { ...process.env };
+  // Playwright can inherit NO_COLOR and set FORCE_COLOR simultaneously.
+  // JSON lint output needs neither competing color switch nor Node's warning.
+  if (lintEnv.NO_COLOR !== undefined) delete lintEnv.FORCE_COLOR;
   const run = spawnSync(
     "npm",
     ["run", "lint", "--silent", "--", "--format", "json"],
-    { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+    { cwd: root, encoding: "utf8", env: lintEnv, maxBuffer: 64 * 1024 * 1024 },
   );
   expect(run.error).toBeUndefined();
   expect(run.stderr.trim()).toBe("");

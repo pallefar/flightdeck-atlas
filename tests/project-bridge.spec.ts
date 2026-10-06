@@ -4880,6 +4880,8 @@ test("the Super Admin can close an unconfirmed send from the form, and the draft
 test("the To FlightDeck list and the dashboard follow FlightDeck without the form open, and say when it last checked", async ({
   page,
 }) => {
+  // The status card is an optional dashboard widget in Compact Workspace.
+  await page.addInitScript(() => localStorage.setItem("atlas-settings-v1", JSON.stringify({ dashboard: { showFocus: true } })));
   await page.clock.install();
   await mockContext(page);
   await page.goto("/?view=connection");
@@ -5749,7 +5751,7 @@ test("a stage list Atlas could not read locks the row instead of offering to dro
 /** Runs `fn` against the dev server's local D1 database (the miniflare
  * sqlite file that holds the onboarding tables). */
 function devDb<T>(fn: (db: DatabaseSync) => T): T {
-  const folder = ".wrangler/state/v3/d1/miniflare-D1DatabaseObject";
+  const folder = `${process.env.ATLAS_D1_STATE_DIR ?? ".wrangler/state"}/v3/d1/miniflare-D1DatabaseObject`;
   for (const file of readdirSync(folder).filter(
     (p) => p.endsWith(".sqlite") && p !== "metadata.sqlite",
   )) {

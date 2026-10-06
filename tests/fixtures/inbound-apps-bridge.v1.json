@@ -1,0 +1,115 @@
+{
+  "contract": 1,
+  "workspaceId": "te-ops",
+  "projectId": "rhineland-rollout",
+  "appId": "maps",
+  "label": "Maps",
+  "icon": "🗺️",
+  "version": "0.2.5",
+  "locale": "de",
+  "requestedLocale": "de",
+  "localeFallback": false,
+  "declaredScopes": [],
+  "releaseRevision": 1,
+  "release": {
+    "revision": 1,
+    "tagline": "Tagline (synthetisches maps-Fixture)",
+    "summary": "Summary (synthetisches maps-Fixture)",
+    "highlights": [
+      {
+        "feature": "Feature (synthetisches maps-Fixture)",
+        "benefit": "Benefit (synthetisches maps-Fixture)"
+      }
+    ],
+    "useCase": {
+      "scenario": "Scenario (synthetisches maps-Fixture)",
+      "outcome": "Outcome (synthetisches maps-Fixture)"
+    },
+    "audience": "Audience (synthetisches maps-Fixture)",
+    "requirements": {
+      "minHostVersion": "5.0.0",
+      "connectors": []
+    },
+    "cost": "Cost (synthetisches maps-Fixture)",
+    "dataHandling": "Data handling (synthetisches maps-Fixture)",
+    "links": {
+      "support": "https://example.test/support",
+      "privacy": "https://example.test/privacy"
+    },
+    "whatsNew": "New (synthetisches maps-Fixture)",
+    "screenshots": [],
+    "doc": {
+      "status": "ok",
+      "doc": {
+        "schemaVersion": 2,
+        "meta": {
+          "sourceLocale": "en",
+          "title": {
+            "en": "About (synthetic maps fixture)",
+            "de": "About (synthetisches maps-Fixture)"
+          }
+        },
+        "sections": [
+          {
+            "id": "fixsection01",
+            "layout": "1",
+            "emphasis": "none",
+            "spacing": "normal",
+            "phone": "stack",
+            "lock": "content-only",
+            "columns": [
+              {
+                "id": "fixcolumn001",
+                "blocks": [
+                  {
+                    "id": "fixrichtext1",
+                    "type": "richText",
+                    "content": {
+                      "en": [
+                        {
+                          "type": "paragraph",
+                          "content": [
+                            {
+                              "type": "text",
+                              "text": "About body (synthetic maps fixture)"
+                            }
+                          ]
+                        }
+                      ],
+                      "de": [
+                        {
+                          "type": "paragraph",
+                          "content": [
+                            {
+                              "type": "text",
+                              "text": "About body (synthetisches maps-Fixture)"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "id": "fixctabtn001",
+                    "type": "cta",
+                    "label": {
+                      "en": "Open (synthetic maps fixture)",
+                      "de": "Open (synthetisches maps-Fixture)"
+                    },
+                    "style": "primary",
+                    "action": {
+                      "type": "openApp",
+                      "appId": "maps"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "media": {},
+      "skippedBlocks": 0
+    }
+  }
+}

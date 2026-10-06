@@ -56,6 +56,7 @@ import PresentationStudio from "./presentation-studio";
 import Today from "./today";
 import PortfolioPlan from "./portfolio-plan";
 import ProjectBoard from "./project-board";
+import PortfolioList from "./portfolio-list";
 import CommandMenu from "./command-menu";
 import { briefing } from "@/lib/briefing";
 import GlobeWorkspace from "./globe-workspace";
@@ -142,6 +143,7 @@ function startingPoint() {
   };
 }
 export default function Atlas() {
+  const locale = useLocale();
   const { theme, setTheme } = useTheme();
   const [access, setAccess] = useState<AccessProfile | null>(null);
   const [requesterRequests, setRequesterRequests] = useState(false);
@@ -160,6 +162,18 @@ export default function Atlas() {
   const [settings, setSettings] = useState<AtlasSettings>(defaultSettings);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsTrigger = useRef<HTMLButtonElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+    // Mobile controls wrap. Keep the existing camera transition's inset in
+    // step with the actual header instead of assuming a desktop height.
+    const measure = () => header.closest<HTMLElement>(".atlas-shell")?.style.setProperty("--atlas-header", `${header.getBoundingClientRect().height}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, [access?.userId]);
   const [settingsTab, setSettingsTab] = useState<"dashboard" | "globe">(
     "dashboard",
   );
@@ -382,6 +396,7 @@ export default function Atlas() {
   }
   const isDark = loaded && theme === "dark";
   const allData = demo ? examples : projects;
+  const workingProject = view === "manage" && tool !== "projects" ? allData.find((p) => p.id === workspaceId) : undefined;
   const globeProjects = allData.filter((p) => !p.archived);
   const data = allData.filter((p) =>
     filter === "Archived" ? !!p.archived : !p.archived,
@@ -535,7 +550,7 @@ export default function Atlas() {
           </div>
         </aside>
         <div className="main-shell">
-          <header className="topbar">
+          <header className="topbar" ref={headerRef}>
             <button
               ref={menuTrigger}
               className="theme-toggle mobile-navigation-trigger"
@@ -558,7 +573,8 @@ export default function Atlas() {
                 <span>ATLAS</span>
               </Link>
             )}
-            <div className="view-tabs-bar">
+            {workingProject && <div className="compact-project-breadcrumb"><button onClick={() => navigate("dashboard")}>{t("apps.compact.projects", locale)}</button><ArrowRight size={13} /><strong>{workingProject.name}</strong></div>}
+            <div className={`view-tabs-bar ${workingProject ? "compact-project-tabs" : ""}`}>
               <div
                 className="view-tabs"
                 role="tablist"
@@ -938,11 +954,9 @@ export default function Atlas() {
               >
                 <div className="page-heading">
                   <div>
-                    <span className="eyebrow">THE BIG PICTURE</span>
-                    <h1>
-                      Everything in motion<span>.</span>
-                    </h1>
-                    <p>Your projects, your progress, your next move.</p>
+                    <span className="eyebrow">ATLAS / PORTFOLIO</span>
+                    <h1>{t("apps.compact.projects", locale)}</h1>
+                    <p>{t("apps.compact.subtitle", locale)}</p>
                   </div>
                   <button
                     className="today-launch"
@@ -1057,7 +1071,7 @@ export default function Atlas() {
                       className="project-layout-switch"
                       aria-label="Project layout"
                     >
-                      {(["cards", "list", "board"] as const).map((layout) => (
+                      {(["list", "board", "cards"] as const).map((layout) => (
                         <button
                           key={layout}
                           disabled={!loaded}
@@ -1072,6 +1086,7 @@ export default function Atlas() {
                           {layout[0].toUpperCase() + layout.slice(1)}
                         </button>
                       ))}
+                      <button disabled={!loaded} onClick={() => navigate("globe")}><Globe2 size={15} />Globe</button>
                     </div>
                     {projects.some(
                       (p) => !p.archived && p.work?.widgets.length,
@@ -1123,9 +1138,11 @@ export default function Atlas() {
                         busy={saving}
                         demo={demo}
                       />
+                    ) : settings.dashboard.layout === "list" ? (
+                      <PortfolioList projects={filtered} loaded={loaded} onOpen={openProject} />
                     ) : (
                       <div
-                        className={`project-grid ${settings.dashboard.layout === "list" ? "project-list" : ""}`}
+                        className="project-grid"
                       >
                         {filtered.map((p) => (
                           <button
@@ -1356,6 +1373,13 @@ export default function Atlas() {
             }
             navigate={navigate}
           />
+          <div className="mobile-account-menu mt-4">
+            <AccountMenu
+              name={access?.name || "My workspace"}
+              role={access?.roleName || (demo ? "Exploring demo projects" : "Personal projects")}
+              email={access?.email}
+            />
+          </div>
         </DialogContent>
       </Dialog>
     </WellbeingProvider>
