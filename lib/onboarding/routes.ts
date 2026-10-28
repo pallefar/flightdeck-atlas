@@ -49,6 +49,16 @@ import {
 import { json, sameOrigin } from "../http";
 import { findingCodes, scanText } from "../governance/scan";
 import {
+  HANDOFF_KINDS,
+  type HandoffKind,
+  diagramforgeHandoff,
+  handoffsFor,
+  mapsStepsRequest,
+  parseComplianceRecord,
+  reserveHandoff,
+  studioSpec,
+} from "./handoffs";
+import {
   EDITABLE_FIELDS,
   brainDataSchema,
   defaultBrainData,
@@ -259,6 +269,7 @@ export function createOnboardingRoutes(deps: BrainDeps) {
         }),
       ),
       values: values.map(valueJson),
+      handoffs: await handoffsFor(deps.db, project.id),
       reuse,
       gates,
       /** Which gates this actor may pass, so the UI hides what the server
@@ -741,8 +752,152 @@ export function createOnboardingRoutes(deps: BrainDeps) {
       .run();
     return get(id);
   };
-  return { list, get, create, patch, gate, reuse, evidenceAdd, valueAdd };
+  /** Reserve one hand-off for another tool. Nothing is dispatched here: the
+   * body and its idempotency key are stored so a transport added by the
+   * contract's owner sends exactly these bytes, once. */
+  const handoffCreate = async (request: Request, id: string): Promise<Response> => {
+    if (!sameOrigin(request))
+      return json({ error: "Request origin is not allowed." }, 403);
+    const auth = await deps.authorize("onboarding.handoff");
+    if (auth.error) return auth.error;
+    const found = await load(auth.access, id);
+    if (!found) return notFound();
+    if (!found.row) return notFound("not_onboarded");
+    const body = await readBody(request);
+    if (!body) return badBody();
+    const kind = body.kind;
+    if (!(HANDOFF_KINDS as readonly string[]).includes(String(kind)))
+      return json({ error: "Unknown hand-off kind.", code: "unknown_kind" }, 400);
+    const ctx = await context(id);
+    if (!ctx.onboarding) return notFound("not_onboarded");
+    const data = parseRowData(ctx.onboarding);
+    const evidence = ctx.evidence
+      .filter((item) => item.status === "accepted" || item.status === "redacted")
+      .map((item) => ({
+        id: item.id as string,
+        sha256: item.sha256 as string,
+        kind: item.kind as string,
+        classification: item.classification as never,
+      }));
+    const mapType = body.mapType === "future" ? "future" : "as-is";
+    const questions = Array.isArray(body.questions)
+      ? body.questions.filter((q): q is string => typeof q === "string")
+      : [];
+    let payload: unknown;
+    switch (kind as HandoffKind) {
+      case "kg":
+        payload = mapsStepsRequest({
+          projectId: id,
+          projectName: found.project.name,
+          evidence,
+          mapType,
+          stepFormatRevision:
+            typeof body.stepFormatRevision === "string"
+              ? body.stepFormatRevision.slice(0, 80)
+              : null,
+        });
+        break;
+      case "diagramforge":
+        payload = diagramforgeHandoff({
+          projectId: id,
+          projectName: found.project.name,
+          mapType,
+          evidence,
+          questions,
+        });
+        break;
+      case "studio":
+        if (!data.buildDecision)
+          return json(
+            {
+              error: "Choose the build decision before asking Studio.",
+              code: "build_decision_missing",
+            },
+            409,
+          );
+        payload = studioSpec({
+          projectId: id,
+          projectName: found.project.name,
+          decision: data.buildDecision,
+          toBeMapRef: data.toBeMapRef,
+          processManifestHash:
+            typeof body.processManifestHash === "string"
+              ? body.processManifestHash.slice(0, 128)
+              : null,
+          objective: data.objective,
+          successMeasure: data.successMeasure,
+          classification: (data.classification ?? "internal") as never,
+        });
+        break;
+      default:
+        payload = {
+          schema: "atlas-companion-request/1",
+          projectId: id,
+          projectName: found.project.name,
+        };
+    }
+    const reserved = await reserveHandoff(deps.db, {
+      id: deps.newId(),
+      projectId: id,
+      kind: kind as HandoffKind,
+      body: payload,
+      at: now(),
+    });
+    if (!reserved.ok)
+      return json(
+        {
+          error: "A hand-off of this kind is already open for this project.",
+          code: reserved.code,
+        },
+        409,
+      );
+    return get(id);
+  };
+  /** Accept a Studio compliance record back. Only a record that names what
+   * ran and whether it passed can mark a build as shipped. */
+  const compliance = async (request: Request, id: string): Promise<Response> => {
+    if (!sameOrigin(request))
+      return json({ error: "Request origin is not allowed." }, 403);
+    const auth = await deps.authorize("onboarding.handoff");
+    if (auth.error) return auth.error;
+    const found = await load(auth.access, id);
+    if (!found) return notFound();
+    if (!found.row) return notFound("not_onboarded");
+    const body = await readBody(request);
+    if (!body) return badBody();
+    const parsed = parseComplianceRecord(body.record);
+    if (!parsed.ok)
+      return json(
+        { error: "That is not a Studio compliance record.", code: parsed.code },
+        400,
+      );
+    if (!parsed.value.passed)
+      return json(
+        { error: "The compliance record did not pass; nothing was shipped.", code: "not_passed" },
+        409,
+      );
+    const data = parseRowData(found.row);
+    const at = now();
+    await deps.db
+      .prepare(
+        "UPDATE atlas_onboarding SET data = ?, revision = revision + 1, updated_at = ? WHERE project_id = ? AND revision = ?",
+      )
+      .bind(
+        JSON.stringify({
+          ...data,
+          complianceRecordId: parsed.value.recordId,
+          shippedRef: parsed.value.subAppId,
+        }),
+        at,
+        id,
+        found.row.revision,
+      )
+      .run();
+    return get(id);
+  };
+  return { list, get, create, patch, gate, reuse, evidenceAdd, valueAdd, handoffCreate, compliance };
 }
+
 function nameOf(data: string) {
   try {
     return (JSON.parse(data) as { name?: string }).name ?? "";
