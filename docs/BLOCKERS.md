@@ -59,3 +59,11 @@ this file is a claim that something works.
 See `docs/DECISIONS-ATLAS-V1.md`: every row there is an assumption, not an
 approval. The two that block the most work are the Windows shell (Q1) and
 whether Atlas stays on Cloudflare Sites for TE data (Q3).
+
+## Housekeeping before this branch is pushed
+
+The macOS build products (`atlas/macos/Atlas/.build`, 230 MB) were committed by
+accident in the first native commit and are untracked again from the commit that
+added `.gitignore` for them. **The objects remain in this branch's history.**
+Before pushing, rewrite the last native commits locally (or squash them) so the
+remote does not receive 230 MB of build output; nothing depends on that history.
