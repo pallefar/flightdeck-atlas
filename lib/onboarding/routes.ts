@@ -79,6 +79,7 @@ export type BrainProject = { id: string; name: string; revision: number };
 export type BrainDeps = {
   authorize(
     permission?: Permission,
+    request?: Request,
   ): Promise<
     { access: BrainAccess; error?: never } | { access?: never; error: Response }
   >;
@@ -291,8 +292,8 @@ export function createOnboardingRoutes(deps: BrainDeps) {
       .first<OnboardingRow>();
     return { project, row };
   }
-  const list = async (): Promise<Response> => {
-    const auth = await deps.authorize("onboarding.view");
+  const list = async (request?: Request): Promise<Response> => {
+    const auth = await deps.authorize("onboarding.view", request);
     if (auth.error) return auth.error;
     const visible = await deps.visibleIds(auth.access);
     const { results } = await deps.db
@@ -315,8 +316,8 @@ export function createOnboardingRoutes(deps: BrainDeps) {
       }));
     return json({ projects });
   };
-  const get = async (id: string): Promise<Response> => {
-    const auth = await deps.authorize("onboarding.view");
+  const get = async (id: string, request?: Request): Promise<Response> => {
+    const auth = await deps.authorize("onboarding.view", request);
     if (auth.error) return auth.error;
     const found = await load(auth.access, id);
     if (!found) return notFound();
@@ -328,7 +329,7 @@ export function createOnboardingRoutes(deps: BrainDeps) {
   const create = async (request: Request, id: string): Promise<Response> => {
     if (!sameOrigin(request))
       return json({ error: "Request origin is not allowed." }, 403);
-    const auth = await deps.authorize("onboarding.create");
+    const auth = await deps.authorize("onboarding.create", request);
     if (auth.error) return auth.error;
     const project = await deps.loadProject(auth.access, id);
     if (!project) return notFound();
@@ -376,12 +377,12 @@ export function createOnboardingRoutes(deps: BrainDeps) {
       reason: "Intake opened",
       at,
     });
-    return get(id);
+    return get(id, request);
   };
   const patch = async (request: Request, id: string): Promise<Response> => {
     if (!sameOrigin(request))
       return json({ error: "Request origin is not allowed." }, 403);
-    const auth = await deps.authorize("onboarding.create");
+    const auth = await deps.authorize("onboarding.create", request);
     if (auth.error) return auth.error;
     const found = await load(auth.access, id);
     if (!found) return notFound();
@@ -466,7 +467,7 @@ export function createOnboardingRoutes(deps: BrainDeps) {
       )
       .bind(JSON.stringify(data), stage, at, id, found.row.revision)
       .run();
-    const response = await get(id);
+    const response = await get(id, request);
     if (!reopened) return response;
     return new Response(response.body, {
       status: 200,
@@ -476,7 +477,7 @@ export function createOnboardingRoutes(deps: BrainDeps) {
   const gate = async (request: Request, id: string): Promise<Response> => {
     if (!sameOrigin(request))
       return json({ error: "Request origin is not allowed." }, 403);
-    const auth = await deps.authorize("onboarding.view");
+    const auth = await deps.authorize("onboarding.view", request);
     if (auth.error) return auth.error;
     const found = await load(auth.access, id);
     if (!found) return notFound();
@@ -584,12 +585,12 @@ export function createOnboardingRoutes(deps: BrainDeps) {
         found.row.revision,
       )
       .run();
-    return get(id);
+    return get(id, request);
   };
   const reuse = async (request: Request, id: string): Promise<Response> => {
     if (!sameOrigin(request))
       return json({ error: "Request origin is not allowed." }, 403);
-    const auth = await deps.authorize("onboarding.triage");
+    const auth = await deps.authorize("onboarding.triage", request);
     if (auth.error) return auth.error;
     const found = await load(auth.access, id);
     if (!found) return notFound();
@@ -614,12 +615,12 @@ export function createOnboardingRoutes(deps: BrainDeps) {
       )
       .bind(id, body.decision, reason, JSON.stringify(matches), auth.access.userId, at, at)
       .run();
-    return get(id);
+    return get(id, request);
   };
   const evidenceAdd = async (request: Request, id: string): Promise<Response> => {
     if (!sameOrigin(request))
       return json({ error: "Request origin is not allowed." }, 403);
-    const auth = await deps.authorize("onboarding.capture.review");
+    const auth = await deps.authorize("onboarding.capture.review", request);
     if (auth.error) return auth.error;
     const found = await load(auth.access, id);
     if (!found) return notFound();
@@ -686,12 +687,12 @@ export function createOnboardingRoutes(deps: BrainDeps) {
         at,
       )
       .run();
-    return get(id);
+    return get(id, request);
   };
   const valueAdd = async (request: Request, id: string): Promise<Response> => {
     if (!sameOrigin(request))
       return json({ error: "Request origin is not allowed." }, 403);
-    const auth = await deps.authorize("onboarding.value.edit");
+    const auth = await deps.authorize("onboarding.value.edit", request);
     if (auth.error) return auth.error;
     const found = await load(auth.access, id);
     if (!found) return notFound();
@@ -750,7 +751,7 @@ export function createOnboardingRoutes(deps: BrainDeps) {
         at,
       )
       .run();
-    return get(id);
+    return get(id, request);
   };
   /** Reserve one hand-off for another tool. Nothing is dispatched here: the
    * body and its idempotency key are stored so a transport added by the
@@ -758,7 +759,7 @@ export function createOnboardingRoutes(deps: BrainDeps) {
   const handoffCreate = async (request: Request, id: string): Promise<Response> => {
     if (!sameOrigin(request))
       return json({ error: "Request origin is not allowed." }, 403);
-    const auth = await deps.authorize("onboarding.handoff");
+    const auth = await deps.authorize("onboarding.handoff", request);
     if (auth.error) return auth.error;
     const found = await load(auth.access, id);
     if (!found) return notFound();
@@ -851,14 +852,14 @@ export function createOnboardingRoutes(deps: BrainDeps) {
         },
         409,
       );
-    return get(id);
+    return get(id, request);
   };
   /** Accept a Studio compliance record back. Only a record that names what
    * ran and whether it passed can mark a build as shipped. */
   const compliance = async (request: Request, id: string): Promise<Response> => {
     if (!sameOrigin(request))
       return json({ error: "Request origin is not allowed." }, 403);
-    const auth = await deps.authorize("onboarding.handoff");
+    const auth = await deps.authorize("onboarding.handoff", request);
     if (auth.error) return auth.error;
     const found = await load(auth.access, id);
     if (!found) return notFound();
@@ -893,7 +894,7 @@ export function createOnboardingRoutes(deps: BrainDeps) {
         found.row.revision,
       )
       .run();
-    return get(id);
+    return get(id, request);
   };
   return { list, get, create, patch, gate, reuse, evidenceAdd, valueAdd, handoffCreate, compliance };
 }

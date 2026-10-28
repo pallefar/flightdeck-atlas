@@ -20,12 +20,23 @@
     "reuseDecision",
     "buildDecision",
     "valueBasis",
-    "updatedAt"
+    "updatedAt",
+    "entryType"
   ],
   "properties": {
-    "contract": { "const": "atlas-onboarding-record/1" },
-    "projectId": { "type": "string", "minLength": 1, "maxLength": 80 },
-    "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "contract": {
+      "const": "atlas-onboarding-record/1"
+    },
+    "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
     "stage": {
       "enum": [
         "intake",
@@ -41,14 +52,21 @@
         "retired"
       ]
     },
-    "revision": { "type": "integer", "minimum": 1 },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
     "gates": {
       "type": "array",
       "maxItems": 200,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["stage", "decision", "at"],
+        "required": [
+          "stage",
+          "decision",
+          "at"
+        ],
         "properties": {
           "stage": {
             "enum": [
@@ -65,19 +83,82 @@
               "retired"
             ]
           },
-          "decision": { "enum": ["pass", "reject", "reopen"] },
-          "at": { "type": "string", "format": "date-time" }
+          "decision": {
+            "enum": [
+              "pass",
+              "reject",
+              "reopen"
+            ]
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       }
     },
-    "evidenceAccepted": { "type": "integer", "minimum": 0 },
-    "evidencePending": { "type": "integer", "minimum": 0 },
-    "osProjectId": { "type": ["string", "null"], "maxLength": 80 },
-    "teoaScopeId": { "type": ["string", "null"], "maxLength": 80 },
-    "visionObjectiveId": { "type": ["string", "null"], "maxLength": 80 },
-    "reuseDecision": { "enum": ["reuse", "extend", "new", null] },
-    "buildDecision": { "enum": ["cowork", "sub-app", "studio", null] },
-    "valueBasis": { "enum": ["estimate", "measured", "not-tracked", null] },
-    "updatedAt": { "type": "string", "format": "date-time" }
+    "evidenceAccepted": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "evidencePending": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "osProjectId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 80
+    },
+    "teoaScopeId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 80
+    },
+    "visionObjectiveId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 80
+    },
+    "reuseDecision": {
+      "enum": [
+        "reuse",
+        "extend",
+        "new",
+        null
+      ]
+    },
+    "buildDecision": {
+      "enum": [
+        "cowork",
+        "sub-app",
+        "studio",
+        null
+      ]
+    },
+    "entryType": {
+      "enum": [
+        "project",
+        "process"
+      ]
+    },
+    "valueBasis": {
+      "enum": [
+        "estimate",
+        "measured",
+        "not-tracked",
+        null
+      ]
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
   }
 }

@@ -149,11 +149,23 @@ the assumptions are in [DECISIONS-ATLAS-V1.md](docs/DECISIONS-ATLAS-V1.md), and
 what is still missing is in [BLOCKERS.md](docs/BLOCKERS.md).
 
 **Desktop:** `atlas/macos/Atlas` is a Swift package (generated contract models,
-stage ladder, signed app shell; `./build.sh` installs `~/Applications/Atlas.app`).
+stage ladder, signed app; `./build.sh` installs `~/Applications/Atlas.app`). The
+app speaks the same API as the web lane: an **Overview** (counts by stage, the
+recently updated projects, and one form to onboard a new project or process),
+a **Pipeline** board, and a project's brain with its requirements, gate, evidence,
+value and audit timeline. It never decides a rule itself — `canGate` and the
+missing requirements come from the server.
+
+Connecting it needs a **device token** the Super Admin mints
+(`POST /api/access/device-tokens`); only its sha256 is stored, and it resolves to
+an existing Atlas grant, so disabling the member or revoking the token denies
+the next request. The token lives in the Keychain. See the
+[runbook](docs/ONBOARDING-RUNBOOK.md) for the exact steps.
+
 Its tests decode the same fixtures as the web suite, and
 `node scripts/gen-swift.mjs --check` fails when the models fall behind the
-schemas. Capture, transcription and sync are not built yet, and the app says so
-instead of pretending to be connected.
+schemas. Screen capture, transcription and live sync are not built yet, and the
+app says so instead of pretending to be connected.
 
 ## i18n
 

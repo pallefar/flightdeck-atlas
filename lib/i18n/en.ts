@@ -532,6 +532,16 @@ export const en = {
   "brain.start.none": "Every project you can edit already has an intake.",
   "brain.start.done": "Intake opened.",
   "brain.start.failed": "The intake could not be started.",
+  "brain.onboard.title": "Onboard a new project or process",
+  "brain.onboard.name": "Name",
+  "brain.onboard.type": "What are you onboarding?",
+  "brain.onboard.type.project": "A project",
+  "brain.onboard.type.process": "A process",
+  "brain.onboard.action": "Onboard it",
+  "brain.onboard.done": "Project created and its intake is open.",
+  "brain.onboard.failed": "The project could not be created.",
+  "brain.entry.project": "Project",
+  "brain.entry.process": "Process",
 } as const;
 
 export type MessageKey = keyof typeof en;

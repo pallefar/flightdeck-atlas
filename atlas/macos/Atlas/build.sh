@@ -44,6 +44,11 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <!-- The local FlightDeck OS/Atlas runs on loopback over plain HTTP during
+       development. A release points at an HTTPS origin; the exception is
+       limited to local networking, never to arbitrary hosts. -->
+  <key>NSAppTransportSecurity</key>
+  <dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict></plist>
 PLIST
 xattr -cr "$app"

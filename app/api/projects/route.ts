@@ -24,8 +24,8 @@ import { stampTimeEntries } from "@/lib/work-management";
 import { env } from "cloudflare:workers";
 import { requesterRequestsOn as cardRequesterRequestsOn } from "@/lib/flightdeck/project-card";
 export const dynamic = "force-dynamic";
-export async function GET() {
-  const auth = await authorize("projects.read");
+export async function GET(request: Request) {
+  const auth = await authorize("projects.read", false, request);
   if (auth.error) return auth.error;
   try {
     return json({
@@ -47,7 +47,7 @@ export async function GET() {
 export async function POST(request: Request) {
   if (!sameOrigin(request))
     return json({ error: "Request origin is not allowed." }, 403);
-  const auth = await authorize("projects.create");
+  const auth = await authorize("projects.create", false, request);
   if (auth.error) return auth.error;
   const user = auth.access.userId;
   const agents = await lockedAiAgents(request);

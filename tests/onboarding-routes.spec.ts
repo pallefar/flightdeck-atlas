@@ -162,6 +162,15 @@ test.describe("opening an intake", () => {
     }
     expect(body.chain).toEqual({ ok: true, length: 1 });
   });
+  test("records whether a project or a process is being onboarded", async () => {
+    const h = harness();
+    const created = await h.routes.create(call({ ...intakeFields, entryType: "process" }), P);
+    expect(created.status).toBe(200);
+    const body = (await created.json()) as { record: { entryType: string } };
+    expect(body.record.entryType).toBe("process");
+    const projected = parseRecord(body.record);
+    expect(projected.ok).toBe(true);
+  });
   test("refuses a second intake on the same project", async () => {
     const h = await onboarded();
     const again = await jsonOf(await h.routes.create(call({}), P));

@@ -238,6 +238,10 @@ public enum AtlasOnboardingRecordBuildDecision: String, Codable, CaseIterable, S
   case subApp = "sub-app"
   case studio = "studio"
 }
+public enum AtlasOnboardingRecordEntryType: String, Codable, CaseIterable, Sendable {
+  case project = "project"
+  case process = "process"
+}
 public enum AtlasOnboardingRecordValueBasis: String, Codable, CaseIterable, Sendable {
   case estimate = "estimate"
   case measured = "measured"
@@ -257,10 +261,11 @@ public struct AtlasOnboardingRecord: Codable, Equatable, Sendable {
   public let visionObjectiveId: String?
   public let reuseDecision: AtlasOnboardingRecordReuseDecision?
   public let buildDecision: AtlasOnboardingRecordBuildDecision?
+  public let entryType: AtlasOnboardingRecordEntryType
   public let valueBasis: AtlasOnboardingRecordValueBasis?
   public let updatedAt: String
 
-  public init(contract: String, projectId: String, name: String, stage: AtlasOnboardingRecordStage, revision: Int, gates: [AtlasOnboardingRecordItem], evidenceAccepted: Int, evidencePending: Int, osProjectId: String?, teoaScopeId: String?, visionObjectiveId: String?, reuseDecision: AtlasOnboardingRecordReuseDecision?, buildDecision: AtlasOnboardingRecordBuildDecision?, valueBasis: AtlasOnboardingRecordValueBasis?, updatedAt: String) {
+  public init(contract: String, projectId: String, name: String, stage: AtlasOnboardingRecordStage, revision: Int, gates: [AtlasOnboardingRecordItem], evidenceAccepted: Int, evidencePending: Int, osProjectId: String?, teoaScopeId: String?, visionObjectiveId: String?, reuseDecision: AtlasOnboardingRecordReuseDecision?, buildDecision: AtlasOnboardingRecordBuildDecision?, entryType: AtlasOnboardingRecordEntryType, valueBasis: AtlasOnboardingRecordValueBasis?, updatedAt: String) {
     self.contract = contract
     self.projectId = projectId
     self.name = name
@@ -274,6 +279,7 @@ public struct AtlasOnboardingRecord: Codable, Equatable, Sendable {
     self.visionObjectiveId = visionObjectiveId
     self.reuseDecision = reuseDecision
     self.buildDecision = buildDecision
+    self.entryType = entryType
     self.valueBasis = valueBasis
     self.updatedAt = updatedAt
   }
@@ -292,6 +298,7 @@ public struct AtlasOnboardingRecord: Codable, Equatable, Sendable {
     case visionObjectiveId = "visionObjectiveId"
     case reuseDecision = "reuseDecision"
     case buildDecision = "buildDecision"
+    case entryType = "entryType"
     case valueBasis = "valueBasis"
     case updatedAt = "updatedAt"
   }

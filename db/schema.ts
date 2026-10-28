@@ -510,3 +510,23 @@ export const handoffs = sqliteTable(
     ),
   ],
 );
+/** Device tokens for the native clients (Atlas v1). A token is a bearer
+ * credential the Super Admin mints for one person's email and role, and it is
+ * stored ONLY as a sha256 hash: a leaked database cannot be replayed. The
+ * token is not an identity provider — it maps to an existing Atlas grant, so
+ * revoking the grant or the token both deny the next request. */
+export const deviceTokens = sqliteTable(
+  "atlas_device_tokens",
+  {
+    id: text("id").primaryKey(),
+    label: text("label").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    email: text("email").notNull(),
+    roleId: text("role_id").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull(),
+    lastUsedAt: text("last_used_at"),
+    revokedAt: text("revoked_at"),
+  },
+  (t) => [index("idx_atlas_device_tokens_email").on(t.email)],
+);

@@ -12,6 +12,7 @@ New with Atlas v1:
 |---|---|
 | `0014_massive_whirlwind.sql` | `atlas_gate_events` — the append-only, hash-chained gate audit. |
 | `0015_nifty_lord_tyger.sql` | `atlas_onboarding`, `atlas_evidence`, `atlas_reuse_checks`, `atlas_value`, `atlas_handoffs`. |
+| `0016_unique_switch.sql` | `atlas_device_tokens` — hashed bearer credentials for the native clients. |
 
 Local (the same incantation as the other migrations, from the repository root):
 
@@ -89,3 +90,46 @@ unmet is refused with the requirement codes, not a generic error.
   never stored.
 - The hand-off outbox refuses a second open hand-off of the same kind for the
   same project (one bundle at a time), which is deliberate.
+
+## Connecting the macOS app
+
+The app speaks the same API as the web lane, so it needs a credential the web
+lane does not: a **device token**. Mint one as the Super Admin and hand it to
+the app once.
+
+```sh
+# With a signed-in Super Admin session (the dev browser flow, or a real one):
+curl -sS -X POST "$ATLAS/api/access/device-tokens" \
+  -H 'content-type: application/json' -H "origin: $ATLAS" \
+  -b "session=$COOKIE" \
+  -d '{"label":"Karsten macOS","email":"you@te.com","roleId":"admin"}'
+# → {"id":"…","token":"<64 hex>","email":"…","roleId":"admin"}   (shown ONCE)
+```
+
+- Only the sha256 of the token is stored. There is no "show it again": mint a
+  new one and revoke the old.
+- A token never grants anything by itself. It resolves to an existing Atlas
+  member grant (email + role); disabling the member or revoking the token
+  denies the next request.
+- `GET /api/access/device-tokens` lists them (no token, no hash) and
+  `DELETE /api/access/device-tokens?id=…` revokes one. Both are Super Admin
+  only.
+- There is **no web UI** for minting yet; the API is the supported path.
+
+In the app: **Settings → Base URL** (`http://localhost:5173` in development —
+the dev server listens on IPv6 loopback, so a literal `127.0.0.1` is refused),
+paste the token, **Save and test**. The token goes to the Keychain, never to
+preferences.
+
+For development only, a terminal launch can skip Settings:
+
+```sh
+ATLAS_BASE_URL=http://localhost:5173 ATLAS_DEVICE_TOKEN=<token> \
+  "$HOME/Applications/Atlas.app/Contents/MacOS/Atlas"
+```
+
+A Finder/Dock launch never sees those variables, and the app stores nothing
+from them.
+
+The app's `Info.plist` allows cleartext HTTP to **local** hosts only
+(`NSAllowsLocalNetworking`), so a production deployment must use HTTPS.

@@ -21,8 +21,14 @@ import {
 } from "../domain/stages";
 import type { Confidence, ValueBasis, ValueFigures, ValuePeriod } from "../domain/value";
 const text = (max: number) => z.string().trim().max(max);
+/** What is being onboarded: a project, or a process that runs inside one.
+ * Both use the same pipeline; the distinction changes the wording and the
+ * hand-off defaults (a process usually needs KG and a map). */
+export const ENTRY_TYPES = ["project", "process"] as const;
+export type EntryType = (typeof ENTRY_TYPES)[number];
 export const brainDataSchema = z
   .object({
+    entryType: z.enum(ENTRY_TYPES).default("project"),
     classificationDeclared: z.boolean().default(false),
     classification: z.enum(CLASSIFICATIONS).nullable().default(null),
     /** Who asked, in the requester's own words. A name, not an account. */
@@ -57,6 +63,7 @@ export type BrainData = z.infer<typeof brainDataSchema>;
 /** Fields a PATCH may write. Everything else is derived from a real event, so
  * a client cannot assert an alignment or a ship that has not happened. */
 export const EDITABLE_FIELDS = [
+  "entryType",
   "classificationDeclared",
   "classification",
   "requester",
@@ -167,6 +174,7 @@ export function toRecord(input: {
     visionObjectiveId: input.data.visionObjectiveId,
     reuseDecision: input.reuseDecision,
     buildDecision: input.data.buildDecision,
+    entryType: input.data.entryType,
     valueBasis: input.valueBasis,
     updatedAt: input.updatedAt,
   };

@@ -26,11 +26,22 @@ this file is a claim that something works.
   build plus a capture helper; the contract models are already generated, so the
   shell only needs the same fixtures to prove parity.
 
+## Device-token administration has no screen
+
+- **State:** minting, listing and revoking work through
+  `POST/GET/DELETE /api/access/device-tokens` (Super Admin, same-origin), and the
+  macOS app connects with a token.
+- **Why:** the runbook's `curl` is the supported path for now; a screen in
+  Access management is a UI task, not an API one.
+- **Next step:** a "Devices" section in the existing Access management view that
+  lists tokens (never the hash), mints one, shows it once, and revokes.
+
 ## macOS capture, transcription and sync
 
-- **State:** the app shell, generated contract models and stage ladder are
-  built, signed and installed. ScreenCaptureKit recording, on-device Whisper
-  transcription and HTTPS sync are **not** built.
+- **State:** the app has an Overview, a Pipeline board, a project brain, the
+  onboard-a-project-or-process flow and a working API connection over device
+  tokens. ScreenCaptureKit recording, on-device Whisper transcription and
+  offline sync are **not** built.
 - **Why:** capture is the part of the PRD that needs the most care (permission
   prompts, a visible indicator, keyframe layout compatibility, no Cap). It was
   not attempted rather than half-built.

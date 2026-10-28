@@ -15,7 +15,8 @@ const db = {
   },
 } as ChainDb;
 export const onboardingRoutes = createOnboardingRoutes({
-  authorize: (permission?: Permission) => authorize(permission) as Promise<
+  authorize: (permission?: Permission, request?: Request) =>
+    authorize(permission, false, request) as Promise<
     { access: BrainAccess } | { error: Response }
   >,
   async loadProject(access, id) {

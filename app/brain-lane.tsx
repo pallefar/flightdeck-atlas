@@ -38,7 +38,13 @@ type ValueRow = {
 };
 type Gate = { stage: string; decision: string; at: string };
 type BrainView = {
-  record: { projectId: string; name: string; stage: string; revision: number };
+  record: {
+    projectId: string;
+    name: string;
+    stage: string;
+    revision: number;
+    entryType: "project" | "process";
+  };
   status: string;
   data: Record<string, string | boolean | null>;
   stage: {
@@ -85,6 +91,8 @@ export default function BrainLane() {
   const [notice, setNotice] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<{ id: string; name: string }[]>([]);
   const [startId, setStartId] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newType, setNewType] = useState<"project" | "process">("project");
   const [busy, setBusy] = useState(false);
   const [fields, setFields] = useState<Record<string, string | boolean>>({});
   const [reuseReason, setReuseReason] = useState("");
@@ -176,7 +184,6 @@ export default function BrainLane() {
         setNotice(payload.error ?? t("brain.start.failed"));
         return;
       }
-      setNotice(t("brain.start.done"));
       const chosen = startId;
       setStartId("");
       const refreshed = await fetch("/api/onboarding", { cache: "no-store" });
@@ -185,12 +192,72 @@ export default function BrainLane() {
         setRows(body.projects);
       }
       await open(chosen);
+      // After open(): open() clears the notice, so a message set before it
+      // would flash and vanish.
+      setNotice(t("brain.start.done"));
     } catch {
       setNotice(t("brain.start.failed"));
     } finally {
       setBusy(false);
     }
   }, [startId, t, open]);
+  /** The one flow that creates a project AND opens its intake, so a person
+   * never leaves the lane to start onboarding. Two calls, in order: Atlas's
+   * existing project create, then the intake on its id. */
+  const onboardNew = useCallback(async () => {
+    const name = newName.trim();
+    if (!name) return;
+    setBusy(true);
+    try {
+      const created = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name,
+          description: "",
+          status: "In progress",
+          category: newType === "process" ? "Process" : "Project",
+          location: "",
+          latitude: null,
+          longitude: null,
+          dueDate: "",
+          color: "orange",
+          tasks: [],
+        }),
+      });
+      const createdBody = (await created.json().catch(() => ({}))) as {
+        error?: string;
+        project?: { id: string };
+      };
+      if (!created.ok || !createdBody.project?.id) {
+        setNotice(createdBody.error ?? t("brain.onboard.failed"));
+        return;
+      }
+      const id = createdBody.project.id;
+      const opened = await fetch(`/api/onboarding/${id}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ entryType: newType }),
+      });
+      if (!opened.ok) {
+        const payload = (await opened.json().catch(() => ({}))) as { error?: string };
+        setNotice(payload.error ?? t("brain.onboard.failed"));
+        return;
+      }
+      setNewName("");
+      const refreshed = await fetch("/api/onboarding", { cache: "no-store" });
+      if (refreshed.ok) {
+        const body = (await refreshed.json()) as { projects: ListRow[] };
+        setRows(body.projects);
+      }
+      await open(id);
+      setNotice(t("brain.onboard.done"));
+    } catch {
+      setNotice(t("brain.onboard.failed"));
+    } finally {
+      setBusy(false);
+    }
+  }, [newName, newType, t, open]);
   const send = useCallback(
     async (
       path: string,
@@ -356,6 +423,39 @@ export default function BrainLane() {
           {notice}
         </p>
       )}
+      <section className="brain-start" aria-label={t("brain.onboard.title")}>
+        <h2>{t("brain.onboard.title")}</h2>
+        <div className="brain-row">
+          <label>
+            {t("brain.onboard.name")}
+            <input
+              value={newName}
+              onChange={(event) => setNewName(event.target.value)}
+              placeholder={t("brain.onboard.name")}
+            />
+          </label>
+          <label>
+            {t("brain.onboard.type")}
+            <select
+              value={newType}
+              onChange={(event) =>
+                setNewType(event.target.value === "process" ? "process" : "project")
+              }
+            >
+              <option value="project">{t("brain.onboard.type.project")}</option>
+              <option value="process">{t("brain.onboard.type.process")}</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            className="brain-primary"
+            disabled={busy || newName.trim().length === 0}
+            onClick={() => void onboardNew()}
+          >
+            {t("brain.onboard.action")}
+          </button>
+        </div>
+      </section>
       <section className="brain-start" aria-label={t("brain.start.title")}>
         <h2>{t("brain.start.title")}</h2>
         {candidates.length === 0 ? (
@@ -438,6 +538,7 @@ export default function BrainLane() {
           ) : (
             <>
               <p className="brain-meta">
+                {t(`brain.entry.${view.record.entryType === "process" ? "process" : "project"}` as never)} ·{" "}
                 {stageLabel(view.stage.current)} ·{" "}
                 {t("brain.revision", { revision: view.record.revision })}
               </p>
