@@ -1,4 +1,0 @@
-module AtlasDomain {
-header "AtlasDomain-Swift.h"
-export *
-}

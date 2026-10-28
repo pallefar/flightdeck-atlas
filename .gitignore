@@ -52,3 +52,6 @@ next-env.d.ts
 /playwright-report/
 
 *.tsbuildinfo
+
+# SwiftPM build products (installed app is built from a scratch path).
+atlas/macos/Atlas/.build/
