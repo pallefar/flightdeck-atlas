@@ -1,0 +1,21 @@
+{
+  "" : {
+    "const-values" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Release/AtlasDomain-t.build/Objects-normal/arm64/AtlasDomain-primary.swiftconstvalues",
+    "dependencies" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Release/AtlasDomain-t.build/Objects-normal/arm64/AtlasDomain-primary.d",
+    "diagnostics" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Release/AtlasDomain-t.build/Objects-normal/arm64/AtlasDomain-primary.dia",
+    "emit-module-dependencies" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Release/AtlasDomain-t.build/Objects-normal/arm64/AtlasDomain-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Release/AtlasDomain-t.build/Objects-normal/arm64/AtlasDomain-primary-emit-module.dia",
+    "pch" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Release/AtlasDomain-t.build/Objects-normal/arm64/AtlasDomain-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Release/AtlasDomain-t.build/Objects-normal/arm64/AtlasDomain-primary.swiftdeps"
+  },
+  "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/Sources/AtlasDomain/Generated.swift" : {
+    "index-unit-output-path" : "/Atlas.build/Release/AtlasDomain-t.build/Objects-normal/arm64/Generated.o",
+    "llvm-bc" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Release/AtlasDomain-t.build/Objects-normal/arm64/Generated.bc",
+    "object" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Release/AtlasDomain-t.build/Objects-normal/arm64/Generated.o"
+  },
+  "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/Sources/AtlasDomain/Stages.swift" : {
+    "index-unit-output-path" : "/Atlas.build/Release/AtlasDomain-t.build/Objects-normal/arm64/Stages.o",
+    "llvm-bc" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Release/AtlasDomain-t.build/Objects-normal/arm64/Stages.bc",
+    "object" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Release/AtlasDomain-t.build/Objects-normal/arm64/Stages.o"
+  }
+}

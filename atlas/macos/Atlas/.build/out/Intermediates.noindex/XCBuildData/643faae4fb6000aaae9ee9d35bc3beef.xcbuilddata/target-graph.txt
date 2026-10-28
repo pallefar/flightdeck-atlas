@@ -1,0 +1,9 @@
+Target dependency graph (4 targets)
+Target 'AllExcludingTests' in project 'Aggregate'
+➜ Explicit dependency on target 'Atlas_AtlasDomainTests' in project 'Atlas'
+➜ Explicit dependency on target 'Atlas-product' in project 'Atlas'
+➜ Explicit dependency on target 'AtlasDomain' in project 'Atlas'
+Target 'Atlas-product' in project 'Atlas'
+➜ Explicit dependency on target 'AtlasDomain' in project 'Atlas'
+Target 'AtlasDomain' in project 'Atlas' (no dependencies)
+Target 'Atlas_AtlasDomainTests' in project 'Atlas' (no dependencies)

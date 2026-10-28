@@ -1,0 +1,15 @@
+{
+  "contract": "atlas-evidence/1",
+  "id": "ev-001",
+  "projectId": "4f7d1c2a-8b3e-4c5d-9e6f-a1b2c3d4e5f6",
+  "kind": "recording",
+  "source": "screen-capture-2026-10-28.mp4",
+  "sha256": "55c92059f75c61c50ae5f0e6c15d2a8147b378a401ec5a8280032ec18b598170",
+  "bytes": 1048576,
+  "classification": "internal",
+  "scanState": "clear",
+  "findings": [],
+  "reviewer": null,
+  "status": "accepted",
+  "createdAt": "2026-10-28T09:00:00.000Z"
+}

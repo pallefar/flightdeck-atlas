@@ -1,0 +1,29 @@
+{
+  "" : {
+    "diagnostics" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/AtlasDomain-primary.dia",
+    "emit-module-dependencies" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/AtlasDomain-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/AtlasDomain-primary-emit-module.dia",
+    "pch" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/AtlasDomain-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/AtlasDomain-primary.swiftdeps"
+  },
+  "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/Sources/AtlasDomain/Generated.swift" : {
+    "const-values" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/Generated.swiftconstvalues",
+    "dependencies" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/Generated.d",
+    "diagnostics" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/Generated.dia",
+    "index-unit-output-path" : "/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/Generated.o",
+    "llvm-bc" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/Generated.bc",
+    "object" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/Generated.o",
+    "swift-dependencies" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/Generated.swiftdeps",
+    "swiftmodule" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/Generated~partial.swiftmodule"
+  },
+  "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/Sources/AtlasDomain/Stages.swift" : {
+    "const-values" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/Stages.swiftconstvalues",
+    "dependencies" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/Stages.d",
+    "diagnostics" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/Stages.dia",
+    "index-unit-output-path" : "/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/Stages.o",
+    "llvm-bc" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/Stages.bc",
+    "object" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/Stages.o",
+    "swift-dependencies" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/Stages.swiftdeps",
+    "swiftmodule" : "/Users/te451223/FlightDeck OS/flightdeck-atlas/atlas/macos/Atlas/.build/out/Intermediates.noindex/Atlas.build/Debug/AtlasDomain-t.build/Objects-normal/arm64/Stages~partial.swiftmodule"
+  }
+}
