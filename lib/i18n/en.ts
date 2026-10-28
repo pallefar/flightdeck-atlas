@@ -1,5 +1,6 @@
 // English, the source language. Every key lives under its lane's namespace
-// (onb.*, apps.*, pages.*, crm.*); a lane adds its own keys here and in de.ts
+// (onb.*, apps.*, pages.*, crm.*, brain.*); a lane adds its own keys here
+// and in de.ts
 // in the same change. Placeholders are {name}; t() fills them.
 export const en = {
   "apps.vision.title": "Vision assessment",
@@ -525,6 +526,12 @@ export const en = {
   "brain.requirement.operator-bundle": "Publish the operator bundle",
   "brain.requirement.realized-value": "Record the realized value",
   "brain.requirement.retire-reason": "Give the reason for retiring",
+  "brain.start.title": "Start an intake",
+  "brain.start.choose": "Project",
+  "brain.start.action": "Start the intake",
+  "brain.start.none": "Every project you can edit already has an intake.",
+  "brain.start.done": "Intake opened.",
+  "brain.start.failed": "The intake could not be started.",
 } as const;
 
 export type MessageKey = keyof typeof en;

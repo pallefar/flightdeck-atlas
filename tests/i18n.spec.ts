@@ -26,7 +26,7 @@ test("en and de carry exactly the same keys, none empty, same placeholders", () 
   expect(Object.keys(de).sort()).toEqual(enKeys);
   expect(enKeys.length).toBeGreaterThan(0);
   for (const key of enKeys as MessageKey[]) {
-    expect(key, key).toMatch(/^(onb|apps|pages|crm|decks|account)\./);
+    expect(key, key).toMatch(/^(onb|apps|pages|crm|decks|account|brain)\./);
     expect(en[key].trim(), key).not.toBe("");
     expect(de[key].trim(), key).not.toBe("");
     expect(placeholders(de[key]), key).toEqual(placeholders(en[key]));

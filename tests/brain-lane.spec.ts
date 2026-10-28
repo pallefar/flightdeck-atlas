@@ -97,6 +97,44 @@ test.describe("the board", () => {
     ).toBeVisible();
     await expect(detail.getByRole("listitem").filter({ hasText: "capture.mp4" })).toBeVisible();
   });
+  test("an intake can be started from the lane", async ({ page }) => {
+    await page.route("**/api/projects", (route) =>
+      route.fulfill({
+        json: {
+          projects: [
+            {
+              id: "p-3",
+              name: "New intake",
+              canEdit: true,
+              status: "In progress",
+              tasks: [],
+              updatedAt: "2026-10-28T09:00:00.000Z",
+              source: "atlas",
+              revision: 1,
+            },
+            {
+              id: "p-4",
+              name: "Someone else's",
+              canEdit: false,
+              status: "In progress",
+              tasks: [],
+              updatedAt: "2026-10-27T09:00:00.000Z",
+              source: "atlas",
+              revision: 1,
+            },
+          ],
+        },
+      }),
+    );
+    await page.goto("/?view=brain");
+    const start = page.getByRole("region", { name: "Start an intake" });
+    // Only the project this person may edit is offered.
+    await expect(start.getByRole("option", { name: "New intake" })).toBeAttached();
+    await expect(start.getByRole("option", { name: "Someone else's" })).toHaveCount(0);
+    await start.getByLabel("Project").selectOption("p-3");
+    await start.getByRole("button", { name: "Start the intake" }).click();
+    await expect(page.locator(".brain-notice")).toContainText("Intake opened.");
+  });
   test("a refusal from the server is printed as it came back", async ({ page }) => {
     const allowed = { ...view, canGate: { capture: true } };
     await page.route("**/api/onboarding/*", (route) => route.fulfill({ json: allowed }));

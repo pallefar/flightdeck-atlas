@@ -184,7 +184,7 @@ export default function AtlasNavigation({
       </div>
       <div className="primary-nav-link">
         <BrainCircuit size={17} />
-        {item("Onboarding brain", "brain", undefined, "Portfolio")}
+        {item("Onboarding brain", "brain", undefined, "Onboarding brain")}
       </div>
       {project ? (
         <div className="nav-project-identity">

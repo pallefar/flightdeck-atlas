@@ -111,11 +111,55 @@ The future SDK/master-app/TEOA contract is in [docs/MASTER-APP-CONTRACT.md](docs
 
 Connections has **From FlightDeck** and **To FlightDeck** flows. Atlas onboarding drafts persist with proposed OS names, workspace planning notes and FlightDeck details; users can edit, remove and export them. The Super Admin can send a saved, complete draft to FlightDeck as a proposal (above); nothing is sent automatically. Import from FlightDeck stays disconnected until delegated identity and project-level access exist with the SDK. See [the bridge contract](docs/PROJECT-BRIDGE-CONTRACT.md).
 
+## Onboarding brain
+
+Every new project can be onboarded once, in Atlas, and then carried through a
+lifecycle: intake → reuse check → capture → as-is → aligned → value baseline →
+to-be → build → live → measured, with **retired** as a terminal state. Atlas
+owns the brain (who asked, why, what it is worth, how it aligns, where it
+stands); it does not draw maps, build apps or run work. It hands those off.
+
+- **The lane:** `?view=brain` (also in the sidebar) shows the pipeline by stage
+  and one project's brain beside it: the next stage's missing requirements, the
+  stage gate, the intake facts, the reuse decision, evidence, value records and
+  the audit timeline.
+- **The audit chain:** every gate decision and stage move is appended to
+  `atlas_gate_events`, hash-chained to its predecessor. The project view reports
+  the chain as verified or names the first broken event; nothing repairs it
+  silently.
+- **No orphans:** alignment cannot pass without one OS project, one TEOA scope,
+  one Vision objective and a committed Vision delivery — each read from the
+  table that records the real event, never from an editable field.
+- **No claimed approvals:** a gate needs the stage's own permissions (alignment
+  needs both the TEOA and the Vision approver), and the built-in Owner role
+  holds none of them, so a requester cannot approve their own project.
+- **Governance first:** a restricted classification (Export Restricted, ITAR,
+  CUI, customer PII) is refused before anything is stored. The scan verdict is
+  the server's, never the client's, and content it cannot inspect is a review,
+  not a pass. Findings are codes with counts; a matched value never leaves the
+  scanner.
+- **Value:** every figure carries a basis (`estimate`, `measured`,
+  `not-tracked`); a measured record without a source is refused, and the
+  roll-up keeps the bases apart rather than adding them together.
+
+Apply migrations `0014` and `0015`, grant `onboarding.*` permissions per person,
+and read [the runbook](docs/ONBOARDING-RUNBOOK.md) before switching anything on.
+The contracts are indexed in [ONBOARDING-CONTRACTS.md](docs/ONBOARDING-CONTRACTS.md),
+the assumptions are in [DECISIONS-ATLAS-V1.md](docs/DECISIONS-ATLAS-V1.md), and
+what is still missing is in [BLOCKERS.md](docs/BLOCKERS.md).
+
+**Desktop:** `atlas/macos/Atlas` is a Swift package (generated contract models,
+stage ladder, signed app shell; `./build.sh` installs `~/Applications/Atlas.app`).
+Its tests decode the same fixtures as the web suite, and
+`node scripts/gen-swift.mjs --check` fails when the models fall behind the
+schemas. Capture, transcription and sync are not built yet, and the app says so
+instead of pretending to be connected.
+
 ## i18n
 
 Atlas has one i18n module, `lib/i18n`, with English and German and no dependency. The onboarding, apps, pages and CRM lanes all use it.
 
-- **Keys.** `lib/i18n/en.ts` is the source, and its keys form the typed `MessageKey` union. `lib/i18n/de.ts` is typed `Record<MessageKey, string>`, so a missing German key fails `npx tsc --noEmit`. `tests/i18n.spec.ts` also checks that both files have the same keys and placeholders. Each lane adds keys only under its own namespace: `onb.*`, `apps.*`, `pages.*` or `crm.*`.
+- **Keys.** `lib/i18n/en.ts` is the source, and its keys form the typed `MessageKey` union. `lib/i18n/de.ts` is typed `Record<MessageKey, string>`, so a missing German key fails `npx tsc --noEmit`. `tests/i18n.spec.ts` also checks that both files have the same keys and placeholders. Each lane adds keys only under its own namespace: `onb.*`, `apps.*`, `pages.*`, `crm.*` or `brain.*`.
 - **Lookup.** `t(key, locale, params)` fills `{name}` placeholders. Outside production a missing key throws. In production it falls back to English.
 - **Locale.** `resolveLocale` picks the first of these that Atlas supports: a saved profile preference (none is stored yet), then `<html lang>`, then Accept-Language, then `en`. On the server, `resolveRequestLocale(request)` in `lib/i18n/server.ts` does the same. The root layout sets `<html lang>` and the client `I18nProvider` from it. Client components use `useLocale()` or `useT()` from `lib/i18n/react.tsx`.
 - **Adoption rule.** Each lane moves its own strings to the module when it next changes them. No lane has to migrate the whole app. English output must stay exactly the same when a string moves, so existing tests and accessible names keep matching.

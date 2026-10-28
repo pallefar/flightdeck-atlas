@@ -526,4 +526,10 @@ export const de: Record<MessageKey, string> = {
   "brain.requirement.operator-bundle": "Operator-Bundle veröffentlichen",
   "brain.requirement.realized-value": "Realiserten Wert erfassen",
   "brain.requirement.retire-reason": "Grund für die Beendigung angeben",
+  "brain.start.title": "Intake starten",
+  "brain.start.choose": "Projekt",
+  "brain.start.action": "Intake starten",
+  "brain.start.none": "Jedes Projekt, das Sie bearbeiten können, hat bereits ein Intake.",
+  "brain.start.done": "Intake eröffnet.",
+  "brain.start.failed": "Das Intake konnte nicht gestartet werden.",
 };

@@ -83,6 +83,8 @@ export default function BrainLane() {
   const [selected, setSelected] = useState<string | null>(null);
   const [view, setView] = useState<BrainView | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [candidates, setCandidates] = useState<{ id: string; name: string }[]>([]);
+  const [startId, setStartId] = useState("");
   const [busy, setBusy] = useState(false);
   const [fields, setFields] = useState<Record<string, string | boolean>>({});
   const [reuseReason, setReuseReason] = useState("");
@@ -114,6 +116,26 @@ export default function BrainLane() {
       )
       .then((body) => live && setRows(body.projects))
       .catch(() => live && setError(t("brain.error")));
+    // The projects this person may edit: the intake can only be opened where
+    // they already have edit rights, which the API checks again.
+    fetch("/api/projects", { cache: "no-store" })
+      .then((response) =>
+        response.ok
+          ? (response.json() as Promise<{
+              projects: { id: string; name: string; canEdit?: boolean }[];
+            }>)
+          : Promise.reject(new Error(String(response.status))),
+      )
+      .then(
+        (body) =>
+          live &&
+          setCandidates(
+            body.projects
+              .filter((project) => project.canEdit !== false)
+              .map((project) => ({ id: project.id, name: project.name })),
+          ),
+      )
+      .catch(() => live && setCandidates([]));
     return () => {
       live = false;
     };
@@ -136,6 +158,39 @@ export default function BrainLane() {
     },
     [t],
   );
+  // Start an intake on a project the person may edit. The lane is the only
+  // place that opens one; the API (POST /api/onboarding/:id) does the rest.
+  const startIntake = useCallback(async () => {
+    if (!startId) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/onboarding/${startId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      if (!response.ok) {
+        setNotice(payload.error ?? t("brain.start.failed"));
+        return;
+      }
+      setNotice(t("brain.start.done"));
+      const chosen = startId;
+      setStartId("");
+      const refreshed = await fetch("/api/onboarding", { cache: "no-store" });
+      if (refreshed.ok) {
+        const body = (await refreshed.json()) as { projects: ListRow[] };
+        setRows(body.projects);
+      }
+      await open(chosen);
+    } catch {
+      setNotice(t("brain.start.failed"));
+    } finally {
+      setBusy(false);
+    }
+  }, [startId, t, open]);
   const send = useCallback(
     async (
       path: string,
@@ -301,6 +356,39 @@ export default function BrainLane() {
           {notice}
         </p>
       )}
+      <section className="brain-start" aria-label={t("brain.start.title")}>
+        <h2>{t("brain.start.title")}</h2>
+        {candidates.length === 0 ? (
+          <p className="brain-hint">{t("brain.start.none")}</p>
+        ) : (
+          <div className="brain-row">
+            <label>
+              {t("brain.start.choose")}
+              <select
+                value={startId}
+                onChange={(event) => setStartId(event.target.value)}
+              >
+                <option value="">—</option>
+                {candidates
+                  .filter((candidate) => !rows.some((row) => row.projectId === candidate.id))
+                  .map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="brain-primary"
+              disabled={busy || !startId}
+              onClick={() => void startIntake()}
+            >
+              {t("brain.start.action")}
+            </button>
+          </div>
+        )}
+      </section>
       {rows.length === 0 ? (
         <p className="brain-empty">{t("brain.empty")}</p>
       ) : (

@@ -227,3 +227,19 @@
     grid-auto-columns: minmax(170px, 1fr);
   }
 }
+.brain-start {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border, #e3e3e8);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--surface, #fff);
+}
+.brain-start h2 {
+  margin: 0;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.75;
+}
