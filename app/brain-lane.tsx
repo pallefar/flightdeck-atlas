@@ -224,8 +224,6 @@ export default function BrainLane() {
       sha256: digest,
       bytes: file.size,
       classification: fields.evidenceClassification ?? "internal",
-      scanState: "review",
-      findings: [],
       status: "pending",
     });
     setNotice(result.ok ? t("brain.evidence.hashed") : result.message);

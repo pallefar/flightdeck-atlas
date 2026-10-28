@@ -19,7 +19,6 @@ import type { Permission } from "../access-policy";
 import {
   CLASSIFICATIONS,
   EVIDENCE_KINDS,
-  SCAN_VERDICTS,
   allowsUpload,
 } from "../domain/classification";
 import {
@@ -48,6 +47,7 @@ import {
   type ValueBasis,
 } from "../domain/value";
 import { json, sameOrigin } from "../http";
+import { findingCodes, scanText } from "../governance/scan";
 import {
   EDITABLE_FIELDS,
   brainDataSchema,
@@ -635,9 +635,16 @@ export function createOnboardingRoutes(deps: BrainDeps) {
         },
         403,
       );
-    if (item.scanState === "blocked")
+    // The verdict is the SERVER's: the body may carry the text to scan, but
+    // never the answer. Content we cannot inspect is a review, not a pass.
+    const scan = scanText(item.scanText);
+    if (scan.verdict === "blocked")
       return json(
-        { error: "The scan blocked this item. It was not stored.", code: "scan_blocked" },
+        {
+          error: "The scan blocked this item. It was not stored.",
+          code: "scan_blocked",
+          findings: findingCodes(scan),
+        },
         403,
       );
     const at = now();
@@ -656,10 +663,12 @@ export function createOnboardingRoutes(deps: BrainDeps) {
         item.sha256,
         item.bytes,
         item.classification,
-        item.scanState,
-        JSON.stringify(item.findings),
+        scan.verdict,
+        JSON.stringify(findingCodes(scan)),
         item.reviewer ?? null,
-        item.status,
+        scan.verdict === "clear" && item.status === "accepted"
+          ? "accepted"
+          : "pending",
         item.retentionDeleteAfter ?? null,
         item.osRef ?? null,
         auth.access.userId,
@@ -770,11 +779,9 @@ const evidenceBody = z
     sha256: hex64,
     bytes: z.number().int().nonnegative().max(2_147_483_648),
     classification: z.enum(CLASSIFICATIONS),
-    scanState: z.enum(SCAN_VERDICTS),
-    findings: z
-      .array(z.string().regex(/^[a-z][a-z0-9._-]{0,59}$/))
-      .max(20)
-      .default([]),
+    /** The text to inspect (an excerpt, a transcript, an extracted page).
+     * Absent means "nothing to inspect", which is a review. */
+    scanText: z.string().max(20_000).optional(),
     reviewer: z.string().trim().max(200).nullable().optional(),
     status: z.enum(["pending", "accepted"]).default("pending"),
     retentionDeleteAfter: z.string().datetime({ offset: true }).nullable().optional(),

@@ -277,8 +277,8 @@ test.describe("gates", () => {
           sha256: "a".repeat(64),
           bytes: 1024,
           classification: "internal",
-          scanState: "clear",
-          findings: [],
+          scanText:
+            "The operator opens the case in ServiceNow and checks the document.",
           status: "accepted",
         },
         "POST",
@@ -349,8 +349,8 @@ test.describe("material change", () => {
         sha256: "a".repeat(64),
         bytes: 1024,
         classification: "internal",
-        scanState: "clear",
-        findings: [],
+        scanText:
+          "The operator opens the case in ServiceNow and checks the document.",
         status: "accepted",
       }),
       P,
@@ -427,8 +427,6 @@ test.describe("evidence and the governance gate", () => {
             sha256: "b".repeat(64),
             bytes: 10,
             classification,
-            scanState: "clear",
-            findings: [],
           }),
           P,
         ),
@@ -441,7 +439,7 @@ test.describe("evidence and the governance gate", () => {
     };
     expect(rows.n).toBe(0);
   });
-  test("a blocking scan is refused", async () => {
+  test("a blocking scan is refused and names only its codes", async () => {
     const h = await onboarded();
     const result = await jsonOf(
       await h.routes.evidenceAdd(
@@ -451,16 +449,18 @@ test.describe("evidence and the governance gate", () => {
           sha256: "c".repeat(64),
           bytes: 10,
           classification: "internal",
-          scanState: "blocked",
-          findings: ["credential.aws_key"],
+          scanText: "paste this key AKIAIOSFODNN7EXAMPLE into the tool",
         }),
         P,
       ),
     );
     expect(result.status).toBe(403);
     expect(result.body.code).toBe("scan_blocked");
+    expect(result.body.findings).toEqual(["secret.aws_key"]);
+    // The matched value never reaches the response.
+    expect(JSON.stringify(result.body)).not.toContain("AKIAIOSFODNN7EXAMPLE");
   });
-  test("findings travel as codes, so a value in a finding is refused", async () => {
+  test("a body cannot claim its own scan verdict", async () => {
     const h = await onboarded();
     const result = await jsonOf(
       await h.routes.evidenceAdd(
@@ -470,14 +470,34 @@ test.describe("evidence and the governance gate", () => {
           sha256: "d".repeat(64),
           bytes: 10,
           classification: "internal",
-          scanState: "review",
-          findings: ["anna.schmidt@example.com"],
+          scanState: "clear",
+          findings: [],
         }),
         P,
       ),
     );
     expect(result.status).toBe(400);
     expect(result.body.code).toBe("invalid_evidence");
+  });
+  test("evidence with no text to inspect is stored as a review, not a pass", async () => {
+    const h = await onboarded();
+    const result = await jsonOf(
+      await h.routes.evidenceAdd(
+        call({
+          kind: "recording",
+          source: "capture.mp4",
+          sha256: "e".repeat(64),
+          bytes: 10,
+          classification: "internal",
+          status: "accepted",
+        }),
+        P,
+      ),
+    );
+    expect(result.status).toBe(200);
+    const stored = (result.body.evidence as { scanState: string; status: string }[])[0];
+    expect(stored.scanState).toBe("review");
+    expect(stored.status).toBe("pending");
   });
 });
 test.describe("value", () => {
