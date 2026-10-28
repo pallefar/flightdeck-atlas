@@ -1,5 +1,6 @@
 import Atlas from "./atlas";
 import { getAccess } from "@/lib/access";
+import { validViews, type View } from "@/lib/navigation";
 import { requireChatGPTUser } from "./chatgpt-auth";
 export const dynamic = "force-dynamic";
 export default async function Home({
@@ -8,23 +9,11 @@ export default async function Home({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
+  // One list, not a second copy: the sign-in round trip must bring the viewer
+  // back to the view it dropped them from, so an unknown view is refused here
+  // and the known ones are exactly lib/navigation's.
   const view =
-    typeof params.view === "string" &&
-    [
-      "manage",
-      "help",
-      "dashboard",
-      "globe",
-      "connection",
-      "briefing",
-      "ideas",
-      "access",
-      "wellbeing",
-      "today",
-      "apps",
-      "team",
-      "presentations",
-    ].includes(params.view)
+    typeof params.view === "string" && validViews.includes(params.view as View)
       ? params.view
       : null;
   const returnParams = new URLSearchParams();

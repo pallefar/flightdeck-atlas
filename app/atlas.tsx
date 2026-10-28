@@ -97,6 +97,7 @@ import {
 } from "@/lib/settings";
 import { t } from "@/lib/i18n";
 import { useLocale } from "@/lib/i18n/react";
+import BrainLane from "./brain-lane";
 const blank: ProjectFields = {
   name: "",
   description: "",
@@ -875,6 +876,8 @@ export default function Atlas() {
                   })
                 }
               />
+            ) : view === "brain" ? (
+              <BrainLane />
             ) : view === "wellbeing" ? (
               <WellbeingPage />
             ) : view === "access" ? (

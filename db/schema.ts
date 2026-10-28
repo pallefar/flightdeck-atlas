@@ -360,3 +360,153 @@ export const gateEvents = sqliteTable(
     ),
   ],
 );
+/** The brain's own fields for one project (Atlas v1). One row per Atlas
+ * project, created when a project enters the onboarding flow. `data` holds
+ * the editable facts (lib/onboarding/model.ts, brainDataSchema); `stage` and
+ * `status` are indexed copies the pipeline board reads without parsing JSON.
+ * The revision is the concurrency token every save and gate must match, the
+ * same rule the rest of Atlas uses. */
+export const onboarding = sqliteTable(
+  "atlas_onboarding",
+  {
+    projectId: text("project_id")
+      .primaryKey()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    stage: text("stage").notNull().default("intake"),
+    status: text("status").notNull().default("active"),
+    data: text("data").notNull(),
+    revision: integer("revision").notNull().default(1),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [
+    index("idx_atlas_onboarding_stage").on(t.stage, t.updatedAt),
+    check("atlas_onboarding_status", sql`${t.status} IN ('active','retired')`),
+  ],
+);
+/** Evidence metadata only (PRD §7.3, §9). The bytes live in the OS docstore;
+ * this table keeps the reference, the hash and the verdict. A `blocked`
+ * classification or scan never gets here at all — the upload path refuses it
+ * before the insert — so a row existing is already a statement that it was
+ * allowed. Findings are codes, never matched values. */
+export const evidence = sqliteTable(
+  "atlas_evidence",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    source: text("source").notNull(),
+    sha256: text("sha256").notNull(),
+    bytes: integer("bytes").notNull(),
+    classification: text("classification").notNull(),
+    scanState: text("scan_state").notNull(),
+    findings: text("findings").notNull().default("[]"),
+    reviewer: text("reviewer"),
+    status: text("status").notNull().default("pending"),
+    retentionDeleteAfter: text("retention_delete_after"),
+    osRef: text("os_ref"),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    index("idx_atlas_evidence_project").on(t.projectId, t.createdAt),
+    check(
+      "atlas_evidence_scan_state",
+      sql`${t.scanState} IN ('clear','review','blocked')`,
+    ),
+    check(
+      "atlas_evidence_status",
+      sql`${t.status} IN ('pending','accepted','rejected','redacted')`,
+    ),
+    check(
+      "atlas_evidence_classification",
+      sql`${t.classification} IN ('public','internal','confidential','export-restricted','itar','cui','customer-pii')`,
+    ),
+  ],
+);
+/** The reuse check (PRD FR-4..FR-6): what was searched, what matched, and the
+ * decision with its reason. One row per project, replaced on a re-check but
+ * the decision is also on the audit chain, so replacing the row never erases
+ * what was decided before. */
+export const reuseChecks = sqliteTable("atlas_reuse_checks", {
+  projectId: text("project_id")
+    .primaryKey()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  decision: text("decision").notNull(),
+  reason: text("reason").notNull(),
+  matches: text("matches").notNull().default("[]"),
+  decidedBy: text("decided_by").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+/** A value record (PRD §7.7). Figures are JSON so adding a measure does not
+ * need a migration; the basis is a column because every read filters on it.
+ * A `measured` row always has a source_ref — the contract refuses otherwise
+ * and this table repeats the rule as a CHECK. */
+export const valueRecords = sqliteTable(
+  "atlas_value",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    basis: text("basis").notNull(),
+    period: text("period").notNull(),
+    tier: text("tier"),
+    figures: text("figures").notNull().default("{}"),
+    target: text("target").notNull().default("{}"),
+    method: text("method").notNull(),
+    methodVersion: text("method_version").notNull(),
+    confidence: text("confidence").notNull(),
+    sourceRef: text("source_ref"),
+    notes: text("notes").notNull().default(""),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    index("idx_atlas_value_project").on(t.projectId, t.period, t.createdAt),
+    check("atlas_value_basis", sql`${t.basis} IN ('estimate','measured','not-tracked')`),
+    check(
+      "atlas_value_measured_source",
+      sql`${t.basis} <> 'measured' OR (${t.sourceRef} IS NOT NULL AND ${t.sourceRef} <> '')`,
+    ),
+  ],
+);
+/** One hand-off to another tool (KG, DiagramForge, Studio, Companion), as a
+ * durable outbox: reserved with an idempotency key and the exact body before
+ * anything leaves Atlas, so a lost reply is retried with the same bytes and
+ * can never file twice. The same discipline as
+ * atlas_flightdeck_operations, which this deliberately mirrors. */
+export const handoffs = sqliteTable(
+  "atlas_handoffs",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    direction: text("direction").notNull(),
+    idempotencyKey: text("idempotency_key").notNull().unique(),
+    requestBody: text("request_body").notNull(),
+    status: text("status").notNull().default("reserved"),
+    receipt: text("receipt"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [
+    index("idx_atlas_handoffs_project").on(t.projectId, t.updatedAt),
+    check(
+      "atlas_handoffs_kind",
+      sql`${t.kind} IN ('kg','diagramforge','studio','companion')`,
+    ),
+    check(
+      "atlas_handoffs_status",
+      sql`${t.status} IN ('reserved','sent','filed','refused','abandoned')`,
+    ),
+  ],
+);

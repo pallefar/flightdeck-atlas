@@ -146,6 +146,7 @@ export type View =
   | "today"
   | "dashboard"
   | "globe"
+  | "brain"
   | "connection"
   | "briefing"
   | "ideas"
@@ -160,6 +161,7 @@ export const validViews: View[] = [
   "today",
   "dashboard",
   "globe",
+  "brain",
   "connection",
   "briefing",
   "ideas",

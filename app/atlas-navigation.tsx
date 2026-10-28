@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import {
+  BrainCircuit,
   ChevronDown,
   Layers3,
   ListTodo,
@@ -180,6 +181,10 @@ export default function AtlasNavigation({
       <div className="primary-nav-link">
         <Layers3 size={17} />
         {item("Portfolio dashboard", "dashboard", undefined, "Portfolio")}
+      </div>
+      <div className="primary-nav-link">
+        <BrainCircuit size={17} />
+        {item("Onboarding brain", "brain", undefined, "Portfolio")}
       </div>
       {project ? (
         <div className="nav-project-identity">
