@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas-evidence/1",
+  "title": "Atlas evidence descriptor",
+  "description": "One item of evidence for an onboarding project. Never carries file content, a path, or a raw scan finding: only codes, hashes and classifications.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "id",
+    "projectId",
+    "kind",
+    "source",
+    "sha256",
+    "bytes",
+    "classification",
+    "scanState",
+    "findings",
+    "reviewer",
+    "status",
+    "createdAt"
+  ],
+  "properties": {
+    "contract": { "const": "atlas-evidence/1" },
+    "id": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "projectId": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "kind": {
+      "enum": ["recording", "voice", "document", "connector", "interview", "capture"]
+    },
+    "source": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "bytes": { "type": "integer", "minimum": 0, "maximum": 2147483648 },
+    "classification": {
+      "enum": [
+        "public",
+        "internal",
+        "confidential",
+        "export-restricted",
+        "itar",
+        "cui",
+        "customer-pii"
+      ]
+    },
+    "scanState": { "enum": ["clear", "review", "blocked"] },
+    "findings": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{0,59}$" }
+    },
+    "reviewer": { "type": ["string", "null"], "maxLength": 2000 },
+    "status": { "enum": ["pending", "accepted", "rejected", "redacted"] },
+    "createdAt": { "type": "string", "format": "date-time" }
+  }
+}

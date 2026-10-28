@@ -1,0 +1,20 @@
+{
+  "contract": "atlas-value/1",
+  "id": "val-001",
+  "projectId": "4f7d1c2a-8b3e-4c5d-9e6f-a1b2c3d4e5f6",
+  "basis": "measured",
+  "period": "baseline",
+  "tier": "capacity-release",
+  "hours": 640,
+  "cost": 28800,
+  "errorRate": 0.04,
+  "volume": 1200,
+  "targetHours": 480,
+  "targetCost": 21600,
+  "method": "ai-jam-value-case",
+  "methodVersion": "provisional-1",
+  "confidence": "medium",
+  "sourceRef": "time-export-2026-10-20.csv",
+  "notes": "Baseline from four weeks of operator time entries.",
+  "createdAt": "2026-10-28T10:30:00.000Z"
+}

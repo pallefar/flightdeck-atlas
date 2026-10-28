@@ -323,3 +323,40 @@ export const visionDeliveryOutbox = sqliteTable("atlas_vision_delivery_outbox", 
   data: text("data").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
+/** The onboarding audit chain (Atlas v1, PRD §6/§9 G-9). Append-only: one
+ * row per gate decision or stage move, chained by hash to its predecessor, so
+ * a deleted, reordered or edited row breaks verifyChain (lib/audit/chain.ts)
+ * at a known seq instead of passing unnoticed. Written only through
+ * appendGateEvent; nothing else may insert here, and no route updates or
+ * deletes a row. `seq` starts at 1 per project; the pair is unique, which is
+ * what makes a concurrent append fail loudly rather than fork the chain. */
+export const gateEvents = sqliteTable(
+  "atlas_gate_events",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    stage: text("stage").notNull(),
+    fromStage: text("from_stage"),
+    toStage: text("to_stage"),
+    actor: text("actor").notNull(),
+    role: text("role").notNull(),
+    decision: text("decision").notNull(),
+    reason: text("reason").notNull().default(""),
+    evidenceRef: text("evidence_ref"),
+    materialDigest: text("material_digest"),
+    prevHash: text("prev_hash").notNull(),
+    hash: text("hash").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uniq_atlas_gate_events_project_seq").on(t.projectId, t.seq),
+    index("idx_atlas_gate_events_project").on(t.projectId, t.createdAt),
+    check(
+      "atlas_gate_events_decision",
+      sql`${t.decision} IN ('pass','reject','reopen')`,
+    ),
+  ],
+);

@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas-onboarding-record/1",
+  "title": "Atlas onboarding record",
+  "description": "The read projection of one project's brain. The same fixture is parsed by the web test and by the generated Swift models, so the macOS, Windows and web clients cannot drift.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "projectId",
+    "name",
+    "stage",
+    "revision",
+    "gates",
+    "evidenceAccepted",
+    "evidencePending",
+    "osProjectId",
+    "teoaScopeId",
+    "visionObjectiveId",
+    "reuseDecision",
+    "buildDecision",
+    "valueBasis",
+    "updatedAt"
+  ],
+  "properties": {
+    "contract": { "const": "atlas-onboarding-record/1" },
+    "projectId": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "stage": {
+      "enum": [
+        "intake",
+        "reuse",
+        "capture",
+        "as-is",
+        "aligned",
+        "value",
+        "to-be",
+        "build",
+        "live",
+        "measured",
+        "retired"
+      ]
+    },
+    "revision": { "type": "integer", "minimum": 1 },
+    "gates": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stage", "decision", "at"],
+        "properties": {
+          "stage": {
+            "enum": [
+              "intake",
+              "reuse",
+              "capture",
+              "as-is",
+              "aligned",
+              "value",
+              "to-be",
+              "build",
+              "live",
+              "measured",
+              "retired"
+            ]
+          },
+          "decision": { "enum": ["pass", "reject", "reopen"] },
+          "at": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "evidenceAccepted": { "type": "integer", "minimum": 0 },
+    "evidencePending": { "type": "integer", "minimum": 0 },
+    "osProjectId": { "type": ["string", "null"], "maxLength": 80 },
+    "teoaScopeId": { "type": ["string", "null"], "maxLength": 80 },
+    "visionObjectiveId": { "type": ["string", "null"], "maxLength": 80 },
+    "reuseDecision": { "enum": ["reuse", "extend", "new", null] },
+    "buildDecision": { "enum": ["cowork", "sub-app", "studio", null] },
+    "valueBasis": { "enum": ["estimate", "measured", "not-tracked", null] },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  }
+}

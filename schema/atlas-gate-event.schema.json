@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas-gate-event/1",
+  "title": "Atlas gate event",
+  "description": "One gate decision or stage move, and the wire form of the hash-chained audit log. prevHash links it to the row before it; hash covers every field except id.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "id",
+    "projectId",
+    "seq",
+    "stage",
+    "fromStage",
+    "toStage",
+    "actor",
+    "role",
+    "decision",
+    "reason",
+    "evidenceRef",
+    "materialDigest",
+    "prevHash",
+    "hash",
+    "createdAt"
+  ],
+  "properties": {
+    "contract": { "const": "atlas-gate-event/1" },
+    "id": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "projectId": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "seq": { "type": "integer", "minimum": 1 },
+    "stage": {
+      "enum": [
+        "intake",
+        "reuse",
+        "capture",
+        "as-is",
+        "aligned",
+        "value",
+        "to-be",
+        "build",
+        "live",
+        "measured",
+        "retired"
+      ]
+    },
+    "fromStage": {
+      "type": ["string", "null"],
+      "enum": [
+        "intake",
+        "reuse",
+        "capture",
+        "as-is",
+        "aligned",
+        "value",
+        "to-be",
+        "build",
+        "live",
+        "measured",
+        "retired",
+        null
+      ]
+    },
+    "toStage": {
+      "type": ["string", "null"],
+      "enum": [
+        "intake",
+        "reuse",
+        "capture",
+        "as-is",
+        "aligned",
+        "value",
+        "to-be",
+        "build",
+        "live",
+        "measured",
+        "retired",
+        null
+      ]
+    },
+    "actor": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "role": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "decision": { "enum": ["pass", "reject", "reopen"] },
+    "reason": { "type": "string", "maxLength": 500 },
+    "evidenceRef": { "type": ["string", "null"], "maxLength": 2000 },
+    "materialDigest": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "prevHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "createdAt": { "type": "string", "format": "date-time" }
+  }
+}
