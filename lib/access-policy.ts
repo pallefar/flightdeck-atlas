@@ -7,6 +7,17 @@ export const permissionLabels = {
   "projects.archive_all": "Archive all permitted projects",
   "briefings.read": "View briefings",
   "ideas.use": "Use ideas and AI updates",
+  // The onboarding brain (Atlas v1). A stage gate is passed by its gate
+  // permission and nothing else; see lib/domain/gates.ts for the matrix.
+  "onboarding.view": "View the onboarding brain",
+  "onboarding.create": "Start a project intake",
+  "onboarding.triage": "Triage an intake and record the reuse check",
+  "onboarding.capture.review": "Review captured evidence",
+  "onboarding.gate.process_owner": "Gate: approve as-is, to-be and value",
+  "onboarding.gate.teoa": "Gate: approve TEOA alignment",
+  "onboarding.gate.vision": "Gate: approve Vision alignment",
+  "onboarding.value.edit": "Set and confirm value baselines",
+  "onboarding.handoff": "Send evidence and specs to KG, DiagramForge, Studio",
 } as const;
 export type Permission = keyof typeof permissionLabels;
 export const permissions = Object.keys(permissionLabels) as Permission[];
@@ -24,7 +35,13 @@ export const builtinRoles = [
   {
     id: "owner",
     name: "Owner",
-    permissions: permissions.filter((p) => !p.endsWith("_all")),
+    // The Owner role is the business requester: they may start an intake and
+    // see the brain, and nothing that can pass a gate, review capture or send
+    // a hand-off. Those are granted per person by the Super Admin, so a
+    // requester can never approve their own project.
+    permissions: permissions
+      .filter((p) => !p.endsWith("_all") && !p.startsWith("onboarding."))
+      .concat(["onboarding.view", "onboarding.create"]),
   },
 ];
 export function canChangeProject(

@@ -11,6 +11,7 @@
     "build": "node scripts/run-framework.mjs build",
     "start": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --inspector-port 0",
     "lint": "node scripts/check-pagedoc-mirror.mjs --quiet && eslint . --ignore-pattern dist --ignore-pattern .next",
+    "verify": "npx tsc --noEmit && npm run lint && npm run build",
     "check:pagedoc": "node scripts/check-pagedoc-mirror.mjs",
     "db:generate": "drizzle-kit generate",
     "predev": "node scripts/prepare-globe.mjs",
