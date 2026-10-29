@@ -38,13 +38,19 @@ re-run (**7/7**).
 | `npx tsc --noEmit` | clean |
 | `npm run lint` | **0 errors**, 29 warnings (unchanged; no rule disabled) |
 | `npm run build` | green |
-| `npx playwright test` | **728 tests: 721 passed, 0 failed, 7 skipped** (4.4 min) |
-| `swift test` (macOS package) | 6 tests, 0 failures |
+| `npx playwright test` (before the desktop client work) | **728 tests: 721 passed, 0 failed, 7 skipped** (4.4 min) |
+| `npx playwright test` (with the desktop client and device tokens) | **740 tests: 729 passed, 4 failed, 7 skipped** — the four were the example-workspace specs, suppressed by the demo project used for the client screenshots; after deleting it those six specs passed **6/6** on a targeted run |
+| `swift test` (macOS package) | 11 tests, 0 failures (6 contract + 5 API client) |
 | `./build.sh` (macOS) | built and installed `~/Applications/Atlas.app` |
 | `node scripts/gen-swift.mjs --check` | models match the schemas |
 
-`605 → 728` tests (**+123**), `598 → 721` passing, **0 failures**, and the
-seven skips are the same pre-existing ones.
+`605 → 740` tests (**+135**): 123 in the first pass and 12 with the desktop client
+(1 lane, 1 API for the entry type, 7 device-token, 3 route-wiring).
+
+**One number I did not observe:** a single complete 740-test run that ends 733 passed / 7 skipped.
+The only complete run including everything ended 729 / 4, with the four explained above, and the
+follow-up run could not finish because the host became unresponsive (load average ~90; 86 browser
+processes that are not this suite). Every new spec was run on its own and is green.
 
 ### Where the 123 new tests live
 
