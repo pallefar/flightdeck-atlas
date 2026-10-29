@@ -133,6 +133,12 @@ stands); it does not draw maps, build apps or run work. It hands those off.
 - **No claimed approvals:** a gate needs the stage's own permissions (alignment
   needs both the TEOA and the Vision approver), and the built-in Owner role
   holds none of them, so a requester cannot approve their own project.
+- **Permissions say what; assignments say whose.** A project belongs to a
+  workspace. An Admin creates projects in a workspace they administer, the Super
+  Admin chooses any workspace, and an owner works on the project or process they
+  own. Every project gets an owner when its intake opens, and a workspace admin
+  assigns the process owner and the two alignment approvers from the project's
+  brain — an owner cannot assign, or they could approve their own project.
 - **Governance first:** a restricted classification (Export Restricted, ITAR,
   CUI, customer PII) is refused before anything is stored. The scan verdict is
   the server's, never the client's, and content it cannot inspect is a review,

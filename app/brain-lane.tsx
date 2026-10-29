@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "@/lib/i18n/react";
 import { STAGES, RETIRED } from "@/lib/domain/stages";
+type Workspace = { id: string; name: string; slug: string; role?: string };
 type ListRow = {
   projectId: string;
   name: string;
@@ -38,6 +39,14 @@ type ValueRow = {
 };
 type Gate = { stage: string; decision: string; at: string };
 type BrainView = {
+  workspace: { id: string; name: string } | null;
+  assignments: {
+    owner: string | null;
+    processOwner: string | null;
+    teoaApprover: string | null;
+    visionApprover: string | null;
+  };
+  access: { canEdit: boolean; canAssignRoles: boolean; canView: boolean };
   record: {
     projectId: string;
     name: string;
@@ -93,6 +102,10 @@ export default function BrainLane() {
   const [startId, setStartId] = useState("");
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState<"project" | "process">("project");
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [workspaceId, setWorkspaceId] = useState("");
+  const [ownerEmail, setOwnerEmail] = useState("");
+  const [roleDraft, setRoleDraft] = useState({ role: "process_owner", email: "" });
   const [busy, setBusy] = useState(false);
   const [fields, setFields] = useState<Record<string, string | boolean>>({});
   const [reuseReason, setReuseReason] = useState("");
@@ -144,6 +157,18 @@ export default function BrainLane() {
           ),
       )
       .catch(() => live && setCandidates([]));
+    fetch("/api/workspaces", { cache: "no-store" })
+      .then((response) =>
+        response.ok
+          ? (response.json() as Promise<{ workspaces: Workspace[] }>)
+          : Promise.reject(new Error(String(response.status))),
+      )
+      .then((body) => {
+        if (!live) return;
+        setWorkspaces(body.workspaces);
+        setWorkspaceId((current) => current || body.workspaces[0]?.id || "");
+      })
+      .catch(() => live && setWorkspaces([]));
     return () => {
       live = false;
     };
@@ -207,6 +232,10 @@ export default function BrainLane() {
   const onboardNew = useCallback(async () => {
     const name = newName.trim();
     if (!name) return;
+    if (!workspaceId) {
+      setNotice(t("brain.create.workspaceRequired"));
+      return;
+    }
     setBusy(true);
     try {
       const created = await fetch("/api/projects", {
@@ -237,7 +266,11 @@ export default function BrainLane() {
       const opened = await fetch(`/api/onboarding/${id}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ entryType: newType }),
+        body: JSON.stringify({
+          entryType: newType,
+          workspaceId,
+          ...(ownerEmail.trim() ? { ownerEmail: ownerEmail.trim() } : {}),
+        }),
       });
       if (!opened.ok) {
         const payload = (await opened.json().catch(() => ({}))) as { error?: string };
@@ -257,7 +290,31 @@ export default function BrainLane() {
     } finally {
       setBusy(false);
     }
-  }, [newName, newType, t, open]);
+  }, [newName, newType, workspaceId, ownerEmail, t, open]);
+  const assignRole = useCallback(async () => {
+    if (!view) return;
+    const email = roleDraft.email.trim();
+    if (!email) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/onboarding/${view.record.projectId}/roles`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ role: roleDraft.role, email }),
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        setNotice(payload.error ?? t("brain.roles.failed"));
+        return;
+      }
+      setView((await response.json()) as BrainView);
+      setNotice(t("brain.roles.assigned"));
+    } catch {
+      setNotice(t("brain.roles.failed"));
+    } finally {
+      setBusy(false);
+    }
+  }, [view, roleDraft, t]);
   const send = useCallback(
     async (
       path: string,
@@ -435,6 +492,28 @@ export default function BrainLane() {
             />
           </label>
           <label>
+            {t("brain.workspace.choose")}
+            <select
+              value={workspaceId}
+              onChange={(event) => setWorkspaceId(event.target.value)}
+            >
+              {workspaces.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>
+                  {workspace.name}
+                  {workspace.role ? ` (${workspace.role})` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            {t("brain.owner")}
+            <input
+              value={ownerEmail}
+              onChange={(event) => setOwnerEmail(event.target.value)}
+              placeholder={t("brain.owner.hint")}
+            />
+          </label>
+          <label>
             {t("brain.onboard.type")}
             <select
               value={newType}
@@ -538,6 +617,7 @@ export default function BrainLane() {
           ) : (
             <>
               <p className="brain-meta">
+                {view.workspace ? `${view.workspace.name} · ` : ""}
                 {t(`brain.entry.${view.record.entryType === "process" ? "process" : "project"}` as never)} ·{" "}
                 {stageLabel(view.stage.current)} ·{" "}
                 {t("brain.revision", { revision: view.record.revision })}
@@ -550,6 +630,62 @@ export default function BrainLane() {
                   ? t("brain.chain.ok", { length: view.chain.length ?? 0 })
                   : t("brain.chain.broken", { seq: view.chain.brokenAt ?? 0 })}
               </p>
+              <section aria-label={t("brain.roles.title")}>
+                <h3>{t("brain.roles.title")}</h3>
+                <ul className="brain-roles">
+                  {(
+                    [
+                      ["owner", view.assignments.owner],
+                      ["process_owner", view.assignments.processOwner],
+                      ["teoa_approver", view.assignments.teoaApprover],
+                      ["vision_approver", view.assignments.visionApprover],
+                    ] as const
+                  )
+                    .filter(([, email]) => email)
+                    .map(([role, email]) => (
+                      <li key={role}>
+                        <strong>{t(`brain.roles.${role}` as never)}</strong> {email}
+                      </li>
+                    ))}
+                </ul>
+                {view.access.canAssignRoles ? (
+                  <div className="brain-row">
+                    <label>
+                      {t("brain.roles.title")}
+                      <select
+                        value={roleDraft.role}
+                        onChange={(event) =>
+                          setRoleDraft((draft) => ({ ...draft, role: event.target.value }))
+                        }
+                      >
+                        <option value="owner">{t("brain.roles.owner")}</option>
+                        <option value="process_owner">{t("brain.roles.process_owner")}</option>
+                        <option value="teoa_approver">{t("brain.roles.teoa_approver")}</option>
+                        <option value="vision_approver">{t("brain.roles.vision_approver")}</option>
+                      </select>
+                    </label>
+                    <label>
+                      {t("brain.roles.assign")}
+                      <input
+                        value={roleDraft.email}
+                        onChange={(event) =>
+                          setRoleDraft((draft) => ({ ...draft, email: event.target.value }))
+                        }
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="brain-secondary"
+                      disabled={busy}
+                      onClick={() => void assignRole()}
+                    >
+                      {t("brain.roles.assign")}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="brain-hint">{t("brain.roles.onlyAdmin")}</p>
+                )}
+              </section>
               <section aria-label={t("brain.requirements.title")}>
                 <h3>{t("brain.requirements.title")}</h3>
                 {view.stage.missing.length === 0 ? (

@@ -35,6 +35,14 @@ const view = {
     entryType: "project",
   },
   status: "active",
+  workspace: { id: "general", name: "General" },
+  assignments: {
+    owner: "owner@example.test",
+    processOwner: null,
+    teoaApprover: null,
+    visionApprover: null,
+  },
+  access: { canEdit: true, canAssignRoles: true, canView: true },
   data: { problem: "Two systems", requester: "Anna", site: "Bensheim" },
   facts: {},
   stage: {
@@ -66,6 +74,11 @@ const view = {
 test.describe("the board", () => {
   test.beforeEach(async ({ page }) => {
     await page.route("**/api/onboarding", (route) => route.fulfill({ json: list }));
+    await page.route("**/api/workspaces", (route) =>
+      route.fulfill({
+        json: { workspaces: [{ id: "general", name: "General", slug: "general", role: "admin" }] },
+      }),
+    );
     await page.route("**/api/onboarding/*", (route) => route.fulfill({ json: view }));
   });
   test("a card sits in its stage column and opens the project's brain", async ({
@@ -95,6 +108,9 @@ test.describe("the board", () => {
     // The server said the scan is still missing, so the lane lists it and
     // disables the gate it could not pass.
     await expect(detail.getByText("Clear the governance scan")).toBeVisible();
+    // The assignment step is visible: who owns it, and a control to assign more.
+    await expect(detail.getByText("owner@example.test")).toBeVisible();
+    await expect(detail.getByRole("button", { name: "Assign" })).toBeVisible();
     await expect(
       detail.getByRole("button", { name: "Pass this stage" }),
     ).toBeDisabled();
@@ -167,9 +183,43 @@ test.describe("the board", () => {
     );
   });
 });
+test.describe("assigning a role", () => {
+  test("a workspace admin assigns the process owner and sees it", async ({ page }) => {
+    await page.route("**/api/onboarding", (route) => route.fulfill({ json: list }));
+    await page.route("**/api/workspaces", (route) =>
+      route.fulfill({
+        json: { workspaces: [{ id: "general", name: "General", slug: "general", role: "admin" }] },
+      }),
+    );
+    const assignedView = {
+      ...view,
+      assignments: { ...view.assignments, processOwner: "process@example.test" },
+    };
+    await page.route("**/api/onboarding/*/roles", (route) =>
+      route.fulfill({ json: assignedView }),
+    );
+    await page.route("**/api/onboarding/*", (route) => route.fulfill({ json: view }));
+    await page.goto("/?view=brain");
+    await page
+      .getByRole("region", { name: "Capture", exact: true })
+      .getByRole("button", { name: /Contract intake/ })
+      .click();
+    const detail = page.getByRole("complementary", { name: "Project brain" });
+    const roles = detail.getByRole("region", { name: "Roles" });
+    await roles.getByLabel("Assign").fill("process@example.test");
+    await roles.getByRole("button", { name: "Assign" }).click();
+    await expect(page.locator(".brain-notice")).toContainText("Role assigned.");
+    await expect(detail.getByText("process@example.test")).toBeVisible();
+  });
+});
 test.describe("onboarding a new project or process", () => {
   test("creates the project, opens its intake and shows it", async ({ page }) => {
     await page.route("**/api/onboarding", (route) => route.fulfill({ json: list }));
+    await page.route("**/api/workspaces", (route) =>
+      route.fulfill({
+        json: { workspaces: [{ id: "general", name: "General", slug: "general", role: "admin" }] },
+      }),
+    );
     await page.route("**/api/onboarding/*", (route) =>
       route.fulfill({ json: { ...view, record: { ...view.record, entryType: "process" } } }),
     );

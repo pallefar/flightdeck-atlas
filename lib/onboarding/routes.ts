@@ -23,9 +23,7 @@ import {
 } from "../domain/classification";
 import {
   GATE_DECISIONS,
-  canPassGate,
   gatePermissions,
-  missingGatePermissions,
   reasonRequired,
 } from "../domain/gates";
 import { materialDigest } from "../domain/digest";
@@ -72,9 +70,27 @@ import {
 } from "./model";
 export type BrainAccess = {
   userId: string;
+  email: string;
   superAdmin: boolean;
   permissions: readonly string[];
 };
+import {
+  assignmentsFrom,
+  canAssignRoles,
+  canCreateIn,
+  canCreateWorkspace,
+  canEdit,
+  canView,
+  gateRefusal,
+  isWorkspaceAdmin,
+  type Actor,
+} from "./access";
+import { PROJECT_ROLES, type ProjectRole } from "./roles";
+const actorOf = (access: BrainAccess): Actor => ({
+  email: access.email,
+  superAdmin: access.superAdmin,
+  permissions: [...access.permissions],
+});
 export type BrainProject = { id: string; name: string; revision: number };
 export type BrainDeps = {
   authorize(
@@ -94,6 +110,7 @@ export type BrainDeps = {
 };
 type OnboardingRow = {
   project_id: string;
+  workspace_id: string | null;
   stage: string;
   status: string;
   data: string;
@@ -143,7 +160,7 @@ const notFound = (code = "project_not_found") =>
 export function createOnboardingRoutes(deps: BrainDeps) {
   const now = () => deps.now();
   /** Every read a handler needs, in one place, so no handler invents a fact. */
-  async function context(projectId: string) {
+  async function context(projectId: string, actorEmail?: string) {
     const { db } = deps;
     const onboarding = await db
       .prepare("SELECT * FROM atlas_onboarding WHERE project_id = ?")
@@ -169,8 +186,32 @@ export function createOnboardingRoutes(deps: BrainDeps) {
       .prepare("SELECT COUNT(*) AS n FROM atlas_vision_delivery_outbox WHERE project_id = ?")
       .bind(projectId)
       .first<{ n: number }>();
+    const workspace = onboarding?.workspace_id
+      ? await db
+          .prepare("SELECT id, name FROM atlas_workspaces WHERE id = ?")
+          .bind(onboarding.workspace_id)
+          .first<{ id: string; name: string }>()
+      : null;
+    const workspaceRoles: Record<string, "admin" | "member"> = {};
+    if (actorEmail) {
+      const memberRows = await db
+        .prepare("SELECT workspace_id, role FROM atlas_workspace_members WHERE email = ?")
+        .bind(actorEmail)
+        .all<{ workspace_id: string; role: string }>();
+      for (const member of memberRows.results)
+        workspaceRoles[member.workspace_id] = member.role as "admin" | "member";
+    }
+    const roleRows = await db
+      .prepare("SELECT role, email FROM atlas_project_roles WHERE project_id = ?")
+      .bind(projectId)
+      .all<{ role: string; email: string }>();
     return {
       onboarding,
+      workspace,
+      workspaceRoles,
+      assignments: assignmentsFrom(
+        roleRows.results.map((row) => ({ role: row.role as ProjectRole, email: row.email })),
+      ),
       evidence: evidence.results,
       values: values.results,
       reuse,
@@ -179,8 +220,8 @@ export function createOnboardingRoutes(deps: BrainDeps) {
     };
   }
   /** The composed read the browser, macOS and Windows all use. */
-  async function view(project: BrainProject, held: readonly string[]) {
-    const ctx = await context(project.id);
+  async function view(project: BrainProject, access: BrainAccess) {
+    const ctx = await context(project.id, access.email);
     const row = ctx.onboarding;
     if (!row) return null;
     const data = parseRowData(row);
@@ -271,6 +312,21 @@ export function createOnboardingRoutes(deps: BrainDeps) {
       ),
       values: values.map(valueJson),
       handoffs: await handoffsFor(deps.db, project.id),
+      workspace: ctx.workspace,
+      assignments: ctx.assignments,
+      access: (() => {
+        const actor = actorOf(access);
+        const input = {
+          workspaceId: row.workspace_id,
+          roles: ctx.workspaceRoles,
+          assignments: ctx.assignments,
+        };
+        return {
+          canEdit: canEdit(actor, input),
+          canAssignRoles: canAssignRoles(actor, input),
+          canView: canView(actor, input),
+        };
+      })(),
       reuse,
       gates,
       /** Which gates this actor may pass, so the UI hides what the server
@@ -278,7 +334,11 @@ export function createOnboardingRoutes(deps: BrainDeps) {
       canGate: Object.fromEntries(
         [...Object.keys(NEXT), RETIRED].map((s) => [
           s,
-          canPassGate(held, s as StageOrRetired),
+          gateRefusal(actorOf(access), s, {
+            workspaceId: row.workspace_id,
+            roles: ctx.workspaceRoles,
+            assignments: ctx.assignments,
+          }) === null,
         ]),
       ),
     };
@@ -322,7 +382,7 @@ export function createOnboardingRoutes(deps: BrainDeps) {
     const found = await load(auth.access, id);
     if (!found) return notFound();
     if (!found.row) return notFound("not_onboarded");
-    const body = await view(found.project, auth.access.permissions);
+    const body = await view(found.project, auth.access);
     if (!body) return notFound("not_onboarded");
     return json(body);
   };
@@ -345,6 +405,41 @@ export function createOnboardingRoutes(deps: BrainDeps) {
     if (existing)
       return json({ error: "This project already has an intake.", code: "already_onboarded" }, 409);
     const body = await readBody(request);
+    const workspaceId = typeof body?.workspaceId === "string" ? body.workspaceId.trim() : "";
+    if (!workspaceId)
+      return json(
+        {
+          error: "Choose the workspace this project belongs to.",
+          code: "workspace_required",
+        },
+        400,
+      );
+    const actor = actorOf(auth.access);
+    const memberRows = await deps.db
+      .prepare("SELECT workspace_id, role FROM atlas_workspace_members WHERE email = ?")
+      .bind(auth.access.email)
+      .all<{ workspace_id: string; role: string }>();
+    const roles: Record<string, "admin" | "member"> = {};
+    for (const member of memberRows.results)
+      roles[member.workspace_id] = member.role as "admin" | "member";
+    const workspace = await deps.db
+      .prepare("SELECT id FROM atlas_workspaces WHERE id = ?")
+      .bind(workspaceId)
+      .first();
+    if (!workspace)
+      return json({ error: "That workspace does not exist.", code: "unknown_workspace" }, 404);
+    if (!canCreateIn(actor, workspaceId, roles))
+      return json(
+        {
+          error: "Only a workspace admin can create projects there.",
+          code: "workspace_admin_required",
+        },
+        403,
+      );
+    const ownerEmail =
+      typeof body?.ownerEmail === "string" && body.ownerEmail.trim()
+        ? body.ownerEmail.trim().toLowerCase()
+        : auth.access.email;
     let data: BrainData;
     try {
       data = brainDataSchema.parse(body ? pickEditable(body) : {});
@@ -360,10 +455,29 @@ export function createOnboardingRoutes(deps: BrainDeps) {
     await deps.db
       .prepare(
         `INSERT INTO atlas_onboarding
-           (project_id, stage, status, data, revision, created_by, created_at, updated_at)
-         VALUES (?,?,?,?,?,?,?,?)`,
+           (project_id, workspace_id, stage, status, data, revision, created_by, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
       )
-      .bind(id, "intake", "active", JSON.stringify(data), 1, auth.access.userId, at, at)
+      .bind(
+        id,
+        workspaceId,
+        "intake",
+        "active",
+        JSON.stringify(data),
+        1,
+        auth.access.userId,
+        at,
+        at,
+      )
+      .run();
+    // The assignment step starts here: every project has an owner from the
+    // first moment, so the gate rules never fall back to "nobody".
+    await deps.db
+      .prepare(
+        `INSERT INTO atlas_project_roles (project_id, role, email, assigned_by, created_at)
+         VALUES (?,?,?,?,?)`,
+      )
+      .bind(id, "owner", ownerEmail, auth.access.email, at)
       .run();
     // Opening the intake is the first audited event of the project's brain.
     await appendGateEvent(deps.db, {
@@ -389,6 +503,21 @@ export function createOnboardingRoutes(deps: BrainDeps) {
     if (!found.row) return notFound("not_onboarded");
     if (!(await deps.canEdit(auth.access, id)))
       return json({ error: "You cannot edit this project.", code: "not_editable" }, 403);
+    const patchCtx = await context(id, auth.access.email);
+    if (
+      !canEdit(actorOf(auth.access), {
+        workspaceId: found.row.workspace_id,
+        roles: patchCtx.workspaceRoles,
+        assignments: patchCtx.assignments,
+      })
+    )
+      return json(
+        {
+          error: "Only the project's owner or a workspace admin can change it.",
+          code: "edit_assignment_required",
+        },
+        403,
+      );
     if (found.row.status === "retired")
       return json({ error: "A retired project is read-only.", code: "retired" }, 403);
     const body = await readBody(request);
@@ -512,17 +641,27 @@ export function createOnboardingRoutes(deps: BrainDeps) {
         { error: "That gate is not the project's current stage.", code: "wrong_stage", current },
         409,
       );
-    const missingRole = missingGatePermissions([...auth.access.permissions], stage);
-    if (missingRole.length)
+    const gateCtx = await context(id, auth.access.email);
+    const refusal = gateRefusal(actorOf(auth.access), stage, {
+      workspaceId: found.row.workspace_id,
+      roles: gateCtx.workspaceRoles,
+      assignments: gateCtx.assignments,
+    });
+    if (refusal)
       return json(
-        {
-          error: "You do not hold the role this gate needs.",
-          code: "gate_role_required",
-          missing: missingRole,
-        },
+        refusal === "assignment_required"
+          ? {
+              error:
+                "You are not assigned the role this gate needs on this project.",
+              code: refusal,
+            }
+          : {
+              error: "You do not hold the role this gate needs.",
+              code: refusal,
+            },
         403,
       );
-    const currentView = await view(found.project, auth.access.permissions);
+    const currentView = await view(found.project, auth.access);
     if (!currentView) return notFound("not_onboarded");
     const at = now();
     // Check the requirements of the stage being decided, not of the stage the
@@ -896,8 +1035,184 @@ export function createOnboardingRoutes(deps: BrainDeps) {
       .run();
     return get(id, request);
   };
-  return { list, get, create, patch, gate, reuse, evidenceAdd, valueAdd, handoffCreate, compliance };
+  /** The assignment step: name the owner, the process owner and the two
+   * alignment approvers for this project. Only a workspace admin (or the
+   * Super Admin) may assign, so an owner cannot hand themselves an approval. */
+  const rolesAssign = async (request: Request, id: string): Promise<Response> => {
+    if (!sameOrigin(request))
+      return json({ error: "Request origin is not allowed." }, 403);
+    const auth = await deps.authorize("onboarding.triage", request);
+    if (auth.error) return auth.error;
+    const found = await load(auth.access, id);
+    if (!found) return notFound();
+    if (!found.row) return notFound("not_onboarded");
+    const assignCtx = await context(id, auth.access.email);
+    if (
+      !canAssignRoles(actorOf(auth.access), {
+        workspaceId: found.row.workspace_id,
+        roles: assignCtx.workspaceRoles,
+      })
+    )
+      return json(
+        {
+          error: "Only a workspace admin can assign roles on this project.",
+          code: "assignment_forbidden",
+        },
+        403,
+      );
+    const body = await readBody(request);
+    if (!body) return badBody();
+    const role = body.role;
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    if (!(PROJECT_ROLES as readonly string[]).includes(String(role)))
+      return json({ error: "Unknown role.", code: "unknown_role" }, 400);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      return json({ error: "Name the person's email address.", code: "email_required" }, 400);
+    const at = now();
+    if (body.remove === true) {
+      await deps.db
+        .prepare("DELETE FROM atlas_project_roles WHERE project_id = ? AND role = ?")
+        .bind(id, role)
+        .run();
+      if (role === "owner")
+        return json(
+          {
+            error: "A project always has an owner; assign another one instead.",
+            code: "owner_required",
+          },
+          409,
+        );
+      return get(id, request);
+    }
+    await deps.db
+      .prepare(
+        `INSERT INTO atlas_project_roles (project_id, role, email, assigned_by, created_at)
+         VALUES (?,?,?,?,?)
+         ON CONFLICT(project_id, role) DO UPDATE SET email = excluded.email,
+           assigned_by = excluded.assigned_by, created_at = excluded.created_at`,
+      )
+      .bind(id, role, email, auth.access.email, at)
+      .run();
+    return get(id, request);
+  };
+
+  /** The workspaces this actor may see: all of them for the Super Admin, the
+   * ones they belong to for everyone else. */
+  const workspacesList = async (request?: Request): Promise<Response> => {
+    const auth = await deps.authorize("onboarding.view", request);
+    if (auth.error) return auth.error;
+    const { results } = await deps.db
+      .prepare("SELECT id, name, slug FROM atlas_workspaces WHERE archived_at IS NULL ORDER BY name")
+      .bind()
+      .all<{ id: string; name: string; slug: string }>();
+    if (auth.access.superAdmin)
+      return json({ workspaces: results.map((row) => ({ ...row, role: "super_admin" })) });
+    const memberRows = await deps.db
+      .prepare("SELECT workspace_id, role FROM atlas_workspace_members WHERE email = ?")
+      .bind(auth.access.email)
+      .all<{ workspace_id: string; role: string }>();
+    const mine = new Map(memberRows.results.map((row) => [row.workspace_id, row.role]));
+    return json({
+      workspaces: results
+        .filter((row) => mine.has(row.id))
+        .map((row) => ({ ...row, role: mine.get(row.id) })),
+    });
+  };
+
+  /** Only the Super Admin creates a workspace. */
+  const workspaceCreate = async (request: Request): Promise<Response> => {
+    if (!sameOrigin(request))
+      return json({ error: "Request origin is not allowed." }, 403);
+    const auth = await deps.authorize("onboarding.view", request);
+    if (auth.error) return auth.error;
+    if (!canCreateWorkspace(actorOf(auth.access)))
+      return json(
+        { error: "Only the Super Admin creates workspaces.", code: "super_admin_required" },
+        403,
+      );
+    const body = await readBody(request);
+    const name = typeof body?.name === "string" ? body.name.trim() : "";
+    if (!name || name.length > 80)
+      return json({ error: "Give the workspace a name.", code: "name_required" }, 400);
+    const slug = name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 40);
+    if (!slug) return json({ error: "That name has no usable letters.", code: "name_required" }, 400);
+    try {
+      await deps.db
+        .prepare(
+          "INSERT INTO atlas_workspaces (id, name, slug, created_by, created_at) VALUES (?,?,?,?,?)",
+        )
+        .bind(deps.newId(), name, slug, auth.access.email, now())
+        .run();
+    } catch {
+      return json(
+        { error: "A workspace with that name already exists.", code: "slug_taken" },
+        409,
+      );
+    }
+    return workspacesList(request);
+  };
+
+  /** Who is in a workspace. The Super Admin adds an admin; a workspace admin
+   * may add members but never another admin. */
+  const workspaceMemberAdd = async (request: Request, id: string): Promise<Response> => {
+    if (!sameOrigin(request))
+      return json({ error: "Request origin is not allowed." }, 403);
+    const auth = await deps.authorize("onboarding.view", request);
+    if (auth.error) return auth.error;
+    const memberCtx = await deps.db
+      .prepare("SELECT workspace_id, role FROM atlas_workspace_members WHERE email = ?")
+      .bind(auth.access.email)
+      .all<{ workspace_id: string; role: string }>();
+    const roles: Record<string, "admin" | "member"> = {};
+    for (const row of memberCtx.results) roles[row.workspace_id] = row.role as "admin" | "member";
+    const body = await readBody(request);
+    const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+    const role = body?.role === "admin" ? "admin" : "member";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      return json({ error: "Name the person's email address.", code: "email_required" }, 400);
+    const isAdmin = auth.access.superAdmin || isWorkspaceAdmin(roles, id);
+    if (!isAdmin)
+      return json(
+        { error: "Only a workspace admin can add people.", code: "workspace_admin_required" },
+        403,
+      );
+    if (role === "admin" && !auth.access.superAdmin)
+      return json(
+        { error: "Only the Super Admin makes a workspace admin.", code: "super_admin_required" },
+        403,
+      );
+    await deps.db
+      .prepare(
+        `INSERT INTO atlas_workspace_members (workspace_id, email, role, added_by, created_at)
+         VALUES (?,?,?,?,?)
+         ON CONFLICT(workspace_id, email) DO UPDATE SET role = excluded.role`,
+      )
+      .bind(id, email, role, auth.access.email, now())
+      .run();
+    return workspacesList(request);
+  };
+  return {
+    list,
+    get,
+    create,
+    patch,
+    gate,
+    reuse,
+    evidenceAdd,
+    valueAdd,
+    handoffCreate,
+    compliance,
+    rolesAssign,
+    workspacesList,
+    workspaceCreate,
+    workspaceMemberAdd,
+  };
 }
+
 
 function nameOf(data: string) {
   try {

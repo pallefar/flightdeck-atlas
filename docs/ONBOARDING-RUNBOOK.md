@@ -13,6 +13,7 @@ New with Atlas v1:
 | `0014_massive_whirlwind.sql` | `atlas_gate_events` — the append-only, hash-chained gate audit. |
 | `0015_nifty_lord_tyger.sql` | `atlas_onboarding`, `atlas_evidence`, `atlas_reuse_checks`, `atlas_value`, `atlas_handoffs`. |
 | `0016_unique_switch.sql` | `atlas_device_tokens` — hashed bearer credentials for the native clients. |
+| `0017_messy_inhumans.sql` | `atlas_workspaces`, `atlas_workspace_members`, `atlas_project_roles`; `atlas_onboarding.workspace_id`. The migration also creates the `general` workspace and moves every existing intake into it. |
 
 Local (the same incantation as the other migrations, from the repository root):
 
@@ -133,3 +134,36 @@ from them.
 
 The app's `Info.plist` allows cleartext HTTP to **local** hosts only
 (`NSAllowsLocalNetworking`), so a production deployment must use HTTPS.
+
+## Workspaces, owners and the assignment step
+
+Access has two halves, and both must hold:
+
+| Half | Question | Where it lives |
+|---|---|---|
+| Permission | **What** may this person do? | Atlas role permissions (`onboarding.*`), granted by the Super Admin |
+| Assignment | **Whose** project may they do it on? | Workspace membership + a role on the project |
+
+**Workspaces.** A workspace is where an Admin creates projects. The migration creates
+`general`; only the Super Admin creates more (`POST /api/workspaces`), and only the
+Super Admin makes someone a workspace admin
+(`POST /api/workspaces/:id/members` with `role: "admin"`).
+
+| Actor | Creates a project | Edits a project | Passes a gate | Assigns roles |
+|---|---|---|---|---|
+| Super Admin | any workspace | any project | any gate | yes |
+| Workspace admin | their workspace | project in their workspace | only the gate they hold **and** are assigned | yes |
+| Project owner | — | their project | the intake/reuse/capture/build/retire gates | no |
+| Assigned approver | — | — | that one gate | no |
+
+Every project gets an `owner` the moment its intake opens: the person named in the
+onboard form, or the admin who created it. `process_owner` falls back to the owner;
+the two alignment approvers never fall back, because an approval needs a named person.
+
+**The assignment step.** In the project's brain, a workspace admin or the Super Admin
+assigns `owner`, `process_owner`, `teoa_approver` and `vision_approver`
+(`POST /api/onboarding/:id/roles`). Stage 4 refuses until both approvers are assigned,
+before it even looks at the facts — and one person cannot stand in for the other
+approver's permission.
+
+Rules as code: `lib/onboarding/access.ts`; as tests: `tests/brain-access.spec.ts`.

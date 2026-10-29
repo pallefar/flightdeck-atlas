@@ -6,6 +6,7 @@ import {
   index,
   uniqueIndex,
   check,
+  primaryKey,
 } from "drizzle-orm/sqlite-core";
 export const projects = sqliteTable(
   "atlas_projects",
@@ -372,6 +373,10 @@ export const onboarding = sqliteTable(
     projectId: text("project_id")
       .primaryKey()
       .references(() => projects.id, { onDelete: "cascade" }),
+    /** Which workspace this brain belongs to (see atlas_workspaces). Null only
+     * for rows written before workspaces existed; the migration backfills them
+     * into the default workspace. */
+    workspaceId: text("workspace_id"),
     stage: text("stage").notNull().default("intake"),
     status: text("status").notNull().default("active"),
     data: text("data").notNull(),
@@ -529,4 +534,60 @@ export const deviceTokens = sqliteTable(
     revokedAt: text("revoked_at"),
   },
   (t) => [index("idx_atlas_device_tokens_email").on(t.email)],
+);
+/** Atlas workspaces for the onboarding brain (owner decision, 2026-10-29).
+ * A workspace is where an Admin creates projects; it is Atlas's own object,
+ * not the FlightDeck OS workspace, which stays authoritative for OS data.
+ * The Super Admin chooses a project's workspace at onboarding; an Admin is
+ * limited to the workspaces where they are an admin. */
+export const workspaces = sqliteTable("atlas_workspaces", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull(),
+  archivedAt: text("archived_at"),
+});
+/** Who is in a workspace. `admin` creates projects there and assigns people;
+ * `member` can read what they are given. Only the Super Admin creates an
+ * admin: a workspace admin can add members, never another admin. */
+export const workspaceMembers = sqliteTable(
+  "atlas_workspace_members",
+  {
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    role: text("role").notNull(),
+    addedBy: text("added_by").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.workspaceId, t.email] }),
+    check("atlas_workspace_members_role", sql`${t.role} IN ('admin','member')`),
+  ],
+);
+/** The assignment step: who owns THIS project, and who approves it. One person
+ * per role, assigned by a workspace admin or the Super Admin. `owner` is set
+ * at creation; `process_owner` falls back to the owner when nobody else is
+ * named; the two alignment approvers never fall back, because an approval
+ * needs a named person. */
+export const projectRoles = sqliteTable(
+  "atlas_project_roles",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    role: text("role").notNull(),
+    email: text("email").notNull(),
+    assignedBy: text("assigned_by").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.projectId, t.role] }),
+    check(
+      "atlas_project_roles_role",
+      sql`${t.role} IN ('owner','process_owner','teoa_approver','vision_approver')`,
+    ),
+  ],
 );

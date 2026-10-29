@@ -20,6 +20,11 @@ test("the onboarding routes export every method the clients call", () => {
   expect(methods("app/api/onboarding/[id]/handoff/route.ts")).toEqual(["POST"]);
   expect(methods("app/api/onboarding/[id]/compliance/route.ts")).toEqual(["POST"]);
 });
+test("the workspace and role-assignment routes exist", () => {
+  expect(methods("app/api/workspaces/route.ts")).toEqual(["GET", "POST"]);
+  expect(methods("app/api/workspaces/[id]/members/route.ts")).toEqual(["POST"]);
+  expect(methods("app/api/onboarding/[id]/roles/route.ts")).toEqual(["POST"]);
+});
 test("the device-token route mints, lists and revokes", () => {
   expect(methods("app/api/access/device-tokens/route.ts")).toEqual(["DELETE", "GET", "POST"]);
 });

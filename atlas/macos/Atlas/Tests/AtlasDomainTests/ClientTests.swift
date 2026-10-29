@@ -80,6 +80,15 @@ final class ClientTests: XCTestCase {
     XCTAssertEqual(StubProtocol.seen, ["GET /api/onboarding/p-1"])
   }
 
+  func testTheWorkspacesCarryWhetherThisPersonMayCreateThere() async throws {
+    let json = #"{"workspaces":[{"id":"general","name":"General","slug":"general","role":"admin"},{"id":"hr-emea","name":"HR EMEA","slug":"hr-emea","role":"member"}]}"#
+    respond(200, json)
+    let list = try await client.workspaces()
+    XCTAssertEqual(list.count, 2)
+    XCTAssertTrue(list[0].canCreate)
+    XCTAssertFalse(list[1].canCreate)
+  }
+
   func testOnboardingCreatesTheProjectThenOpensItsIntakeInThatOrder() async throws {
     StubProtocol.handler = { request in
       if request.url?.path == "/api/projects" {
@@ -91,7 +100,12 @@ final class ClientTests: XCTestCase {
        "chain":{"ok":true,"length":1},"gates":[],"evidence":[],"values":[],"canGate":{}}
       """#.utf8))
     }
-    let id = try await client.onboardNew(name: "Invoice matching", process: true)
+    let id = try await client.onboardNew(
+      name: "Invoice matching",
+      process: true,
+      workspaceId: "general",
+      ownerEmail: "owner@example.test"
+    )
     XCTAssertEqual(id, "p-9")
     XCTAssertEqual(StubProtocol.seen, ["POST /api/projects", "POST /api/onboarding/p-9"])
   }

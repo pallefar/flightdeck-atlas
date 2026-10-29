@@ -64,14 +64,30 @@ function store() {
       "INSERT INTO atlas_projects (id,owner_id,data,source,updated_at,revision) VALUES (?,?,?,?,?,?)",
     )
     .run(P, "u1", JSON.stringify({ name: "Contract intake" }), "atlas", AT, 1);
+  // Migration 0017 inserts the 'general' workspace; the harness only joins it.
+  sqlite
+    .prepare(
+      "INSERT INTO atlas_workspace_members (workspace_id,email,role,added_by,created_at) VALUES (?,?,?,?,?)",
+    )
+    .run("general", "u1@example.test", "admin", "u1", AT);
   return { db, sqlite };
 }
 function harness(
-  options: { permissions?: string[]; canEdit?: boolean; visible?: boolean } = {},
+  options: {
+    permissions?: string[];
+    canEdit?: boolean;
+    visible?: boolean;
+    db?: ChainDb;
+    sqlite?: DatabaseSync;
+  } = {},
 ) {
-  const { db, sqlite } = store();
+  const { db, sqlite } =
+    options.db && options.sqlite
+      ? { db: options.db, sqlite: options.sqlite }
+      : store();
   const access: BrainAccess = {
     userId: "u1",
+    email: "u1@example.test",
     superAdmin: false,
     permissions: options.permissions ?? ALL,
   };
@@ -113,7 +129,7 @@ const intakeFields = {
 };
 async function onboarded(options: Parameters<typeof harness>[0] = {}) {
   const h = harness(options);
-  const created = await h.routes.create(call({ ...intakeFields }), P);
+  const created = await h.routes.create(call({ ...intakeFields, workspaceId: "general" }), P);
   expect(created.status).toBe(200);
   return h;
 }
@@ -136,6 +152,14 @@ async function save(h: ReturnType<typeof harness>, fields: Record<string, unknow
   const current = await jsonOf(await h.routes.get(P));
   const revision = (current.body.record as { revision: number }).revision;
   return jsonOf(await h.routes.patch(call({ revision, fields }, "PATCH"), P));
+}
+async function assign(
+  h: ReturnType<typeof harness>,
+  role: string,
+  email: string,
+) {
+  const response = await h.routes.rolesAssign(call({ role, email }), P);
+  expect(response.status).toBe(200);
 }
 async function recordReuse(
   h: ReturnType<typeof harness>,
@@ -164,7 +188,10 @@ test.describe("opening an intake", () => {
   });
   test("records whether a project or a process is being onboarded", async () => {
     const h = harness();
-    const created = await h.routes.create(call({ ...intakeFields, entryType: "process" }), P);
+    const created = await h.routes.create(
+      call({ ...intakeFields, entryType: "process", workspaceId: "general" }),
+      P,
+    );
     expect(created.status).toBe(200);
     const body = (await created.json()) as { record: { entryType: string } };
     expect(body.record.entryType).toBe("process");
@@ -173,13 +200,13 @@ test.describe("opening an intake", () => {
   });
   test("refuses a second intake on the same project", async () => {
     const h = await onboarded();
-    const again = await jsonOf(await h.routes.create(call({}), P));
+    const again = await jsonOf(await h.routes.create(call({ workspaceId: "general" }), P));
     expect(again.status).toBe(409);
     expect(again.body.code).toBe("already_onboarded");
   });
   test("refuses a viewer who cannot edit the project", async () => {
     const h = harness({ canEdit: false });
-    const result = await jsonOf(await h.routes.create(call({}), P));
+    const result = await jsonOf(await h.routes.create(call({ workspaceId: "general" }), P));
     expect(result.status).toBe(403);
     expect(result.body.code).toBe("not_editable");
   });
@@ -245,11 +272,11 @@ test.describe("editing", () => {
 });
 test.describe("gates", () => {
   test("the wrong role is refused before any prerequisite is even checked", async () => {
-    const h = await onboarded({ permissions: ["onboarding.view"] });
-    const result = await gateOf(h, "intake");
+    const h = await onboarded();
+    const viewer = harness({ permissions: ["onboarding.view"], db: h.db, sqlite: h.sqlite });
+    const result = await gateOf(viewer, "intake");
     expect(result.status).toBe(403);
     expect(result.body.code).toBe("gate_role_required");
-    expect(result.body.missing).toEqual(["onboarding.triage"]);
   });
   test("a stage with unmet facts is refused and names them", async () => {
     const h = await onboarded();
@@ -298,6 +325,12 @@ test.describe("gates", () => {
     await save(h, { asIsMapRef: "map-as-is-1", asIsSignedOff: true });
     const asIs = await gateOf(h, "as-is");
     expect(asIs.status).toBe(200);
+    // Not assigned as an approver yet: the assignment comes before the facts.
+    const unassigned = await gateOf(h, "aligned");
+    expect(unassigned.status).toBe(403);
+    expect(unassigned.body.code).toBe("assignment_required");
+    await assign(h, "teoa_approver", "u1@example.test");
+    await assign(h, "vision_approver", "u1@example.test");
     const aligned = await gateOf(h, "aligned");
     expect(aligned.status).toBe(409);
     expect(aligned.body.missing).toEqual([
@@ -375,6 +408,9 @@ test.describe("material change", () => {
       visionObjectiveId: "obj-1",
     });
     expect(aligned.status).toBe(200);
+    // Alignment needs named approvers before it even looks at the facts.
+    await assign(h, "teoa_approver", "u1@example.test");
+    await assign(h, "vision_approver", "u1@example.test");
     // Alignment still needs the OS project link and the Vision delivery, so
     // the gate is refused until those tables say so; this proves a save cannot
     // satisfy an alignment.

@@ -542,6 +542,22 @@ export const en = {
   "brain.onboard.failed": "The project could not be created.",
   "brain.entry.project": "Project",
   "brain.entry.process": "Process",
+  "brain.workspace": "Workspace",
+  "brain.workspace.choose": "Workspace",
+  "brain.workspace.none": "No workspace is available to you. Ask the Super Admin for one.",
+  "brain.owner": "Owner",
+  "brain.owner.hint": "The person who works on this project or process.",
+  "brain.roles.title": "Roles",
+  "brain.roles.none": "No roles assigned yet.",
+  "brain.roles.assign": "Assign",
+  "brain.roles.onlyAdmin": "Only a workspace admin assigns roles.",
+  "brain.roles.owner": "Owner",
+  "brain.roles.process_owner": "Process owner",
+  "brain.roles.teoa_approver": "TEOA approver",
+  "brain.roles.vision_approver": "Vision approver",
+  "brain.roles.assigned": "Role assigned.",
+  "brain.roles.failed": "The role could not be assigned.",
+  "brain.create.workspaceRequired": "Choose a workspace first.",
 } as const;
 
 export type MessageKey = keyof typeof en;

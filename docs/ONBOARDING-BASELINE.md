@@ -40,7 +40,7 @@ re-run (**7/7**).
 | `npm run build` | green |
 | `npx playwright test` (before the desktop client work) | **728 tests: 721 passed, 0 failed, 7 skipped** (4.4 min) |
 | `npx playwright test` (with the desktop client and device tokens) | **740 tests: 729 passed, 4 failed, 7 skipped** — the four were the example-workspace specs, suppressed by the demo project used for the client screenshots; after deleting it those six specs passed **6/6** on a targeted run |
-| `swift test` (macOS package) | 11 tests, 0 failures (6 contract + 5 API client) |
+| `swift test` (macOS package) | **12 tests, 0 failures** (6 contract + 6 API client) |
 | `./build.sh` (macOS) | built and installed `~/Applications/Atlas.app` |
 | `node scripts/gen-swift.mjs --check` | models match the schemas |
 

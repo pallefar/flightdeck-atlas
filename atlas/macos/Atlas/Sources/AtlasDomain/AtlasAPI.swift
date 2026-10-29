@@ -69,6 +69,16 @@ public struct AtlasList: Codable, Equatable, Sendable {
   public let projects: [AtlasSnapshot.Row]
 }
 
+/// A workspace this person may create in. `role` is "admin" for a workspace
+/// they administer, "super_admin" for the Super Admin, "member" otherwise.
+public struct AtlasWorkspace: Codable, Equatable, Identifiable, Sendable {
+  public let id: String
+  public let name: String
+  public let slug: String
+  public let role: String?
+  public var canCreate: Bool { role == "admin" || role == "super_admin" }
+}
+
 /// A refusal from the server, carrying the server's own words so the UI never
 /// invents a message the API did not send.
 public struct AtlasError: Error, Equatable, Sendable {
@@ -116,6 +126,11 @@ public struct AtlasClient: Sendable {
     try await send(try request("/api/onboarding"), as: AtlasList.self).projects
   }
 
+  public func workspaces() async throws -> [AtlasWorkspace] {
+    struct Body: Decodable { let workspaces: [AtlasWorkspace] }
+    return try await send(try request("/api/workspaces"), as: Body.self).workspaces
+  }
+
   public func brain(_ projectId: String) async throws -> AtlasSnapshot {
     try await send(try request("/api/onboarding/\(projectId)"), as: AtlasSnapshot.self)
   }
@@ -123,7 +138,12 @@ public struct AtlasClient: Sendable {
   /// Create the project, then open its intake. The two calls are the same two
   /// the web lane makes, in the same order, so a failure leaves the project
   /// created and says the intake did not open.
-  public func onboardNew(name: String, process: Bool) async throws -> String {
+  public func onboardNew(
+    name: String,
+    process: Bool,
+    workspaceId: String,
+    ownerEmail: String?
+  ) async throws -> String {
     struct Body: Encodable {
       let name: String, description: String, status: String, category: String
       let location: String, latitude: Double?, longitude: Double?, dueDate: String
@@ -136,19 +156,40 @@ public struct AtlasClient: Sendable {
       latitude: nil, longitude: nil, dueDate: "", color: "orange", tasks: []
     )
     let created = try await send(try request("/api/projects", method: "POST", body: body), as: Created.self)
-    struct Intake: Encodable { let entryType: String }
+    struct Intake: Encodable {
+      let entryType: String
+      let workspaceId: String
+      let ownerEmail: String?
+    }
     _ = try await send(
-      try request("/api/onboarding/\(created.project.id)", method: "POST", body: Intake(entryType: process ? "process" : "project")),
+      try request(
+        "/api/onboarding/\(created.project.id)", method: "POST",
+        body: Intake(
+          entryType: process ? "process" : "project",
+          workspaceId: workspaceId,
+          ownerEmail: ownerEmail
+        )
+      ),
       as: AtlasSnapshot.self
     )
     return created.project.id
   }
 
   /// Start the intake on a project that already exists.
-  public func startIntake(_ projectId: String, process: Bool) async throws -> AtlasSnapshot {
-    struct Intake: Encodable { let entryType: String }
+  public func startIntake(
+    _ projectId: String,
+    process: Bool,
+    workspaceId: String
+  ) async throws -> AtlasSnapshot {
+    struct Intake: Encodable {
+      let entryType: String
+      let workspaceId: String
+    }
     return try await send(
-      try request("/api/onboarding/\(projectId)", method: "POST", body: Intake(entryType: process ? "process" : "project")),
+      try request(
+        "/api/onboarding/\(projectId)", method: "POST",
+        body: Intake(entryType: process ? "process" : "project", workspaceId: workspaceId)
+      ),
       as: AtlasSnapshot.self
     )
   }

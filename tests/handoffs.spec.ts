@@ -63,6 +63,10 @@ function store() {
       "INSERT INTO atlas_projects (id,owner_id,data,source,updated_at,revision) VALUES (?,?,?,?,?,?)",
     )
     .run(P, "u1", JSON.stringify({ name: "Contract intake" }), "atlas", AT, 1);
+  // Migration 0017 inserts the 'general' workspace; the harness only joins it.
+  sqlite
+    .prepare("INSERT INTO atlas_workspace_members (workspace_id,email,role,added_by,created_at) VALUES (?,?,?,?,?)")
+    .run("general", "u1@example.test", "admin", "u1", AT);
   return { db, sqlite };
 }
 test.describe("payload builders", () => {
@@ -225,7 +229,7 @@ test.describe("the outbox", () => {
 test.describe("the hand-off route", () => {
   function harness(permissions: string[]) {
     const { db } = store();
-    const access: BrainAccess = { userId: "u1", superAdmin: false, permissions };
+    const access: BrainAccess = { userId: "u1", email: "u1@example.test", superAdmin: false, permissions };
     const deps: BrainDeps = {
       authorize: async (permission) =>
         permission && !permissions.includes(permission)
@@ -248,7 +252,7 @@ test.describe("the hand-off route", () => {
     });
   test("needs the hand-off permission", async () => {
     const routes = harness(["onboarding.view", "onboarding.create"]);
-    await routes.create(call({}), P);
+    await routes.create(call({ workspaceId: "general" }), P);
     const result = await routes.handoffCreate(call({ kind: "kg" }), P);
     expect(result.status).toBe(403);
   });
@@ -258,7 +262,7 @@ test.describe("the hand-off route", () => {
       "onboarding.create",
       "onboarding.handoff",
     ]);
-    await routes.create(call({}), P);
+    await routes.create(call({ workspaceId: "general" }), P);
     const created = await routes.handoffCreate(call({ kind: "kg" }), P);
     expect(created.status).toBe(200);
     const body = (await created.json()) as { handoffs: { kind: string; status: string }[] };
@@ -271,7 +275,7 @@ test.describe("the hand-off route", () => {
       "onboarding.create",
       "onboarding.handoff",
     ]);
-    await routes.create(call({}), P);
+    await routes.create(call({ workspaceId: "general" }), P);
     const result = await routes.handoffCreate(call({ kind: "studio" }), P);
     expect(result.status).toBe(409);
     const body = (await result.json()) as { code: string };

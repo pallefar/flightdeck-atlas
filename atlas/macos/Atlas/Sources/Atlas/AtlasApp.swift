@@ -38,6 +38,9 @@ struct AtlasApp: App {
 final class BrainModel: ObservableObject {
   @Published var connection = AtlasConnection.load()
   @Published var rows: [AtlasSnapshot.Row] = []
+  @Published var workspaces: [AtlasWorkspace] = []
+  @Published var workspaceId = ""
+  @Published var ownerEmail = ""
   @Published var selected: AtlasSnapshot?
   @Published var error: String?
   @Published var notice: String?
@@ -55,6 +58,10 @@ final class BrainModel: ObservableObject {
     defer { busy = false }
     do {
       rows = try await client.list()
+      workspaces = try await client.workspaces()
+      if workspaceId.isEmpty || !workspaces.contains(where: { $0.id == workspaceId }) {
+        workspaceId = workspaces.first(where: { $0.canCreate })?.id ?? workspaces.first?.id ?? ""
+      }
       verified = true
       error = nil
       connection.lastChecked = ISO8601DateFormatter().string(from: Date())
@@ -89,7 +96,12 @@ final class BrainModel: ObservableObject {
     busy = true
     defer { busy = false }
     do {
-      let id = try await client.onboardNew(name: name, process: process)
+      let id = try await client.onboardNew(
+        name: name,
+        process: process,
+        workspaceId: workspaceId,
+        ownerEmail: ownerEmail.trimmingCharacters(in: .whitespaces).isEmpty ? nil : ownerEmail
+      )
       await refresh()
       selected = try await client.brain(id)
       notice = "Project created and its intake is open."
@@ -260,25 +272,61 @@ struct OverviewView: View {
   private var onboardForm: some View {
     VStack(alignment: .leading, spacing: 10) {
       Text("Onboard a new project or process").font(.headline)
-      HStack {
-        TextField("Name", text: $name)
-          .textFieldStyle(.roundedBorder)
-          .frame(maxWidth: 320)
-        Picker("What are you onboarding?", selection: $process) {
-          Text("A project").tag(false)
-          Text("A process").tag(true)
+      // Two rows with the label above each control: a single row squeezed the
+      // kind picker's label into a vertical column at this window width.
+      HStack(alignment: .bottom, spacing: 12) {
+        labelled("Name") {
+          TextField("Name", text: $name)
+            .textFieldStyle(.roundedBorder)
+            .frame(minWidth: 200)
         }
-        .pickerStyle(.segmented)
-        .frame(maxWidth: 260)
+        labelled("Workspace") {
+          Picker("Workspace", selection: $model.workspaceId) {
+            ForEach(model.workspaces) { workspace in
+              Text(workspace.name).tag(workspace.id)
+            }
+          }
+          .labelsHidden()
+          .frame(width: 190)
+        }
+        labelled("Owner (email)") {
+          TextField("owner@te.com", text: $model.ownerEmail)
+            .textFieldStyle(.roundedBorder)
+            .frame(minWidth: 190)
+        }
+      }
+      HStack(alignment: .bottom, spacing: 12) {
+        labelled("What are you onboarding?") {
+          Picker("What are you onboarding?", selection: $process) {
+            Text("A project").tag(false)
+            Text("A process").tag(true)
+          }
+          .pickerStyle(.segmented)
+          .labelsHidden()
+          .frame(width: 240)
+        }
         Button("Onboard it") {
           Task { await model.onboardNew(name: name, process: process) }
         }
-        .disabled(!model.connected || model.busy || name.trimmingCharacters(in: .whitespaces).isEmpty)
+        .disabled(!model.connected || model.busy || name.trimmingCharacters(in: .whitespaces).isEmpty || model.workspaceId.isEmpty)
         .keyboardShortcut(.defaultAction)
+        if model.connected && model.workspaces.isEmpty {
+          Text("No workspace is available to you; ask the Super Admin for one.")
+            .font(.caption)
+            .foregroundStyle(.orange)
+        }
       }
     }
     .padding(14)
     .background(RoundedRectangle(cornerRadius: 12).fill(Color.secondary.opacity(0.06)))
+  }
+
+  @ViewBuilder
+  private func labelled<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+    VStack(alignment: .leading, spacing: 3) {
+      Text(title).font(.caption).foregroundStyle(.secondary)
+      content()
+    }
   }
 
   private var recent: some View {
