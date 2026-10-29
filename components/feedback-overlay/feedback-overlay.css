@@ -1,0 +1,56 @@
+/* Admin feedback overlay (./index.tsx). Never printed. Colours come from the host's CSS variables
+   (--card, --background, --foreground, --border, --input, --secondary, --muted-foreground, --destructive, --orange)
+   with the fallbacks below, so it also works where none are defined. */
+.fb-toggle{position:relative;border:0;background:transparent;color:var(--muted-foreground,#586e7c);padding:7px;border-radius:9px;cursor:pointer;display:grid;place-items:center}
+.fb-toggle:hover{background:var(--secondary,#e8eef1);color:var(--foreground,#253d4b)}
+.fb-toggle[aria-pressed=true]{background:#fff0df;color:#a24c00}
+.fb-toggle .fb-count{position:absolute;top:0;right:0;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--orange,#f58200);color:#251600;font-size:10px;font-weight:700;line-height:16px;text-align:center}
+
+.fb-root{--fb-orange:var(--orange,#f58200);position:fixed;inset:0;z-index:9000;pointer-events:none;font-size:13px;color:var(--foreground,#253d4b)}
+.fb-root button,.fb-root textarea,.fb-root a{pointer-events:auto;font:inherit}
+.fb-hover{position:fixed;pointer-events:none;outline:2px solid var(--fb-orange);outline-offset:-1px;background:rgba(245,130,0,.08);border-radius:3px;transition:all .06s linear}
+
+.fb-pin{position:fixed;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;border:2px solid #fff;background:var(--fb-orange);color:#251600;font-size:11px;font-weight:700;display:grid;place-items:center;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.35);padding:0}
+.fb-pin:hover{transform:translate(-50%,-50%) scale(1.15)}
+
+.fb-composer,.fb-panel,.fb-dock{background:var(--card,#fff);color:var(--card-foreground,#253d4b);border:1px solid var(--border,#d5dfe5);box-shadow:0 8px 28px rgba(0,0,0,.22);pointer-events:auto}
+.fb-composer{position:fixed;width:340px;border-radius:10px;padding:12px;display:grid;gap:8px}
+.fb-composer textarea,.fb-prompt{width:100%;resize:vertical;border:1px solid var(--input,#bdcdd6);border-radius:7px;background:var(--background,#f3f6f7);color:var(--foreground,#253d4b);padding:8px;line-height:1.4}
+.fb-composer textarea:focus,.fb-prompt:focus{outline:2px solid var(--fb-orange);outline-offset:1px}
+.fb-target,.fb-selected{margin:0;font-size:12px;line-height:1.4;overflow-wrap:anywhere}
+.fb-target small{display:block;color:var(--muted-foreground,#586e7c);font-size:11px}
+.fb-selected{color:var(--muted-foreground,#586e7c);font-style:italic}
+.fb-actions,.fb-panel footer{display:flex;justify-content:flex-end;gap:8px;align-items:center}
+
+.fb-primary,.fb-quiet{border-radius:7px;padding:6px 11px;cursor:pointer;font-size:12px;border:1px solid var(--border,#d5dfe5);background:transparent;color:var(--foreground,#253d4b)}
+.fb-quiet:hover{background:var(--secondary,#e8eef1)}
+.fb-primary{background:var(--fb-orange);border-color:var(--fb-orange);color:#251600;font-weight:600}
+.fb-primary:disabled,.fb-quiet:disabled{opacity:.45;cursor:not-allowed}
+.fb-danger{color:var(--destructive,#aa3122)}
+
+.fb-dock{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);display:flex;align-items:center;gap:10px;border-radius:999px;padding:6px 10px;font-size:12px}
+.fb-tool{width:36px;height:36px;border-radius:50%;border:1px solid var(--border,#d5dfe5);background:transparent;color:var(--muted-foreground,#586e7c);display:grid;place-items:center;cursor:pointer;padding:0}
+.fb-tool:hover{background:var(--secondary,#e8eef1);color:var(--foreground,#253d4b)}
+.fb-tool[aria-pressed=true]{background:var(--fb-orange);border-color:var(--fb-orange);color:#251600}
+.fb-hint{color:var(--muted-foreground,#586e7c);font-size:12px;white-space:nowrap}
+html.fb-annotating,html.fb-annotating *{cursor:crosshair!important}
+html.fb-annotating .fb-root,html.fb-annotating .fb-root *{cursor:auto!important}
+html.fb-annotating .fb-root button,html.fb-annotating .fb-root a{cursor:pointer!important}
+@media(max-width:620px){.fb-hint{display:none}}
+
+.fb-panel{position:fixed;top:calc(var(--studio-header-height,64px) + 8px);right:12px;bottom:64px;width:min(400px,calc(100vw - 24px));border-radius:12px;display:flex;flex-direction:column;gap:10px;padding:12px;overflow-y:auto}
+.fb-panel header,.fb-panel footer{display:flex;align-items:center;justify-content:space-between}
+.fb-panel footer{justify-content:flex-end;margin-top:auto}
+.fb-panel ol{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.fb-panel li{display:flex;gap:9px;border:1px solid var(--border,#d5dfe5);border-radius:8px;padding:8px}
+.fb-panel li p{margin:2px 0 4px;white-space:pre-wrap;overflow-wrap:anywhere}
+.fb-panel li small{color:var(--muted-foreground,#586e7c);font-size:11px;overflow-wrap:anywhere}
+.fb-num{flex:none;width:20px;height:20px;border-radius:50%;background:var(--fb-orange);color:#251600;font-size:11px;font-weight:700;display:grid;place-items:center}
+.fb-row{display:flex;gap:12px;font-size:12px}
+.fb-link{border:0;background:transparent;padding:0;cursor:pointer;color:var(--foreground,#253d4b);text-decoration:underline}
+.fb-row a{color:var(--foreground,#253d4b)}
+.fb-label{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted-foreground,#586e7c)}
+.fb-prompt{min-height:150px;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
+.fb-note,.fb-empty{margin:0;color:var(--muted-foreground,#586e7c);font-size:11px;line-height:1.4}
+
+@media print{.fb-root,.fb-toggle{display:none!important}}

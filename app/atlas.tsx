@@ -74,6 +74,8 @@ import FlightDeckConnection from "./flightdeck-connection";
 import { FlightDeckPromo } from "./flightdeck-onboarding";
 import AccessManagement from "./access-management";
 import AccountMenu from "./account-menu";
+import { usePathname } from "next/navigation";
+import { FeedbackOverlay, FeedbackToggle } from "@/components/feedback-overlay";
 import type { AccessProfile } from "@/lib/access-policy";
 import Ideas from "./ideas";
 import AtlasNavigation from "./atlas-navigation";
@@ -147,6 +149,8 @@ export default function Atlas() {
   const locale = useLocale();
   const { theme, setTheme } = useTheme();
   const [access, setAccess] = useState<AccessProfile | null>(null);
+  const pathname = usePathname();
+  const isFeedbackAdmin = !!access && (access.superAdmin || access.roleId === "admin");
   const [requesterRequests, setRequesterRequests] = useState(false);
   const [flight, setFlight] = useState<{
     from: PortfolioView;
@@ -497,6 +501,7 @@ export default function Atlas() {
       key={access?.userId || "loading"}
       userId={access?.userId}
     >
+      {isFeedbackAdmin ? <FeedbackOverlay pathname={pathname} appName="Atlas" /> : null}
       <div
         className={`atlas-shell ${view === "globe" ? "immersive-globe" : ""}`}
       >
@@ -540,6 +545,7 @@ export default function Atlas() {
             <div className="system-label">
               <span className="tiny-orbit" /> A WIDER PERSPECTIVE
             </div>
+            {isFeedbackAdmin ? <FeedbackToggle /> : null}
             <AccountMenu
               name={access?.name || "My workspace"}
               role={
