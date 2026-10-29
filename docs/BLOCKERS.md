@@ -38,10 +38,11 @@ this file is a claim that something works.
 
 ## macOS capture, transcription and sync
 
-- **State:** the app has an Overview, a Pipeline board, a project brain, the
-  onboard-a-project-or-process flow and a working API connection over device
-  tokens. ScreenCaptureKit recording, on-device Whisper transcription and
-  offline sync are **not** built.
+- **State:** the app can complete an onboarding on its own — create, intake,
+  reuse, evidence metadata (hashed locally, file not uploaded), value, roles and
+  gates — plus the Overview and Pipeline, over device tokens. ScreenCaptureKit
+  recording, on-device Whisper transcription, real evidence upload and offline
+  sync are **not** built.
 - **Why:** capture is the part of the PRD that needs the most care (permission
   prompts, a visible indicator, keyframe layout compatibility, no Cap). It was
   not attempted rather than half-built.

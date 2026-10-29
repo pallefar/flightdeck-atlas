@@ -162,6 +162,16 @@ a **Pipeline** board, and a project's brain with its requirements, gate, evidenc
 value and audit timeline. It never decides a rule itself — `canGate` and the
 missing requirements come from the server.
 
+A whole onboarding can be done in the app: create the project or process, fill the
+intake, record the reuse decision, attach evidence metadata, record value, assign the
+owner, process owner and approvers, and pass or reject each stage gate. What it cannot
+do is produce the facts that come from elsewhere — the OS project link, the Vision
+delivery, a DiagramForge map or a Studio compliance record — and it says which are
+missing rather than pretending.
+
+`ATLAS_SELFTEST=1` runs that whole flow through the app's own client against a live
+Atlas and exits non-zero if any step fails; see the runbook.
+
 Connecting it needs a **device token** the Super Admin mints
 (`POST /api/access/device-tokens`); only its sha256 is stored, and it resolves to
 an existing Atlas grant, so disabling the member or revoking the token denies

@@ -7,12 +7,29 @@ import XCTest
 final class StubProtocol: URLProtocol {
   nonisolated(unsafe) static var handler: ((URLRequest) throws -> (Int, Data))?
   nonisolated(unsafe) static var seen: [String] = []
+  nonisolated(unsafe) static var bodies: [String] = []
 
   override class func canInit(with request: URLRequest) -> Bool { true }
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
   override func startLoading() {
     StubProtocol.seen.append("\(request.httpMethod ?? "GET") \(request.url?.path ?? "")")
+    if let body = request.httpBody {
+      StubProtocol.bodies.append(String(data: body, encoding: .utf8) ?? "")
+    } else if let stream = request.httpBodyStream {
+      stream.open()
+      var data = Data()
+      let size = 4096
+      let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: size)
+      while stream.hasBytesAvailable {
+        let read = stream.read(buffer, maxLength: size)
+        if read <= 0 { break }
+        data.append(buffer, count: read)
+      }
+      buffer.deallocate()
+      stream.close()
+      StubProtocol.bodies.append(String(data: data, encoding: .utf8) ?? "")
+    }
     guard let handler = StubProtocol.handler else {
       client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
       return
@@ -37,6 +54,7 @@ final class ClientTests: XCTestCase {
 
   override func setUp() {
     StubProtocol.seen = []
+    StubProtocol.bodies = []
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [StubProtocol.self]
     client = AtlasClient(
@@ -135,5 +153,68 @@ final class ClientTests: XCTestCase {
     } catch {
       XCTFail("unexpected error \(error)")
     }
+  }
+  // The write actions the app offers. Each one is the same call the web lane
+  // makes, so a person can complete an onboarding in the app alone.
+  private func snapshot() throws -> AtlasSnapshot {
+    let json = #"{"record":{"projectId":"p-1","name":"Purchase orders","stage":"intake","revision":3,"entryType":"process"},"status":"active","stage":{"current":"intake","next":"reuse","missing":[],"missingForNext":[]},"chain":{"ok":true,"length":1},"gates":[],"evidence":[],"values":[],"canGate":{"intake":true},"data":{"problem":"Email","requester":"Procurement","site":"Bensheim","classification":"internal","classificationDeclared":true},"access":{"canEdit":true,"canAssignRoles":true,"canView":true},"workspace":{"id":"general","name":"General"},"assignments":{"owner":"owner@example.test","processOwner":null,"teoaApprover":null,"visionApprover":null}}"#
+    return try JSONDecoder().decode(AtlasSnapshot.self, from: Data(json.utf8))
+  }
+
+  func testSaveIntakeSendsTheRevisionAndTheFields() async throws {
+    respond(200, String(decoding: try JSONEncoder().encode(try snapshot()), as: UTF8.self))
+    var draft = try snapshot().data!.draft
+    draft.site = "Prague"
+    _ = try await client.saveIntake(try snapshot(), draft: draft)
+    XCTAssertEqual(StubProtocol.seen, ["PATCH /api/onboarding/p-1"])
+    let body = StubProtocol.bodies.last ?? ""
+    XCTAssertTrue(body.contains("\"revision\":3"), body)
+    XCTAssertTrue(body.contains("Prague"), body)
+    XCTAssertTrue(body.contains("classificationDeclared"), body)
+  }
+
+  func testReuseEvidenceValueAndRolesEachPostTheirOwnRoute() async throws {
+    respond(200, String(decoding: try JSONEncoder().encode(try snapshot()), as: UTF8.self))
+    _ = try await client.recordReuse(try snapshot(), decision: "extend", reason: "sub-app exists")
+    _ = try await client.addEvidence(try snapshot(), kind: "document", source: "sop.docx", sha256: String(repeating: "a", count: 64), bytes: 10, classification: "internal")
+    _ = try await client.addValue(try snapshot(), basis: "measured", period: "baseline", hours: 640, cost: nil, sourceRef: "export.csv")
+    _ = try await client.assignRole(try snapshot(), role: "process_owner", email: "process@example.test")
+    XCTAssertEqual(StubProtocol.seen, [
+      "POST /api/onboarding/p-1/reuse",
+      "POST /api/onboarding/p-1/evidence",
+      "POST /api/onboarding/p-1/value",
+      "POST /api/onboarding/p-1/roles",
+    ])
+    XCTAssertTrue(StubProtocol.bodies[0].contains("extend"))
+    XCTAssertTrue(StubProtocol.bodies[2].contains("measured"))
+    XCTAssertTrue(StubProtocol.bodies[2].contains("export.csv"))
+  }
+
+  func testAGateDecisionCarriesTheStageAndTheReason() async throws {
+    respond(200, String(decoding: try JSONEncoder().encode(try snapshot()), as: UTF8.self))
+    struct Decision: Encodable {
+      let stage: String, decision: String, reason: String, revision: Int
+    }
+    _ = try await client.decideGate(
+      try snapshot(),
+      Decision(stage: "intake", decision: "reject", reason: "problem too thin", revision: 3)
+    )
+    XCTAssertEqual(StubProtocol.seen, ["POST /api/onboarding/p-1/gate"])
+    let body = StubProtocol.bodies.last ?? ""
+    XCTAssertTrue(body.contains("reject"), body)
+    XCTAssertTrue(body.contains("problem too thin"), body)
+  }
+  func testAnEmptyEnumFieldIsSentAsNullNotFound() {
+    // The regression the self-test caught: the project schema required
+    // latitude/longitude even when null, and "" is not a valid buildDecision.
+    var draft = IntakeDraft()
+    XCTAssertEqual(draft.fields["buildDecision"], .null)
+    draft.buildDecision = "studio"
+    XCTAssertEqual(draft.fields["buildDecision"], .string("studio"))
+    // A declared classification with no class is not sent at all.
+    XCTAssertNil(draft.fields["classification"])
+    draft.classification = "internal"
+    draft.classificationDeclared = true
+    XCTAssertEqual(draft.fields["classification"], .string("internal"))
   }
 }

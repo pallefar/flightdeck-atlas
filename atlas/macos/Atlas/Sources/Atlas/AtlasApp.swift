@@ -1,4 +1,5 @@
 import AtlasDomain
+import CryptoKit
 import SwiftUI
 
 /// Gives the first window a real size. Relying on SwiftUI's default sizing
@@ -26,7 +27,12 @@ struct AtlasApp: App {
       RootView()
         .environmentObject(model)
         .frame(minWidth: 900, minHeight: 600)
-        .task { await model.refresh() }
+        .task {
+          if let passed = await SelfTest.runIfRequested() {
+            exit(passed ? 0 : 1)
+          }
+          await model.refresh()
+        }
     }
     .defaultSize(width: 1100, height: 760)
   }
@@ -64,6 +70,13 @@ final class BrainModel: ObservableObject {
       }
       verified = true
       error = nil
+      // Development only: open one project's brain on launch, so the full
+      // onboarding surface can be driven without a click.
+      if let target = ProcessInfo.processInfo.environment["ATLAS_OPEN_PROJECT"],
+         !target.isEmpty,
+         model_targetUnopened(target) {
+        await open(target)
+      }
       connection.lastChecked = ISO8601DateFormatter().string(from: Date())
       connection.save()
     } catch let failure as AtlasError {
@@ -110,6 +123,132 @@ final class BrainModel: ObservableObject {
       error = failure.message
     } catch {
       self.error = "The project could not be created."
+    }
+  }
+
+  private func model_targetUnopened(_ id: String) -> Bool {
+    selected == nil || selected?.record.projectId != id
+  }
+
+  private func apply(_ update: AtlasSnapshot, notice message: String) {
+    selected = update
+    notice = message
+    error = nil
+  }
+
+  private func run(
+    _ work: (AtlasClient, AtlasSnapshot) async throws -> AtlasSnapshot,
+    notice message: String,
+    failure: String
+  ) async {
+    guard let client, let current = selected else { return }
+    busy = true
+    defer { busy = false }
+    do {
+      apply(try await work(client, current), notice: message)
+      rows = try await client.list()
+    } catch let refusal as AtlasError {
+      error = refusal.message
+    } catch {
+      self.error = failure
+    }
+  }
+
+  func saveIntake(_ draft: IntakeDraft) async {
+    await run(
+      { client, snapshot in try await client.saveIntake(snapshot, draft: draft) },
+      notice: "Intake saved.",
+      failure: "The intake could not be saved."
+    )
+  }
+
+  func recordReuse(decision: String, reason: String) async {
+    await run(
+      { client, snapshot in
+        try await client.recordReuse(snapshot, decision: decision, reason: reason)
+      },
+      notice: "Reuse decision recorded.",
+      failure: "The reuse decision could not be recorded."
+    )
+  }
+
+  func addEvidence(url: URL, kind: String, classification: String) async {
+    guard let data = try? Data(contentsOf: url) else {
+      error = "That file could not be read."
+      return
+    }
+    let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    await run(
+      { client, snapshot in
+        try await client.addEvidence(
+          snapshot,
+          kind: kind,
+          source: url.lastPathComponent,
+          sha256: digest,
+          bytes: data.count,
+          classification: classification
+        )
+      },
+      notice: "Evidence recorded. The file itself was not uploaded.",
+      failure: "The evidence could not be recorded."
+    )
+  }
+
+  func addValue(
+    basis: String,
+    period: String,
+    hours: Double?,
+    cost: Double?,
+    sourceRef: String?
+  ) async {
+    await run(
+      { client, snapshot in
+        try await client.addValue(
+          snapshot, basis: basis, period: period, hours: hours, cost: cost,
+          sourceRef: sourceRef
+        )
+      },
+      notice: "Value recorded.",
+      failure: "The value could not be recorded."
+    )
+  }
+
+  func assignRole(role: String, email: String) async {
+    await run(
+      { client, snapshot in
+        try await client.assignRole(snapshot, role: role, email: email)
+      },
+      notice: "Role assigned.",
+      failure: "The role could not be assigned."
+    )
+  }
+
+  func decideGate(_ decision: String, reason: String) async {
+    guard let client, let current = selected else { return }
+    busy = true
+    defer { busy = false }
+    do {
+      struct Decision: Encodable {
+        let stage: String
+        let decision: String
+        let reason: String
+        let revision: Int
+      }
+      let updated: AtlasSnapshot = try await client.decideGate(
+        current,
+        Decision(
+          stage: current.stage.current,
+          decision: decision,
+          reason: reason,
+          revision: current.record.revision
+        )
+      )
+      apply(updated, notice: decision == "pass" ? "Stage recorded." : "Decision recorded.")
+      rows = try await client.list()
+    } catch let refusal as AtlasError {
+      error = refusal.message
+    } catch {
+      self.error = "The gate decision could not be recorded."
     }
   }
 
@@ -182,10 +321,10 @@ struct RootView: View {
         }
       }
     }
-    .sheet(item: $model.selected) { snapshot in
-      ProjectBrainView(snapshot: snapshot)
+    .sheet(item: $model.selected) { _ in
+      ProjectBrainView()
         .environmentObject(model)
-        .frame(minWidth: 620, minHeight: 560)
+        .frame(minWidth: 680, minHeight: 620)
     }
   }
 }
@@ -408,109 +547,299 @@ struct PipelineView: View {
   }
 }
 
+/// The project's brain, as a working surface: the intake facts, the reuse
+/// check, evidence, value, roles and the gate. It reads `model.selected` rather
+/// than the sheet's captured value, so every save is reflected immediately.
 struct ProjectBrainView: View {
-  let snapshot: AtlasSnapshot
   @EnvironmentObject private var model: BrainModel
-  @State private var reason = ""
-  @State private var openId: String?
+  @State private var draft = IntakeDraft()
+  @State private var seededRevision = -1
+  @State private var reuseDecision = "new"
+  @State private var reuseReason = ""
+  @State private var gateReason = ""
+  @State private var evidenceKind = "document"
+  @State private var evidenceClassification = "internal"
+  @State private var importing = false
+  @State private var valueBasis = "estimate"
+  @State private var valuePeriod = "baseline"
+  @State private var valueHours = ""
+  @State private var valueCost = ""
+  @State private var valueSource = ""
+  @State private var role = "process_owner"
+  @State private var roleEmail = ""
 
-  private var gateAllowed: Bool { snapshot.canGate[snapshot.stage.current] ?? false }
+  private let classifications = [
+    "public", "internal", "confidential", "export-restricted", "itar", "cui", "customer-pii",
+  ]
+  private let kinds = ["document", "recording", "voice", "interview", "connector", "capture"]
 
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 16) {
-        VStack(alignment: .leading, spacing: 2) {
-          Text(snapshot.record.name).font(.title2.bold())
-          Text("\(snapshot.workspace.map { "\($0.name) · " } ?? "")\(snapshot.entryIsProcess ? "Process" : "Project") · \(stageTitle(snapshot.stage.current)) · rev \(snapshot.record.revision)")
-            .foregroundStyle(.secondary)
+      if let snapshot = model.selected {
+        VStack(alignment: .leading, spacing: 18) {
+          header(snapshot)
+          requirements(snapshot)
+          intakeForm(snapshot)
+          reuseForm
+          evidenceSection(snapshot)
+          valueSection(snapshot)
+          rolesSection(snapshot)
+          gateSection(snapshot)
+          timeline(snapshot)
         }
-        section("Roles") {
-          let assignments = snapshot.assignments
-          let rows: [(String, String?)] = [
-            ("Owner", assignments?.owner),
-            ("Process owner", assignments?.processOwner),
-            ("TEOA approver", assignments?.teoaApprover),
-            ("Vision approver", assignments?.visionApprover),
-          ]
-          ForEach(rows.filter { $0.1 != nil }, id: \.0) { role, email in
-            Text("\(role): \(email ?? "")").font(.callout)
-          }
-          if rows.allSatisfy({ $0.1 == nil }) {
-            Text("No roles assigned yet.").foregroundStyle(.secondary)
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: snapshot.record.revision) {
+          if seededRevision != snapshot.record.revision {
+            draft = snapshot.data?.draft ?? IntakeDraft()
+            seededRevision = snapshot.record.revision
           }
         }
-        Text(snapshot.chain.ok
-             ? "Audit chain verified (\(snapshot.chain.length ?? 0) events)"
-             : "Audit chain broken at event \(snapshot.chain.brokenAt ?? 0)")
-          .font(.caption)
-          .padding(6)
-          .background(RoundedRectangle(cornerRadius: 6).fill(snapshot.chain.ok ? Color.green.opacity(0.12) : Color.red.opacity(0.12)))
+      } else {
+        Text("No project selected.").padding(24)
+      }
+    }
+    .navigationTitle(model.selected?.record.name ?? "Project")
+    .fileImporter(isPresented: $importing, allowedContentTypes: [.item]) { result in
+      guard case .success(let url) = result else { return }
+      let kind = evidenceKind
+      let classification = evidenceClassification
+      Task { await model.addEvidence(url: url, kind: kind, classification: classification) }
+    }
+  }
 
-        section("Still needed for this stage") {
-          if snapshot.stage.missing.isEmpty {
-            Text("This stage's requirements are met.").foregroundStyle(.secondary)
-          } else {
-            ForEach(snapshot.stage.missing, id: \.self) { requirement in
-              Label(requirementText(requirement), systemImage: "circle.dashed")
-            }
-          }
-        }
+  private func header(_ snapshot: AtlasSnapshot) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      Text(snapshot.record.name).font(.title2.bold())
+      Text("\(snapshot.workspace.map { "\($0.name) · " } ?? "")\(snapshot.entryIsProcess ? "Process" : "Project") · \(stageTitle(snapshot.stage.current)) · rev \(snapshot.record.revision)")
+        .foregroundStyle(.secondary)
+      Text(snapshot.chain.ok
+           ? "Audit chain verified (\(snapshot.chain.length ?? 0) events)"
+           : "Audit chain broken at event \(snapshot.chain.brokenAt ?? 0)")
+        .font(.caption)
+        .padding(6)
+        .background(RoundedRectangle(cornerRadius: 6)
+          .fill(snapshot.chain.ok ? Color.green.opacity(0.12) : Color.red.opacity(0.12)))
+    }
+  }
 
-        section("Stage gate") {
-          TextField("Reason", text: $reason).textFieldStyle(.roundedBorder)
-          HStack {
-            Button("Pass this stage") { Task { await model.passGate(reason: reason) } }
-              .disabled(!gateAllowed || model.busy)
-            if !gateAllowed {
-              Text("Your role cannot pass this stage.").font(.caption).foregroundStyle(.secondary)
-            }
-            if let next = snapshot.stage.next {
-              Text("Next: \(stageTitle(next))").font(.caption).foregroundStyle(.secondary)
-            }
-          }
-        }
-
-        section("Evidence") {
-          if snapshot.evidence.isEmpty {
-            Text("No evidence attached yet.").foregroundStyle(.secondary)
-          } else {
-            ForEach(snapshot.evidence) { item in
-              Text("\(item.source) · \(item.kind) · \(item.status)")
-                .font(.callout)
-            }
-          }
-        }
-
-        section("Value") {
-          if snapshot.values.isEmpty {
-            Text("No value recorded yet.").foregroundStyle(.secondary)
-          } else {
-            ForEach(snapshot.values) { item in
-              Text("\(item.basis) · \(item.period)\(item.sourceRef.map { " · \($0)" } ?? "")")
-                .font(.callout)
-            }
-          }
-        }
-
-        section("Audit timeline") {
-          if snapshot.gates.isEmpty {
-            Text("No events yet.").foregroundStyle(.secondary)
-          } else {
-            ForEach(Array(snapshot.gates.enumerated()), id: \.offset) { _, gate in
-              Text("\(stageTitle(gate.stage)) · \(gate.decision) · \(gate.at.prefix(10))")
-                .font(.callout)
-            }
-          }
+  private func requirements(_ snapshot: AtlasSnapshot) -> some View {
+    section("Still needed for this stage") {
+      if snapshot.stage.missing.isEmpty {
+        Text("This stage's requirements are met.").foregroundStyle(.secondary)
+      } else {
+        ForEach(snapshot.stage.missing, id: \.self) { requirement in
+          Label(requirementText(requirement), systemImage: "circle.dashed")
         }
       }
-      .padding(24)
-      .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .navigationTitle(snapshot.record.name)
+  }
+
+  private var reuseForm: some View {
+    section("Reuse check") {
+      Picker("Decision", selection: $reuseDecision) {
+        Text("Reuse existing").tag("reuse")
+        Text("Extend existing").tag("extend")
+        Text("New build").tag("new")
+      }
+      .pickerStyle(.segmented)
+      .frame(maxWidth: 420)
+      TextField("Why", text: $reuseReason).textFieldStyle(.roundedBorder)
+      Button("Record the check") {
+        let decision = reuseDecision
+        let reason = reuseReason
+        Task { await model.recordReuse(decision: decision, reason: reason) }
+      }
+      .disabled(model.busy || reuseReason.trimmingCharacters(in: .whitespaces).isEmpty)
+    }
+  }
+
+  private func intakeForm(_ snapshot: AtlasSnapshot) -> some View {
+    section("Intake") {
+      Picker("Data classification", selection: $draft.classification) {
+        Text("—").tag("")
+        ForEach(classifications, id: \.self) { Text($0).tag($0) }
+      }
+      .frame(maxWidth: 320)
+      .onChange(of: draft.classification) { _, value in
+        draft.classificationDeclared = !value.isEmpty
+      }
+      Text("Required before any upload. Export Restricted, ITAR, CUI and customer PII are blocked.")
+        .font(.caption).foregroundStyle(.secondary)
+      field("Problem", text: $draft.problem)
+      field("Requester", text: $draft.requester)
+      field("Function", text: $draft.functionArea)
+      field("Site", text: $draft.site)
+      field("Objective", text: $draft.objective)
+      field("Success measure", text: $draft.successMeasure)
+      field("TEOA scope id", text: $draft.teoaScopeId)
+      field("As-is map reference", text: $draft.asIsMapRef)
+      Toggle("As-is signed off", isOn: $draft.asIsSignedOff)
+      field("To-be map reference", text: $draft.toBeMapRef)
+      Picker("Build decision", selection: $draft.buildDecision) {
+        Text("—").tag("")
+        Text("Cowork skill").tag("cowork")
+        Text("Existing sub-app").tag("sub-app")
+        Text("New Studio build").tag("studio")
+      }
+      .frame(maxWidth: 320)
+      field("Operator bundle reference", text: $draft.operatorBundleRef)
+      field("Retirement reason", text: $draft.retireReason)
+      Button("Save intake") {
+        let copy = draft
+        Task { await model.saveIntake(copy) }
+      }
+      .disabled(model.busy || snapshot.access?.canEdit == false)
+    }
+  }
+
+  private func evidenceSection(_ snapshot: AtlasSnapshot) -> some View {
+    section("Evidence") {
+      if snapshot.evidence.isEmpty {
+        Text("No evidence attached yet.").foregroundStyle(.secondary)
+      } else {
+        ForEach(snapshot.evidence) { item in
+          Text("\(item.source) · \(item.kind) · \(item.scanState) · \(item.status)").font(.callout)
+        }
+      }
+      Picker("Kind", selection: $evidenceKind) {
+        ForEach(kinds, id: \.self) { Text($0).tag($0) }
+      }
+      .frame(maxWidth: 260)
+      Picker("Classification", selection: $evidenceClassification) {
+        ForEach(classifications, id: \.self) { Text($0).tag($0) }
+      }
+      .frame(maxWidth: 260)
+      Button("Add evidence from a file") { importing = true }
+        .disabled(model.busy)
+      Text("Atlas records the file's hash, size and classification. The file itself is not uploaded.")
+        .font(.caption).foregroundStyle(.secondary)
+    }
+  }
+
+  private func valueSection(_ snapshot: AtlasSnapshot) -> some View {
+    section("Value") {
+      if snapshot.values.isEmpty {
+        Text("No value recorded yet.").foregroundStyle(.secondary)
+      } else {
+        ForEach(snapshot.values) { item in
+          Text("\(item.basis) · \(item.period)\(item.sourceRef.map { " · \($0)" } ?? "")").font(.callout)
+        }
+      }
+      HStack(spacing: 10) {
+        Picker("Basis", selection: $valueBasis) {
+          Text("Estimate").tag("estimate")
+          Text("Measured").tag("measured")
+          Text("Not tracked").tag("not-tracked")
+        }
+        .frame(maxWidth: 200)
+        Picker("Period", selection: $valuePeriod) {
+          Text("Baseline").tag("baseline")
+          Text("30 days").tag("d30")
+          Text("90 days").tag("d90")
+        }
+        .frame(maxWidth: 180)
+      }
+      HStack(spacing: 10) {
+        TextField("Hours", text: $valueHours).textFieldStyle(.roundedBorder).frame(maxWidth: 120)
+        TextField("Cost", text: $valueCost).textFieldStyle(.roundedBorder).frame(maxWidth: 120)
+        TextField("Source reference", text: $valueSource).textFieldStyle(.roundedBorder)
+      }
+      Button("Add value record") {
+        let basis = valueBasis
+        let period = valuePeriod
+        let hours = Double(valueHours)
+        let cost = Double(valueCost)
+        let source = valueSource.trimmingCharacters(in: .whitespaces).isEmpty ? nil : valueSource
+        Task { await model.addValue(basis: basis, period: period, hours: hours, cost: cost, sourceRef: source) }
+      }
+      .disabled(model.busy)
+    }
+  }
+
+  private func rolesSection(_ snapshot: AtlasSnapshot) -> some View {
+    section("Roles") {
+      let assignments = snapshot.assignments
+      let rows: [(String, String?)] = [
+        ("Owner", assignments?.owner),
+        ("Process owner", assignments?.processOwner),
+        ("TEOA approver", assignments?.teoaApprover),
+        ("Vision approver", assignments?.visionApprover),
+      ]
+      ForEach(rows.filter { $0.1 != nil }, id: \.0) { role, email in
+        Text("\(role): \(email ?? "")").font(.callout)
+      }
+      if rows.allSatisfy({ $0.1 == nil }) {
+        Text("No roles assigned yet.").foregroundStyle(.secondary)
+      }
+      if snapshot.access?.canAssignRoles == true {
+        HStack(spacing: 10) {
+          Picker("Role", selection: $role) {
+            Text("Owner").tag("owner")
+            Text("Process owner").tag("process_owner")
+            Text("TEOA approver").tag("teoa_approver")
+            Text("Vision approver").tag("vision_approver")
+          }
+          .frame(maxWidth: 180)
+          TextField("person@te.com", text: $roleEmail).textFieldStyle(.roundedBorder)
+          Button("Assign") {
+            let chosen = role
+            let email = roleEmail
+            Task { await model.assignRole(role: chosen, email: email) }
+          }
+          .disabled(model.busy || roleEmail.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+      } else {
+        Text("Only a workspace admin assigns roles.").font(.caption).foregroundStyle(.secondary)
+      }
+    }
+  }
+
+  private func gateSection(_ snapshot: AtlasSnapshot) -> some View {
+    section("Stage gate") {
+      TextField("Reason", text: $gateReason).textFieldStyle(.roundedBorder)
+      HStack {
+        Button("Pass this stage") {
+          let reason = gateReason
+          Task { await model.decideGate("pass", reason: reason) }
+        }
+        .disabled(model.busy || snapshot.canGate[snapshot.stage.current] != true)
+        Button("Reject") {
+          let reason = gateReason
+          Task { await model.decideGate("reject", reason: reason) }
+        }
+        .disabled(model.busy || snapshot.canGate[snapshot.stage.current] != true)
+        if snapshot.canGate[snapshot.stage.current] != true {
+          Text("Your role cannot pass this stage.").font(.caption).foregroundStyle(.secondary)
+        }
+        if let next = snapshot.stage.next {
+          Text("Next: \(stageTitle(next))").font(.caption).foregroundStyle(.secondary)
+        }
+      }
+    }
+  }
+
+  private func timeline(_ snapshot: AtlasSnapshot) -> some View {
+    section("Audit timeline") {
+      if snapshot.gates.isEmpty {
+        Text("No events yet.").foregroundStyle(.secondary)
+      } else {
+        ForEach(Array(snapshot.gates.enumerated()), id: \.offset) { _, gate in
+          Text("\(stageTitle(gate.stage)) · \(gate.decision) · \(gate.at.prefix(10))").font(.callout)
+        }
+      }
+    }
+  }
+
+  private func field(_ title: String, text: Binding<String>) -> some View {
+    HStack {
+      Text(title).font(.caption).foregroundStyle(.secondary).frame(width: 150, alignment: .leading)
+      TextField(title, text: text).textFieldStyle(.roundedBorder)
+    }
   }
 
   private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-    VStack(alignment: .leading, spacing: 6) {
+    VStack(alignment: .leading, spacing: 8) {
       Text(title.uppercased()).font(.caption.bold()).foregroundStyle(.secondary)
       content()
       Divider()

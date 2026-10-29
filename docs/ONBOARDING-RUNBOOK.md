@@ -132,6 +132,20 @@ ATLAS_BASE_URL=http://localhost:5173 ATLAS_DEVICE_TOKEN=<token> \
 A Finder/Dock launch never sees those variables, and the app stores nothing
 from them.
 
+### Check the app against a live Atlas
+
+```sh
+ATLAS_BASE_URL=http://localhost:5173 ATLAS_DEVICE_TOKEN=<token> ATLAS_SELFTEST=1 \
+  "$HOME/Applications/Atlas.app/Contents/MacOS/Atlas"; echo "exit=$?"
+```
+
+It creates a project, saves the intake, records the reuse decision, passes the intake
+gate and prints `selftest: project=… stage=reuse chain=2 workspace=…`, then exits
+0 (non-zero on any failure, with the failing step on stderr). It leaves the project it
+created behind, so delete it when you are done. Two real client bugs were caught this
+way: Swift omits `nil` optionals (the project schema requires `latitude`/`longitude`
+even when null) and `""` is not a valid `buildDecision`.
+
 The app's `Info.plist` allows cleartext HTTP to **local** hosts only
 (`NSAllowsLocalNetworking`), so a production deployment must use HTTPS.
 

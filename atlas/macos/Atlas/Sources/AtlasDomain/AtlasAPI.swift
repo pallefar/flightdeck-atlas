@@ -62,6 +62,58 @@ public struct AtlasSnapshot: Codable, Equatable, Identifiable, Sendable {
     public let teoaApprover: String?
     public let visionApprover: String?
   }
+  public struct Intake: Codable, Equatable, Sendable {
+    public let classificationDeclared: Bool?
+    public let classification: String?
+    public let problem: String?
+    public let requester: String?
+    public let functionArea: String?
+    public let site: String?
+    public let objective: String?
+    public let successMeasure: String?
+    public let volume: String?
+    public let frequency: String?
+    public let teoaScopeId: String?
+    public let visionObjectiveId: String?
+    public let asIsMapRef: String?
+    public let asIsSignedOff: Bool?
+    public let toBeMapRef: String?
+    public let buildDecision: String?
+    public let operatorBundleRef: String?
+    public let retireReason: String?
+
+    public var draft: IntakeDraft {
+      IntakeDraft(
+        classificationDeclared: classificationDeclared ?? false,
+        classification: classification ?? "",
+        problem: problem ?? "",
+        requester: requester ?? "",
+        functionArea: functionArea ?? "",
+        site: site ?? "",
+        objective: objective ?? "",
+        successMeasure: successMeasure ?? "",
+        volume: volume ?? "",
+        frequency: frequency ?? "",
+        teoaScopeId: teoaScopeId ?? "",
+        visionObjectiveId: visionObjectiveId ?? "",
+        asIsMapRef: asIsMapRef ?? "",
+        asIsSignedOff: asIsSignedOff ?? false,
+        toBeMapRef: toBeMapRef ?? "",
+        buildDecision: buildDecision ?? "",
+        operatorBundleRef: operatorBundleRef ?? "",
+        retireReason: retireReason ?? ""
+      )
+    }
+  }
+
+  public struct Access: Codable, Equatable, Sendable {
+    public let canEdit: Bool?
+    public let canAssignRoles: Bool?
+    public let canView: Bool?
+  }
+
+  public let data: Intake?
+  public let access: Access?
   public let workspace: WorkspaceRef?
   public let assignments: Assignment?
   public let record: Record
@@ -156,10 +208,31 @@ public struct AtlasClient: Sendable {
     workspaceId: String,
     ownerEmail: String?
   ) async throws -> String {
+    // `latitude` and `longitude` are required by the project schema and may be
+    // null. Swift omits nil optionals when it encodes, which the server reads
+    // as a missing field ("Required"), so nulls are written explicitly.
     struct Body: Encodable {
       let name: String, description: String, status: String, category: String
       let location: String, latitude: Double?, longitude: Double?, dueDate: String
       let color: String, tasks: [String]
+      enum CodingKeys: String, CodingKey {
+        case name, description, status, category, location, latitude, longitude, dueDate, color, tasks
+      }
+      func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        try container.encode(description, forKey: .description)
+        try container.encode(status, forKey: .status)
+        try container.encode(category, forKey: .category)
+        try container.encode(location, forKey: .location)
+        if let latitude { try container.encode(latitude, forKey: .latitude) }
+        else { try container.encodeNil(forKey: .latitude) }
+        if let longitude { try container.encode(longitude, forKey: .longitude) }
+        else { try container.encodeNil(forKey: .longitude) }
+        try container.encode(dueDate, forKey: .dueDate)
+        try container.encode(color, forKey: .color)
+        try container.encode(tasks, forKey: .tasks)
+      }
     }
     struct Created: Decodable { struct Project: Decodable { let id: String }; let project: Project }
     let body = Body(
@@ -201,6 +274,138 @@ public struct AtlasClient: Sendable {
       try request(
         "/api/onboarding/\(projectId)", method: "POST",
         body: Intake(entryType: process ? "process" : "project", workspaceId: workspaceId)
+      ),
+      as: AtlasSnapshot.self
+    )
+  }
+
+  /// Save the editable intake facts. The revision is the one the snapshot
+  /// carried, so a save cannot overwrite someone else's change.
+  public func saveIntake(
+    _ snapshot: AtlasSnapshot,
+    draft: IntakeDraft
+  ) async throws -> AtlasSnapshot {
+    struct Body: Encodable {
+      let revision: Int
+      let fields: [String: FieldValue]
+    }
+    return try await send(
+      try request(
+        "/api/onboarding/\(snapshot.record.projectId)", method: "PATCH",
+        body: Body(revision: snapshot.record.revision, fields: draft.fields)
+      ),
+      as: AtlasSnapshot.self
+    )
+  }
+
+  public func recordReuse(
+    _ snapshot: AtlasSnapshot,
+    decision: String,
+    reason: String
+  ) async throws -> AtlasSnapshot {
+    struct Body: Encodable {
+      let decision: String
+      let reason: String
+      let matches: [String]
+    }
+    return try await send(
+      try request(
+        "/api/onboarding/\(snapshot.record.projectId)/reuse", method: "POST",
+        body: Body(decision: decision, reason: reason, matches: [])
+      ),
+      as: AtlasSnapshot.self
+    )
+  }
+
+  public func addEvidence(
+    _ snapshot: AtlasSnapshot,
+    kind: String,
+    source: String,
+    sha256: String,
+    bytes: Int,
+    classification: String
+  ) async throws -> AtlasSnapshot {
+    struct Body: Encodable {
+      let kind: String
+      let source: String
+      let sha256: String
+      let bytes: Int
+      let classification: String
+      let status: String
+    }
+    return try await send(
+      try request(
+        "/api/onboarding/\(snapshot.record.projectId)/evidence", method: "POST",
+        body: Body(
+          kind: kind, source: source, sha256: sha256, bytes: bytes,
+          classification: classification, status: "pending"
+        )
+      ),
+      as: AtlasSnapshot.self
+    )
+  }
+
+  public func addValue(
+    _ snapshot: AtlasSnapshot,
+    basis: String,
+    period: String,
+    hours: Double?,
+    cost: Double?,
+    sourceRef: String?
+  ) async throws -> AtlasSnapshot {
+    struct Figures: Encodable {
+      let hours: Double?
+      let cost: Double?
+    }
+    struct Body: Encodable {
+      let basis: String
+      let period: String
+      let figures: Figures
+      let method: String
+      let methodVersion: String
+      let confidence: String
+      let sourceRef: String?
+    }
+    return try await send(
+      try request(
+        "/api/onboarding/\(snapshot.record.projectId)/value", method: "POST",
+        body: Body(
+          basis: basis, period: period, figures: Figures(hours: hours, cost: cost),
+          method: "ai-jam-value-case", methodVersion: "provisional-1",
+          confidence: "medium", sourceRef: sourceRef
+        )
+      ),
+      as: AtlasSnapshot.self
+    )
+  }
+
+  public func assignRole(
+    _ snapshot: AtlasSnapshot,
+    role: String,
+    email: String
+  ) async throws -> AtlasSnapshot {
+    struct Body: Encodable {
+      let role: String
+      let email: String
+    }
+    return try await send(
+      try request(
+        "/api/onboarding/\(snapshot.record.projectId)/roles", method: "POST",
+        body: Body(role: role, email: email)
+      ),
+      as: AtlasSnapshot.self
+    )
+  }
+
+  /// A gate decision of any kind (pass or reject), with the body the route
+  /// expects. Kept generic so the app and the web lane send the same shape.
+  public func decideGate<Body: Encodable>(
+    _ snapshot: AtlasSnapshot,
+    _ body: Body
+  ) async throws -> AtlasSnapshot {
+    try await send(
+      try request(
+        "/api/onboarding/\(snapshot.record.projectId)/gate", method: "POST", body: body
       ),
       as: AtlasSnapshot.self
     )
