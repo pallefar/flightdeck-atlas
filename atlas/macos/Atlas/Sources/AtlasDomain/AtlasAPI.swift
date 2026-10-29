@@ -52,6 +52,18 @@ public struct AtlasSnapshot: Codable, Equatable, Identifiable, Sendable {
     public let revision: Int
     public let entryType: String
   }
+  public struct WorkspaceRef: Codable, Equatable, Sendable {
+    public let id: String
+    public let name: String
+  }
+  public struct Assignment: Codable, Equatable, Sendable {
+    public let owner: String?
+    public let processOwner: String?
+    public let teoaApprover: String?
+    public let visionApprover: String?
+  }
+  public let workspace: WorkspaceRef?
+  public let assignments: Assignment?
   public let record: Record
   public let status: String
   public let stage: StageState

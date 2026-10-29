@@ -421,8 +421,23 @@ struct ProjectBrainView: View {
       VStack(alignment: .leading, spacing: 16) {
         VStack(alignment: .leading, spacing: 2) {
           Text(snapshot.record.name).font(.title2.bold())
-          Text("\(snapshot.entryIsProcess ? "Process" : "Project") · \(stageTitle(snapshot.stage.current)) · rev \(snapshot.record.revision)")
+          Text("\(snapshot.workspace.map { "\($0.name) · " } ?? "")\(snapshot.entryIsProcess ? "Process" : "Project") · \(stageTitle(snapshot.stage.current)) · rev \(snapshot.record.revision)")
             .foregroundStyle(.secondary)
+        }
+        section("Roles") {
+          let assignments = snapshot.assignments
+          let rows: [(String, String?)] = [
+            ("Owner", assignments?.owner),
+            ("Process owner", assignments?.processOwner),
+            ("TEOA approver", assignments?.teoaApprover),
+            ("Vision approver", assignments?.visionApprover),
+          ]
+          ForEach(rows.filter { $0.1 != nil }, id: \.0) { role, email in
+            Text("\(role): \(email ?? "")").font(.callout)
+          }
+          if rows.allSatisfy({ $0.1 == nil }) {
+            Text("No roles assigned yet.").foregroundStyle(.secondary)
+          }
         }
         Text(snapshot.chain.ok
              ? "Audit chain verified (\(snapshot.chain.length ?? 0) events)"
