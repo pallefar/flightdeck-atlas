@@ -183,6 +183,26 @@ test.describe("the board", () => {
     );
   });
 });
+test.describe("a direct link from the app", () => {
+  test("?view=brain&project=<id> opens that project's brain", async ({ page }) => {
+    await page.route("**/api/onboarding", (route) => route.fulfill({ json: list }));
+    await page.route("**/api/workspaces", (route) =>
+      route.fulfill({
+        json: { workspaces: [{ id: "general", name: "General", slug: "general", role: "admin" }] },
+      }),
+    );
+    await page.route("**/api/onboarding/*", (route) => route.fulfill({ json: view }));
+    await page.goto("/?view=brain&project=p-1");
+    const detail = page.getByRole("complementary", { name: "Project brain" });
+    await expect(detail.getByRole("heading", { name: "Contract intake" })).toBeVisible();
+    // The lane around it is still there: the whole portfolio, not a bare page.
+    await expect(
+      page.getByRole("region", { name: "Capture", exact: true }).getByRole("button", {
+        name: /Contract intake/,
+      }),
+    ).toBeVisible();
+  });
+});
 test.describe("assigning a role", () => {
   test("a workspace admin assigns the process owner and sees it", async ({ page }) => {
     await page.route("**/api/onboarding", (route) => route.fulfill({ json: list }));

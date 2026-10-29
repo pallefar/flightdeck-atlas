@@ -206,7 +206,8 @@ public struct AtlasClient: Sendable {
     name: String,
     process: Bool,
     workspaceId: String,
-    ownerEmail: String?
+    ownerEmail: String?,
+    problem: String = ""
   ) async throws -> String {
     // `latitude` and `longitude` are required by the project schema and may be
     // null. Swift omits nil optionals when it encodes, which the server reads
@@ -245,6 +246,7 @@ public struct AtlasClient: Sendable {
       let entryType: String
       let workspaceId: String
       let ownerEmail: String?
+      let problem: String
     }
     _ = try await send(
       try request(
@@ -252,7 +254,8 @@ public struct AtlasClient: Sendable {
         body: Intake(
           entryType: process ? "process" : "project",
           workspaceId: workspaceId,
-          ownerEmail: ownerEmail
+          ownerEmail: ownerEmail,
+          problem: problem
         )
       ),
       as: AtlasSnapshot.self

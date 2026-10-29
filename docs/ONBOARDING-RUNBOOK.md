@@ -181,3 +181,15 @@ before it even looks at the facts — and one person cannot stand in for the oth
 approver's permission.
 
 Rules as code: `lib/onboarding/access.ts`; as tests: `tests/brain-access.spec.ts`.
+
+## The app's wizard and its links into Atlas
+
+- The wizard opens by itself on a first run (until `atlas.wizardSeen` is stored) and
+  from **Onboard a new project or process** (⌘N). Four steps: kind → workspace and
+  owner → name and problem → review and create.
+- **Open Atlas** (top of the Overview) opens `/?view=brain` in the browser: the whole
+  portfolio with the pipeline, filters and every project.
+- **Open in Atlas** (in a project's brain) opens `/?view=brain&project=<id>`, which
+  lands on that project's brain inside the full lane.
+- Both URLs come from `AtlasLink` (tested), so the app and the web cannot drift on
+  what a link means.

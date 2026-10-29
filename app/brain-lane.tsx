@@ -191,6 +191,15 @@ export default function BrainLane() {
     },
     [t],
   );
+  // A direct link from the app (or a bookmark): ?view=brain&project=<id>
+  // opens that project's brain once the list has loaded. State is set from a
+  // promise callback so the mount path stays free of synchronous setState.
+  useEffect(() => {
+    const target = new URLSearchParams(window.location.search).get("project");
+    if (!target || !rows?.some((row) => row.projectId === target)) return;
+    if (selected === target) return;
+    void Promise.resolve().then(() => open(target));
+  }, [rows, selected, open]);
   // Start an intake on a project the person may edit. The lane is the only
   // place that opens one; the API (POST /api/onboarding/:id) does the rest.
   const startIntake = useCallback(async () => {

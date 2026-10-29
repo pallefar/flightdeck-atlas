@@ -51,11 +51,19 @@ final class BrainModel: ObservableObject {
   @Published var error: String?
   @Published var notice: String?
   @Published var busy = false
+  /// The onboarding wizard, as a sheet. Opened by the front-door button, and
+  /// once on a first run, because the choice is the first thing to make.
+  @Published var wizardOpen = false
   /// True only after a fetch actually succeeded: a configured address is not
   /// a connection, and the window must not claim one.
   @Published var verified = false
 
   var client: AtlasClient? { connection.client() }
+  var baseURL: URL? { connection.client()?.baseURL }
+  var atlasOverviewURL: URL? { baseURL.flatMap { AtlasLink.overview(base: $0) } }
+  func atlasProjectURL(_ id: String) -> URL? {
+    baseURL.flatMap { AtlasLink.project(base: $0, id: id) }
+  }
   var connected: Bool { verified }
 
   func refresh() async {
@@ -70,6 +78,9 @@ final class BrainModel: ObservableObject {
       }
       verified = true
       error = nil
+      if rows.isEmpty && !UserDefaults.standard.bool(forKey: "atlas.wizardSeen") {
+        wizardOpen = true
+      }
       // Development only: open one project's brain on launch, so the full
       // onboarding surface can be driven without a click.
       if let target = ProcessInfo.processInfo.environment["ATLAS_OPEN_PROJECT"],
@@ -104,7 +115,7 @@ final class BrainModel: ObservableObject {
     }
   }
 
-  func onboardNew(name: String, process: Bool) async {
+  func onboardNew(name: String, process: Bool, problem: String = "") async {
     guard let client else { return }
     busy = true
     defer { busy = false }
@@ -113,7 +124,8 @@ final class BrainModel: ObservableObject {
         name: name,
         process: process,
         workspaceId: workspaceId,
-        ownerEmail: ownerEmail.trimmingCharacters(in: .whitespaces).isEmpty ? nil : ownerEmail
+        ownerEmail: ownerEmail.trimmingCharacters(in: .whitespaces).isEmpty ? nil : ownerEmail,
+        problem: problem
       )
       await refresh()
       selected = try await client.brain(id)
@@ -321,6 +333,13 @@ struct RootView: View {
         }
       }
     }
+    .sheet(isPresented: $model.wizardOpen) {
+      WizardFlow()
+        .environmentObject(model)
+        .onDisappear {
+          UserDefaults.standard.set(true, forKey: "atlas.wizardSeen")
+        }
+    }
     .sheet(item: $model.selected) { _ in
       ProjectBrainView()
         .environmentObject(model)
@@ -349,8 +368,6 @@ struct Banner: View {
 struct OverviewView: View {
   @EnvironmentObject private var model: BrainModel
   let open: (String) -> Void
-  @State private var name = ""
-  @State private var process = false
 
   private var counts: [(Stage, Int)] {
     Stage.allCases.map { stage in
@@ -363,7 +380,7 @@ struct OverviewView: View {
       VStack(alignment: .leading, spacing: 20) {
         header
         stats
-        onboardForm
+        frontDoor
         recent
       }
       .padding(24)
@@ -377,6 +394,12 @@ struct OverviewView: View {
       Text("Onboarding brain").font(.largeTitle.bold())
       Text("Every project and process from intake to measured value.")
         .foregroundStyle(.secondary)
+      HStack(spacing: 10) {
+        if let url = model.atlasOverviewURL {
+          Link("Open Atlas ↗", destination: url)
+            .font(.callout)
+        }
+      }
       if model.connected {
         Text("Connected to \(model.connection.baseURL)")
           .font(.footnote)
@@ -408,63 +431,54 @@ struct OverviewView: View {
     }
   }
 
-  private var onboardForm: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Text("Onboard a new project or process").font(.headline)
-      // Two rows with the label above each control: a single row squeezed the
-      // kind picker's label into a vertical column at this window width.
-      HStack(alignment: .bottom, spacing: 12) {
-        labelled("Name") {
-          TextField("Name", text: $name)
-            .textFieldStyle(.roundedBorder)
-            .frame(minWidth: 200)
-        }
-        labelled("Workspace") {
-          Picker("Workspace", selection: $model.workspaceId) {
-            ForEach(model.workspaces) { workspace in
-              Text(workspace.name).tag(workspace.id)
-            }
+  /// The front door: the wizard, and the direct link into Atlas for the whole
+  /// portfolio at a density a window cannot match.
+  private var frontDoor: some View {
+    HStack(spacing: 14) {
+      Button {
+        model.wizardOpen = true
+      } label: {
+        HStack(spacing: 12) {
+          Image(systemName: "plus.circle.fill")
+            .font(.title2)
+            .foregroundStyle(Color.accentColor)
+          VStack(alignment: .leading, spacing: 2) {
+            Text("Onboard a new project or process").font(.headline)
+            Text("Four steps: choose, say where, name it, review.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
           }
-          .labelsHidden()
-          .frame(width: 190)
+          Spacer()
+          Image(systemName: "arrow.right")
+            .foregroundStyle(.secondary)
         }
-        labelled("Owner (email)") {
-          TextField("owner@te.com", text: $model.ownerEmail)
-            .textFieldStyle(.roundedBorder)
-            .frame(minWidth: 190)
-        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color.accentColor.opacity(0.12)))
+        .overlay(
+          RoundedRectangle(cornerRadius: 14)
+            .stroke(Color.accentColor.opacity(0.35), lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 14))
       }
-      HStack(alignment: .bottom, spacing: 12) {
-        labelled("What are you onboarding?") {
-          Picker("What are you onboarding?", selection: $process) {
-            Text("A project").tag(false)
-            Text("A process").tag(true)
-          }
-          .pickerStyle(.segmented)
-          .labelsHidden()
-          .frame(width: 240)
-        }
-        Button("Onboard it") {
-          Task { await model.onboardNew(name: name, process: process) }
-        }
-        .disabled(!model.connected || model.busy || name.trimmingCharacters(in: .whitespaces).isEmpty || model.workspaceId.isEmpty)
-        .keyboardShortcut(.defaultAction)
-        if model.connected && model.workspaces.isEmpty {
-          Text("No workspace is available to you; ask the Super Admin for one.")
-            .font(.caption)
-            .foregroundStyle(.orange)
-        }
-      }
-    }
-    .padding(14)
-    .background(RoundedRectangle(cornerRadius: 12).fill(Color.secondary.opacity(0.06)))
-  }
+      .buttonStyle(.plain)
+      .disabled(!model.connected)
+      .keyboardShortcut("n", modifiers: .command)
 
-  @ViewBuilder
-  private func labelled<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-    VStack(alignment: .leading, spacing: 3) {
-      Text(title).font(.caption).foregroundStyle(.secondary)
-      content()
+      if let url = model.atlasOverviewURL {
+        Link(destination: url) {
+          VStack(spacing: 4) {
+            Image(systemName: "arrow.up.right.square").font(.title3)
+            Text("Open Atlas").font(.caption)
+          }
+          .frame(width: 96, height: 66)
+          .background(RoundedRectangle(cornerRadius: 12).fill(Color.secondary.opacity(0.10)))
+          .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.25)))
+        }
+        .buttonStyle(.plain)
+        .help("Open the full Atlas portfolio in your browser")
+        .accessibilityLabel("Open Atlas in the browser")
+      }
     }
   }
 
@@ -613,13 +627,19 @@ struct ProjectBrainView: View {
       Text(snapshot.record.name).font(.title2.bold())
       Text("\(snapshot.workspace.map { "\($0.name) · " } ?? "")\(snapshot.entryIsProcess ? "Process" : "Project") · \(stageTitle(snapshot.stage.current)) · rev \(snapshot.record.revision)")
         .foregroundStyle(.secondary)
-      Text(snapshot.chain.ok
-           ? "Audit chain verified (\(snapshot.chain.length ?? 0) events)"
-           : "Audit chain broken at event \(snapshot.chain.brokenAt ?? 0)")
-        .font(.caption)
-        .padding(6)
-        .background(RoundedRectangle(cornerRadius: 6)
-          .fill(snapshot.chain.ok ? Color.green.opacity(0.12) : Color.red.opacity(0.12)))
+      HStack(spacing: 10) {
+        Text(snapshot.chain.ok
+             ? "Audit chain verified (\(snapshot.chain.length ?? 0) events)"
+             : "Audit chain broken at event \(snapshot.chain.brokenAt ?? 0)")
+          .font(.caption)
+          .padding(6)
+          .background(RoundedRectangle(cornerRadius: 6)
+            .fill(snapshot.chain.ok ? Color.green.opacity(0.12) : Color.red.opacity(0.12)))
+        if let url = model.atlasProjectURL(snapshot.record.projectId) {
+          Link("Open in Atlas ↗", destination: url)
+            .font(.caption)
+        }
+      }
     }
   }
 

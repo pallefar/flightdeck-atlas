@@ -162,6 +162,13 @@ a **Pipeline** board, and a project's brain with its requirements, gate, evidenc
 value and audit timeline. It never decides a rule itself — `canGate` and the
 missing requirements come from the server.
 
+The app opens on a **wizard**: two large illustrated cards ask whether you are
+onboarding a project or a process, then where it belongs, what it is called, and a
+review before anything is created. A **direct link into Atlas** sits in the window
+(`Open Atlas`) and beside every project (`Open in Atlas`), pointing at
+`?view=brain` and `?view=brain&project=<id>` — the full portfolio with that project
+already open.
+
 A whole onboarding can be done in the app: create the project or process, fill the
 intake, record the reuse decision, attach evidence metadata, record value, assign the
 owner, process owner and approvers, and pass or reject each stage gate. What it cannot

@@ -217,4 +217,19 @@ final class ClientTests: XCTestCase {
     draft.classificationDeclared = true
     XCTAssertEqual(draft.fields["classification"], .string("internal"))
   }
+  func testTheAtlasLinksPointAtTheBrainLaneAndOneProject() throws {
+    let base = try XCTUnwrap(URL(string: "http://localhost:5173"))
+    let overview = try XCTUnwrap(AtlasLink.overview(base: base)).absoluteString
+    XCTAssertEqual(overview, "http://localhost:5173/?view=brain")
+    let project = try XCTUnwrap(
+      AtlasLink.project(base: base, id: "p-1")
+    ).absoluteString
+    XCTAssertEqual(project, "http://localhost:5173/?view=brain&project=p-1")
+    // A base that already carries a trailing slash or a query is not doubled.
+    let messy = try XCTUnwrap(URL(string: "http://atlas.test/atlas/?x=1"))
+    let link = try XCTUnwrap(AtlasLink.project(base: messy, id: "p 2")).absoluteString
+    XCTAssertTrue(link.hasPrefix("http://atlas.test/atlas/?"), link)
+    XCTAssertTrue(link.contains("view=brain"), link)
+    XCTAssertTrue(link.contains("project=p%202"), link)
+  }
 }
