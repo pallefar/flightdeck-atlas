@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import {
   CONTRACT_IDS,
+  receiptContract,
+  parseReceipt,
   stepsContract,
   workflowContract,
   parseSteps,
@@ -202,6 +204,12 @@ const cases = [
     id: CONTRACT_IDS.steps,
   },
   {
+    name: "atlas-handoff-receipt",
+    fixture: "atlas-handoff-receipt.v1.json",
+    schema: receiptContract as z.ZodTypeAny,
+    id: CONTRACT_IDS.receipt,
+  },
+  {
     name: "atlas-workflow-draft",
     fixture: "atlas-workflow-draft.v1.json",
     schema: workflowContract as z.ZodTypeAny,
@@ -319,6 +327,12 @@ test.describe("refusals that carry a reason the caller can act on", () => {
     const result = parseWorkflow(bad);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.problems.join(" ")).toContain("writes nothing");
+  });
+  test("a built receipt names what exists; a failed one says what failed", () => {
+    const good = fixture("atlas-handoff-receipt.v1.json");
+    expect(parseReceipt(good).ok).toBe(true);
+    expect(parseReceipt({ ...good, status: "failed", notes: null }).ok).toBe(false);
+    expect(parseReceipt({ ...good, artifactRef: "" }).ok).toBe(false);
   });
   test("a step may name the suite app that does it, but only a real one", () => {
     const good = fixture("atlas-workflow-draft.v1.json");

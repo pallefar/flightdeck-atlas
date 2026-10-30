@@ -967,6 +967,17 @@ export default function BrainLane() {
                 ) : (
                   <p className="brain-hint">{t("brain.workflow.none")}</p>
                 )}
+                {(view.receipts ?? []).length > 0 && (
+                  <ul className="brain-receipts">
+                    {(view.receipts ?? []).map((receipt) => (
+                      <li key={`${receipt.kind}-${receipt.at}`}>
+                        <strong>{receipt.kind}</strong> · {receipt.status} ·{" "}
+                        {receipt.artifactRef}
+                        {receipt.version ? ` v${receipt.version}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 <div className="brain-workflow-editor">
                   <div className="brain-row">
                     <label>
@@ -1011,6 +1022,14 @@ export default function BrainLane() {
                       onClick={() => void saveWorkflow()}
                     >
                       {savingWorkflow ? t("brain.saving") : t("brain.workflow.save")}
+                    </button>
+                    <button
+                      type="button"
+                      className="brain-secondary"
+                      disabled={busy || !view.workflow}
+                      onClick={() => void requestMap("future")}
+                    >
+                      {t("brain.workflow.toStudio")}
                     </button>
                     <button
                       type="button"

@@ -64,6 +64,7 @@ export const brainDataSchema = z
      * shape. */
     workflow: z.unknown().nullable().default(null),
     steps: z.unknown().nullable().default(null),
+    receipts: z.array(z.unknown()).max(50).default([]),
     /** Sign-offs the quick lane left open: who owes them and by when. */
     deferredGates: z
       .array(

@@ -24,6 +24,7 @@ export const CONTRACT_IDS = {
   record: "atlas-onboarding-record/1",
   steps: "atlas-process-steps/1",
   workflow: "atlas-workflow-draft/1",
+  receipt: "atlas-handoff-receipt/1",
 } as const;
 const hex64 = z.string().regex(/^[0-9a-f]{64}$/, "Expected a sha256 hex digest.");
 const id = z.string().min(1).max(80);
@@ -274,6 +275,42 @@ export const workflowContract = z
       });
   });
 export type WorkflowContract = z.infer<typeof workflowContract>;
+
+/** What comes back from the app that did the work: Studio built the workflow,
+ * Maps drew the map, Advantage replaced the scorecard. The receipt is what
+ * closes the loop — without it a hand-off is a hope. */
+export const receiptContract = z
+  .object({
+    contract: z.literal(CONTRACT_IDS.receipt),
+    projectId: id,
+    /** The app that did it, by its OS sub-app id. */
+    kind: z.enum(["advantage", "pdf", "maps", "studio", "vision"]),
+    status: z.enum(["built", "published", "failed"]),
+    /** What was produced, by reference: a version, a document id, a map id. */
+    artifactRef: z.string().trim().min(1).max(200),
+    version: z.string().trim().max(40).nullable(),
+    notes: z.string().trim().max(500).nullable(),
+    at,
+  })
+  .strict()
+  .superRefine((receipt, ctx) => {
+    // A failed build must say what failed; a built one must name what exists.
+    if (receipt.status === "failed" && !receipt.notes?.trim())
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["notes"],
+        message: "A failure says what failed.",
+      });
+    if (receipt.status !== "failed" && !receipt.artifactRef.trim())
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["artifactRef"],
+        message: "A build names what exists.",
+      });
+  });
+export type ReceiptContract = z.infer<typeof receiptContract>;
+export const parseReceipt = (input: unknown) =>
+  parseContract(receiptContract, CONTRACT_IDS.receipt, input);
 
 export type ContractProblem =
   | "wrong_version"

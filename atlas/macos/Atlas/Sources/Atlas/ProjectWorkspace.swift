@@ -495,6 +495,13 @@ struct ProjectWorkspace: View {
         Text("No workflow yet. Describe it here, one step per line.")
           .foregroundStyle(.secondary)
       }
+      if let receipts = snapshot.data?.receipts, !receipts.isEmpty {
+        ForEach(receipts, id: \.at) { receipt in
+          Text("\(receipt.kind) · \(receipt.status) · \(receipt.artifactRef)\(receipt.version.map { " v\($0)" } ?? "")")
+            .font(.caption)
+            .foregroundStyle(.green)
+        }
+      }
       Divider()
       TextField("Name", text: $workflowName).textFieldStyle(.roundedBorder)
       Picker("Trigger", selection: $workflowTrigger) {
@@ -509,6 +516,10 @@ struct ProjectWorkspace: View {
         .font(.callout)
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
       HStack(spacing: 10) {
+        Button("Send it to Studio") {
+          Task { await model.requestHandoff(kind: "studio", mapType: "workflow") }
+        }
+        .disabled(model.busy || snapshot.data?.workflow == nil)
         Button("Save the draft") {
           let name = workflowName.trimmingCharacters(in: .whitespacesAndNewlines)
           let steps = workflowSteps

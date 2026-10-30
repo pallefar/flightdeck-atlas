@@ -54,6 +54,14 @@ export type BrainView = {
   handoffs?: { id: string; kind: string; status: string; createdAt: string }[];
   lane?: string;
   deferredGates?: { stage: string; owner: string; dueAt: string }[];
+  receipts?: {
+    kind: string;
+    status: string;
+    artifactRef: string;
+    version: string | null;
+    notes: string | null;
+    at: string;
+  }[];
   workflow?: {
     name: string;
     trigger: string;

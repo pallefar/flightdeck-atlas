@@ -27,7 +27,7 @@ import {
   reasonRequired,
 } from "../domain/gates";
 import { materialDigest } from "../domain/digest";
-import { parseSteps, parseWorkflow } from "../domain/contracts";
+import { parseReceipt, parseSteps, parseWorkflow } from "../domain/contracts";
 import {
   NEXT,
   REUSE_DECISIONS,
@@ -289,6 +289,7 @@ export function createOnboardingRoutes(deps: BrainDeps) {
       deferredGates: data.deferredGates,
       workflow: data.workflow,
       steps: data.steps,
+      receipts: Array.isArray(data.receipts) ? data.receipts : [],
       facts,
       /** The editable fields as stored, so a client form starts from the
        * truth rather than from empty inputs. */
@@ -1323,6 +1324,49 @@ export function createOnboardingRoutes(deps: BrainDeps) {
     putContract(request, projectId, "workflow", parseWorkflow);
   const stepsPut = (request: Request, projectId: string) =>
     putContract(request, projectId, "steps", parseSteps);
+  /** A receipt from the app that did the work. Append-only: a project keeps the
+   * history of what was built, and a second build is a second receipt. */
+  const receiptAdd = async (request: Request, projectId: string) => {
+    if (!sameOrigin(request)) return json({ error: "Request origin is not allowed." }, 403);
+    const auth = await deps.authorize("onboarding.view", request);
+    if (auth.error) return auth.error;
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: "Send a JSON body.", code: "bad_body" }, 400);
+    }
+    const parsed = parseReceipt(body);
+    if (!parsed.ok)
+      return json(
+        { error: "The receipt does not match its contract.", problems: parsed.problems ?? [] },
+        400,
+      );
+    const receipt = parsed.value;
+    if (receipt.projectId !== projectId)
+      return json({ error: "The receipt is for another project.", code: "wrong_project" }, 400);
+    const found = await deps.db
+      .prepare("SELECT data, revision FROM atlas_onboarding WHERE project_id = ?")
+      .bind(projectId)
+      .first<{ data: string; revision: number }>();
+    if (!found) return json({ error: "That project is not onboarding.", code: "not_found" }, 404);
+    const data = JSON.parse(found.data) as Record<string, unknown>;
+    const now = new Date().toISOString();
+    const receipts = Array.isArray(data.receipts) ? data.receipts : [];
+    const next = {
+      ...data,
+      receipts: [...receipts, parsed.value].slice(-50),
+      revision: found.revision + 1,
+      updatedAt: now,
+    };
+    await deps.db
+      .prepare(
+        "UPDATE atlas_onboarding SET data = ?, revision = ?, updated_at = ? WHERE project_id = ?",
+      )
+      .bind(JSON.stringify(next), found.revision + 1, now, projectId)
+      .run();
+    return json({ revision: found.revision + 1, receipt: parsed.value }, 201);
+  };
 
   return {
     list,
@@ -1341,6 +1385,7 @@ export function createOnboardingRoutes(deps: BrainDeps) {
     workspaceMemberAdd,
     workflowPut,
     stepsPut,
+    receiptAdd,
   };
 }
 

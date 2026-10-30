@@ -1,0 +1,10 @@
+{
+  "contract": "atlas-handoff-receipt/1",
+  "projectId": "4f7d1c2a-8b3e-4c5d-9e6f-a1b2c3d4e5f6",
+  "kind": "studio",
+  "status": "built",
+  "artifactRef": "studio/workflow/exception-triage",
+  "version": "0.3.0",
+  "notes": "Built from the to-be map; two steps automated, one kept by a person.",
+  "at": "2026-10-30T09:30:00.000Z"
+}

@@ -97,6 +97,15 @@ public struct AtlasSnapshot: Codable, Equatable, Identifiable, Sendable {
     public var id: String { stage }
     public var overdue: Bool { (ISO8601DateFormatter().date(from: dueAt) ?? .distantFuture) < Date() }
   }
+  public struct Receipt: Codable, Equatable, Identifiable, Sendable {
+    public let kind: String
+    public let status: String
+    public let artifactRef: String
+    public let version: String?
+    public let notes: String?
+    public let at: String
+    public var id: String { "\(kind)-\(at)" }
+  }
   public struct WorkflowDraft: Codable, Equatable, Sendable {
     public struct Step: Codable, Equatable, Sendable {
       public let action: String
@@ -223,6 +232,7 @@ public struct AtlasSnapshot: Codable, Equatable, Identifiable, Sendable {
     /** What the quick lane still owes, and the workflow draft if there is one. */
     public let deferredGates: [DeferredGate]?
     public let workflow: WorkflowDraft?
+    public let receipts: [Receipt]?
 
     public var draft: IntakeDraft {
       IntakeDraft(

@@ -25,6 +25,7 @@ const STRUCT_NAMES = {
   "atlas-onboarding-record/1": "AtlasOnboardingRecord",
   "atlas-process-steps/1": "AtlasProcessSteps",
   "atlas-workflow-draft/1": "AtlasWorkflowDraft",
+  "atlas-handoff-receipt/1": "AtlasHandoffReceipt",
 };
 const CAMEL = /[^a-zA-Z0-9]/g;
 const ident = (name) => name.replace(CAMEL, "");

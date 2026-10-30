@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas-handoff-receipt/1",
+  "title": "Atlas hand-off receipt",
+  "description": "What comes back from the app that did the work. Without a receipt a hand-off is a hope.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "projectId",
+    "kind",
+    "status",
+    "artifactRef",
+    "version",
+    "notes",
+    "at"
+  ],
+  "properties": {
+    "contract": {
+      "const": "atlas-handoff-receipt/1"
+    },
+    "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "kind": {
+      "enum": [
+        "advantage",
+        "pdf",
+        "maps",
+        "studio",
+        "vision"
+      ]
+    },
+    "status": {
+      "enum": [
+        "built",
+        "published",
+        "failed"
+      ]
+    },
+    "artifactRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 40
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 500
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

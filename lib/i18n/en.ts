@@ -673,6 +673,7 @@ export const en = {
   "brain.suite.title": "Suite",
   "brain.suite.unset": "No URL configured — set ATLAS_",
   "brain.card.late": "{count} late",
+  "brain.workflow.toStudio": "Send it to Studio",
 } as const;
 
 export type MessageKey = keyof typeof en;

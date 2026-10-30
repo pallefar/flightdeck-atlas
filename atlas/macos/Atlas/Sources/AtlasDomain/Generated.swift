@@ -190,6 +190,51 @@ public struct AtlasGateEvent: Codable, Equatable, Sendable {
   }
 }
 
+public enum AtlasHandoffReceiptKind: String, Codable, CaseIterable, Sendable {
+  case advantage = "advantage"
+  case pdf = "pdf"
+  case maps = "maps"
+  case studio = "studio"
+  case vision = "vision"
+}
+public enum AtlasHandoffReceiptStatus: String, Codable, CaseIterable, Sendable {
+  case built = "built"
+  case published = "published"
+  case failed = "failed"
+}
+public struct AtlasHandoffReceipt: Codable, Equatable, Sendable {
+  public let contract: String
+  public let projectId: String
+  public let kind: AtlasHandoffReceiptKind
+  public let status: AtlasHandoffReceiptStatus
+  public let artifactRef: String
+  public let version: String?
+  public let notes: String?
+  public let at: String
+
+  public init(contract: String, projectId: String, kind: AtlasHandoffReceiptKind, status: AtlasHandoffReceiptStatus, artifactRef: String, version: String?, notes: String?, at: String) {
+    self.contract = contract
+    self.projectId = projectId
+    self.kind = kind
+    self.status = status
+    self.artifactRef = artifactRef
+    self.version = version
+    self.notes = notes
+    self.at = at
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case contract = "contract"
+    case projectId = "projectId"
+    case kind = "kind"
+    case status = "status"
+    case artifactRef = "artifactRef"
+    case version = "version"
+    case notes = "notes"
+    case at = "at"
+  }
+}
+
 public enum AtlasOnboardingRecordStage: String, Codable, CaseIterable, Sendable {
   case intake = "intake"
   case reuse = "reuse"
