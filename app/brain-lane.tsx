@@ -206,7 +206,11 @@ export default function BrainLane() {
    * existing project create, then the intake on its id. Returns whether the
    * wizard may close. */
   const createOnboard = useCallback(
-    async (input: { kind: "project" | "process"; name: string; problem: string }) => {
+    async (input: {
+      kind: "project" | "process" | "workflow";
+      name: string;
+      problem: string;
+    }) => {
       const name = input.name.trim();
       if (!name) return false;
       if (!workspaceId) {
@@ -222,7 +226,12 @@ export default function BrainLane() {
             name,
             description: "",
             status: "In progress",
-            category: input.kind === "process" ? "Process" : "Project",
+            category:
+              input.kind === "process"
+                ? "Process"
+                : input.kind === "workflow"
+                  ? "Workflow"
+                  : "Project",
             location: "",
             latitude: null,
             longitude: null,
@@ -941,7 +950,7 @@ export default function BrainLane() {
               </section>
               <p className="brain-meta">
                 {view.workspace ? `${view.workspace.name} · ` : ""}
-                {t(`brain.entry.${view.record.entryType === "process" ? "process" : "project"}` as never)} ·{" "}
+                {t(`brain.entry.${["process", "workflow"].includes(view.record.entryType) ? view.record.entryType : "project"}` as never)} ·{" "}
                 {stageLabel(view.stage.current)} ·{" "}
                 {t("brain.revision", { revision: view.record.revision })}
               </p>

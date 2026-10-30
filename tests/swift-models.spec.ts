@@ -23,9 +23,10 @@ test("the native package, its tests and its build script exist", () => {
   ])
     expect(existsSync(path), path).toBe(true);
 });
-test("every analysis anchor has a section to jump to", () => {
-  // The next actions call scrollTo(anchor). An anchor without a matching
-  // `.id(...)` fails silently at runtime, so the wiring is checked here.
+test("every analysis anchor lands on a tab", () => {
+  // A next action names an anchor; the workspace maps each one to a tab. An
+  // anchor with no case in `tabFor` would silently do nothing, so the mapping
+  // is checked against the enum itself.
   const analysis = readFileSync(
     "atlas/macos/Atlas/Sources/AtlasDomain/Analysis.swift",
     "utf8",
@@ -36,9 +37,13 @@ test("every analysis anchor has a section to jump to", () => {
     .map((line) => line.replace(/case/g, "").trim())
     .filter(Boolean);
   expect(anchors.sort()).toEqual(["evidence", "gate", "intake", "reuse", "roles", "value"]);
-  const view = readFileSync("atlas/macos/Atlas/Sources/Atlas/AtlasApp.swift", "utf8");
-  for (const anchor of anchors)
-    expect(view, anchor).toContain(`.id("${anchor}")`);
+  const workspace = readFileSync(
+    "atlas/macos/Atlas/Sources/Atlas/ProjectWorkspace.swift",
+    "utf8",
+  );
+  for (const anchor of anchors) expect(workspace, anchor).toContain(`.${anchor}`);
+  // The mapping is exhaustive on purpose; a default case would hide a new one.
+  expect(workspace).toContain("private func tabFor(_ anchor: AnalysisAnchor) -> Tab");
 });
 test("the Swift tests decode the same fixtures as the web suite", () => {
   const source = execFileSync(

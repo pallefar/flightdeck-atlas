@@ -620,4 +620,9 @@ export const de: Record<MessageKey, string> = {
   "brain.analysis.broken": "unterbrochen",
   "brain.start.hint": "Für ein Projekt, das bereits in Atlas existiert. Ein neues Projekt oder Verfahren läuft über den Assistenten oben.",
   "brain.requirements.note": "Stufenanforderungen sind das, was dieses Gate braucht. Die Checkliste unten ist breiter: Rollen, Nachweise, Wert und Audit-Kette.",
+  "brain.wizard.kind.workflow": "Ein Workflow",
+  "brain.wizard.kind.workflow.summary": "Ein wiederholbarer Schritt, automatisiert — ein Skill oder eine Sub-App.",
+  "brain.wizard.create.workflow": "Workflow anlegen",
+  "brain.entry.workflow": "Workflow",
+  "brain.kind.note.workflow": "Ein Workflow ist der automatisierte Teil eines Verfahrens: gleiche Pipeline, gleiche Freigabe.",
 };

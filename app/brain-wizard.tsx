@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { MessageKey } from "@/lib/i18n";
 type Translate = (key: MessageKey, params?: Record<string, string>) => string;
 export type WizardCreate = {
-  kind: "project" | "process";
+  kind: "project" | "process" | "workflow";
   name: string;
   problem: string;
 };
@@ -44,7 +44,7 @@ export default function BrainWizard({
   onCreate,
 }: Props) {
   const [step, setStep] = useState(0);
-  const [kind, setKind] = useState<"project" | "process">("project");
+  const [kind, setKind] = useState<"project" | "process" | "workflow">("project");
   const [name, setName] = useState("");
   const [problem, setProblem] = useState("");
   const panel = useRef<HTMLDivElement>(null);
@@ -121,6 +121,12 @@ export default function BrainWizard({
                   selected={kind === "process"}
                   onChoose={() => setKind("process")}
                 />
+                <KindCard
+                  t={t}
+                  kind="workflow"
+                  selected={kind === "workflow"}
+                  onChoose={() => setKind("workflow")}
+                />
               </div>
               <p className="brain-hint">{t("brain.wizard.kind.note")}</p>
             </section>
@@ -193,7 +199,9 @@ export default function BrainWizard({
                 <dd>
                   {kind === "process"
                     ? t("brain.wizard.kind.process")
-                    : t("brain.wizard.kind.project")}
+                    : kind === "workflow"
+                      ? t("brain.wizard.kind.workflow")
+                      : t("brain.wizard.kind.project")}
                 </dd>
                 <dt>{t("brain.wizard.review.workspace")}</dt>
                 <dd>{workspaces.find((item) => item.id === workspaceId)?.name ?? "—"}</dd>
@@ -225,7 +233,9 @@ export default function BrainWizard({
               ? t(
                   kind === "process"
                     ? "brain.wizard.create.process"
-                    : "brain.wizard.create.project",
+                    : kind === "workflow"
+                      ? "brain.wizard.create.workflow"
+                      : "brain.wizard.create.project",
                 )
               : t("brain.wizard.continue")}
           </button>
@@ -241,7 +251,7 @@ function KindCard({
   onChoose,
 }: {
   t: Translate;
-  kind: "project" | "process";
+  kind: "project" | "process" | "workflow";
   selected: boolean;
   onChoose: () => void;
 }) {
@@ -253,15 +263,21 @@ function KindCard({
       aria-pressed={selected}
     >
       <span className="brain-kind-art" aria-hidden="true">
-        {kind === "project" ? <ProjectArt /> : <ProcessArt />}
+        {kind === "project" ? <ProjectArt /> : kind === "process" ? <ProcessArt /> : <WorkflowArt />}
       </span>
       <span className="brain-kind-title">
-        {kind === "process" ? t("brain.wizard.kind.process") : t("brain.wizard.kind.project")}
+        {kind === "process"
+          ? t("brain.wizard.kind.process")
+          : kind === "workflow"
+            ? t("brain.wizard.kind.workflow")
+            : t("brain.wizard.kind.project")}
       </span>
       <span className="brain-kind-summary">
         {kind === "process"
           ? t("brain.wizard.kind.process.summary")
-          : t("brain.wizard.kind.project.summary")}
+          : kind === "workflow"
+            ? t("brain.wizard.kind.workflow.summary")
+            : t("brain.wizard.kind.project.summary")}
       </span>
       <span className="brain-kind-state">
         {selected ? t("brain.wizard.kind.selected") : t("brain.wizard.kind.choose")}
@@ -283,6 +299,24 @@ function ProjectArt() {
     </svg>
   );
 }
+/** A step that runs itself: a trigger, a skill tile and an outcome, wired. */
+function WorkflowArt() {
+  return (
+    <svg viewBox="0 0 220 120" role="presentation">
+      <g stroke="currentColor" fill="none">
+        <rect x="18" y="46" width="44" height="28" rx="7" fill="currentColor" fillOpacity="0.18" strokeWidth="2" />
+        <path d="M62 60h26" strokeWidth="3" strokeLinecap="round" />
+        <path d="M84 55l7 5l-7 5" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+        <rect x="94" y="34" width="58" height="52" rx="9" fill="currentColor" fillOpacity="0.7" />
+        <path d="M106 56h34M106 66h22" stroke="white" strokeWidth="4" strokeLinecap="round" />
+        <path d="M152 60h26" strokeWidth="3" strokeLinecap="round" />
+        <path d="M174 55l7 5l-7 5" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="196" cy="60" r="12" fill="currentColor" fillOpacity="0.2" strokeWidth="2" />
+      </g>
+    </svg>
+  );
+}
+
 /** Three nodes joined by arrows, the middle one in focus: how work runs. */
 function ProcessArt() {
   return (

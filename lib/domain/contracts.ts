@@ -142,7 +142,7 @@ export const recordContract = z
     visionObjectiveId: z.string().max(80).nullable(),
     reuseDecision: z.enum(["reuse", "extend", "new"]).nullable(),
     buildDecision: z.enum(["cowork", "sub-app", "studio"]).nullable(),
-    entryType: z.enum(["project", "process"]),
+    entryType: z.enum(["project", "process", "workflow"]),
     valueBasis: z.enum(VALUE_BASES).nullable(),
     updatedAt: at,
   })

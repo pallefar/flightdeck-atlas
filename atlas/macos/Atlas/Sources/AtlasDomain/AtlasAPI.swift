@@ -34,10 +34,30 @@ public struct AtlasSnapshot: Codable, Equatable, Identifiable, Sendable {
     public let status: String
   }
   public struct Value: Codable, Equatable, Identifiable, Sendable {
+    public struct Figures: Codable, Equatable, Sendable {
+      public let hours: Double?
+      public let cost: Double?
+      public let targetHours: Double?
+      public init(hours: Double? = nil, cost: Double? = nil, targetHours: Double? = nil) {
+        self.hours = hours
+        self.cost = cost
+        self.targetHours = targetHours
+      }
+    }
     public let id: String
     public let basis: String
     public let period: String
+    public let figures: Figures
     public let sourceRef: String?
+
+    public init(from decoder: Decoder) throws {
+      let container = try decoder.container(keyedBy: CodingKeys.self)
+      id = try container.decode(String.self, forKey: .id)
+      basis = try container.decode(String.self, forKey: .basis)
+      period = try container.decode(String.self, forKey: .period)
+      figures = try container.decodeIfPresent(Figures.self, forKey: .figures) ?? Figures()
+      sourceRef = try container.decodeIfPresent(String.self, forKey: .sourceRef)
+    }
   }
   public struct StageState: Codable, Equatable, Sendable {
     public let current: String
@@ -114,6 +134,12 @@ public struct AtlasSnapshot: Codable, Equatable, Identifiable, Sendable {
 
   public let data: Intake?
   public let access: Access?
+  public struct Handoff: Codable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let kind: String
+    public let status: String
+    public let createdAt: String
+  }
   public struct Reuse: Codable, Equatable, Sendable {
     public let decision: String
     public let reason: String
@@ -121,6 +147,7 @@ public struct AtlasSnapshot: Codable, Equatable, Identifiable, Sendable {
   public let workspace: WorkspaceRef?
   public let assignments: Assignment?
   public let reuse: Reuse?
+  public let handoffs: [Handoff]?
   public let record: Record
   public let status: String
   public let stage: StageState
@@ -132,6 +159,10 @@ public struct AtlasSnapshot: Codable, Equatable, Identifiable, Sendable {
   public var id: String { record.projectId }
   public var stageEnum: Stage? { Stage(rawValue: record.stage) }
   public var entryIsProcess: Bool { record.entryType == "process" }
+  /// "project", "process" or "workflow" — the three kinds the wizard offers.
+  public var entryKind: String {
+    ["process", "workflow"].contains(record.entryType) ? record.entryType : "project"
+  }
 }
 
 public struct AtlasList: Codable, Equatable, Sendable {
@@ -243,6 +274,26 @@ public struct AtlasClient: Sendable {
     return try JSONDecoder().decode(UpdateVerdict.self, from: data)
   }
 
+  /// Reserve a hand-off for another tool. The body is built on the server, so
+  /// the app cannot send a hand-off the lane could not have sent.
+  public func requestHandoff(
+    _ snapshot: AtlasSnapshot,
+    kind: String,
+    mapType: String = "as-is"
+  ) async throws -> AtlasSnapshot {
+    struct Body: Encodable {
+      let kind: String
+      let mapType: String
+    }
+    return try await send(
+      try request(
+        "/api/onboarding/\(snapshot.record.projectId)/handoff", method: "POST",
+        body: Body(kind: kind, mapType: mapType)
+      ),
+      as: AtlasSnapshot.self
+    )
+  }
+
   public func brain(_ projectId: String) async throws -> AtlasSnapshot {
     try await send(try request("/api/onboarding/\(projectId)"), as: AtlasSnapshot.self)
   }
@@ -252,7 +303,7 @@ public struct AtlasClient: Sendable {
   /// created and says the intake did not open.
   public func onboardNew(
     name: String,
-    process: Bool,
+    kind: String,
     workspaceId: String,
     ownerEmail: String?,
     problem: String = ""
@@ -286,7 +337,8 @@ public struct AtlasClient: Sendable {
     struct Created: Decodable { struct Project: Decodable { let id: String }; let project: Project }
     let body = Body(
       name: name, description: "", status: "In progress",
-      category: process ? "Process" : "Project", location: "",
+      category: kind == "process" ? "Process" : kind == "workflow" ? "Workflow" : "Project",
+      location: "",
       latitude: nil, longitude: nil, dueDate: "", color: "orange", tasks: []
     )
     let created = try await send(try request("/api/projects", method: "POST", body: body), as: Created.self)
@@ -300,7 +352,7 @@ public struct AtlasClient: Sendable {
       try request(
         "/api/onboarding/\(created.project.id)", method: "POST",
         body: Intake(
-          entryType: process ? "process" : "project",
+          entryType: kind,
           workspaceId: workspaceId,
           ownerEmail: ownerEmail,
           problem: problem
@@ -314,7 +366,7 @@ public struct AtlasClient: Sendable {
   /// Start the intake on a project that already exists.
   public func startIntake(
     _ projectId: String,
-    process: Bool,
+    kind: String,
     workspaceId: String
   ) async throws -> AtlasSnapshot {
     struct Intake: Encodable {
@@ -324,7 +376,7 @@ public struct AtlasClient: Sendable {
     return try await send(
       try request(
         "/api/onboarding/\(projectId)", method: "POST",
-        body: Intake(entryType: process ? "process" : "project", workspaceId: workspaceId)
+        body: Intake(entryType: kind, workspaceId: workspaceId)
       ),
       as: AtlasSnapshot.self
     )
@@ -402,11 +454,13 @@ public struct AtlasClient: Sendable {
     period: String,
     hours: Double?,
     cost: Double?,
+    targetHours: Double? = nil,
     sourceRef: String?
   ) async throws -> AtlasSnapshot {
     struct Figures: Encodable {
       let hours: Double?
       let cost: Double?
+      let targetHours: Double?
     }
     struct Body: Encodable {
       let basis: String
@@ -421,7 +475,8 @@ public struct AtlasClient: Sendable {
       try request(
         "/api/onboarding/\(snapshot.record.projectId)/value", method: "POST",
         body: Body(
-          basis: basis, period: period, figures: Figures(hours: hours, cost: cost),
+          basis: basis, period: period,
+          figures: Figures(hours: hours, cost: cost, targetHours: targetHours),
           method: "ai-jam-value-case", methodVersion: "provisional-1",
           confidence: "medium", sourceRef: sourceRef
         )

@@ -21,10 +21,11 @@ import {
 } from "../domain/stages";
 import type { Confidence, ValueBasis, ValueFigures, ValuePeriod } from "../domain/value";
 const text = (max: number) => z.string().trim().max(max);
-/** What is being onboarded: a project, or a process that runs inside one.
+/** What is being onboarded: a project, a process that runs inside one, or a
+ * workflow that automates a step of one.
  * Both use the same pipeline; the distinction changes the wording and the
  * hand-off defaults (a process usually needs KG and a map). */
-export const ENTRY_TYPES = ["project", "process"] as const;
+export const ENTRY_TYPES = ["project", "process", "workflow"] as const;
 export type EntryType = (typeof ENTRY_TYPES)[number];
 export const brainDataSchema = z
   .object({

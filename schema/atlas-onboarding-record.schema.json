@@ -145,7 +145,8 @@
     "entryType": {
       "enum": [
         "project",
-        "process"
+        "process",
+        "workflow"
       ]
     },
     "valueBasis": {

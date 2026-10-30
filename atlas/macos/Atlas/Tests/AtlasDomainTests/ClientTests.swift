@@ -83,7 +83,7 @@ final class ClientTests: XCTestCase {
 
   func testTheBrainDecodesItsStageChainAndGateRights() async throws {
     respond(200, #"""
-    {"record":{"projectId":"p-1","name":"Contract intake","stage":"capture","revision":4,"entryType":"process"},
+    {"record":{"projectId":"p-1","name":"Contract intake","stage":"capture","revision":4,"entryType":"workflow"},
      "status":"active",
      "stage":{"current":"capture","next":"as-is","missing":["scan"],"missingForNext":["as-is-map"]},
      "chain":{"ok":true,"length":4},
@@ -92,7 +92,7 @@ final class ClientTests: XCTestCase {
     """#)
     let snapshot = try await client.brain("p-1")
     XCTAssertEqual(snapshot.stageEnum, .capture)
-    XCTAssertTrue(snapshot.entryIsProcess)
+    XCTAssertEqual(snapshot.entryKind, "workflow")
     XCTAssertEqual(snapshot.stage.missing, ["scan"])
     XCTAssertEqual(snapshot.canGate["capture"], false)
     XCTAssertEqual(StubProtocol.seen, ["GET /api/onboarding/p-1"])
@@ -120,7 +120,7 @@ final class ClientTests: XCTestCase {
     }
     let id = try await client.onboardNew(
       name: "Invoice matching",
-      process: true,
+      kind: "workflow",
       workspaceId: "general",
       ownerEmail: "owner@example.test"
     )
@@ -157,7 +157,7 @@ final class ClientTests: XCTestCase {
   // The write actions the app offers. Each one is the same call the web lane
   // makes, so a person can complete an onboarding in the app alone.
   private func snapshot() throws -> AtlasSnapshot {
-    let json = #"{"record":{"projectId":"p-1","name":"Purchase orders","stage":"intake","revision":3,"entryType":"process"},"status":"active","stage":{"current":"intake","next":"reuse","missing":[],"missingForNext":[]},"chain":{"ok":true,"length":1},"gates":[],"evidence":[],"values":[],"canGate":{"intake":true},"data":{"problem":"Email","requester":"Procurement","site":"Bensheim","classification":"internal","classificationDeclared":true},"access":{"canEdit":true,"canAssignRoles":true,"canView":true},"workspace":{"id":"general","name":"General"},"assignments":{"owner":"owner@example.test","processOwner":null,"teoaApprover":null,"visionApprover":null}}"#
+    let json = #"{"record":{"projectId":"p-1","name":"Purchase orders","stage":"intake","revision":3,"entryType":"workflow"},"status":"active","stage":{"current":"intake","next":"reuse","missing":[],"missingForNext":[]},"chain":{"ok":true,"length":1},"gates":[],"evidence":[],"values":[],"canGate":{"intake":true},"data":{"problem":"Email","requester":"Procurement","site":"Bensheim","classification":"internal","classificationDeclared":true},"access":{"canEdit":true,"canAssignRoles":true,"canView":true},"workspace":{"id":"general","name":"General"},"assignments":{"owner":"owner@example.test","processOwner":null,"teoaApprover":null,"visionApprover":null}}"#
     return try JSONDecoder().decode(AtlasSnapshot.self, from: Data(json.utf8))
   }
 
@@ -323,5 +323,20 @@ final class ClientTests: XCTestCase {
     let analysis = analyse(snapshot)
     XCTAssertFalse(analysis.nextActions.contains { $0.label == "Review the flagged evidence, or redact it" })
     XCTAssertTrue(analysis.nextActions.contains { $0.label == "Attach evidence and have it accepted" && $0.anchor == .evidence })
+  }
+  func testAHandoffRequestPostsTheKindAndTheMapType() async throws {
+    respond(200, String(decoding: try JSONEncoder().encode(try snapshot()), as: UTF8.self))
+    _ = try await client.requestHandoff(try snapshot(), kind: "diagramforge", mapType: "future")
+    XCTAssertEqual(StubProtocol.seen, ["POST /api/onboarding/p-1/handoff"])
+    let body = StubProtocol.bodies.last ?? ""
+    XCTAssertTrue(body.contains("diagramforge"), body)
+    XCTAssertTrue(body.contains("future"), body)
+  }
+  func testTheThreeKindsAreTheOnesTheWizardOffers() throws {
+    for kind in ["project", "process", "workflow"] {
+      let json = #"{"record":{"projectId":"p-1","name":"P","stage":"intake","revision":1,"entryType":"\#(kind)"},"status":"active","stage":{"current":"intake","next":"reuse","missing":[],"missingForNext":[]},"chain":{"ok":true,"length":1},"gates":[],"evidence":[],"values":[],"canGate":{}}"#
+      let decoded = try JSONDecoder().decode(AtlasSnapshot.self, from: Data(json.utf8))
+      XCTAssertEqual(decoded.entryKind, kind)
+    }
   }
 }

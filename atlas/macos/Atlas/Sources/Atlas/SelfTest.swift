@@ -27,7 +27,7 @@ enum SelfTest {
       }
       let name = "Self test \(Int(Date().timeIntervalSince1970))"
       let id = try await client.onboardNew(
-        name: name, process: true, workspaceId: workspace.id, ownerEmail: nil
+        name: name, kind: "process", workspaceId: workspace.id, ownerEmail: nil
       )
       step("created \(id)")
       var snapshot = try await client.brain(id)

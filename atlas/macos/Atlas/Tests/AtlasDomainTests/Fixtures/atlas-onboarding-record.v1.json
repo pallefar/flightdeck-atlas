@@ -28,7 +28,7 @@
   "visionObjectiveId": "fy27-hr-cycle-time",
   "reuseDecision": "new",
   "buildDecision": null,
-  "entryType": "process",
+  "entryType": "workflow",
   "valueBasis": "measured",
   "updatedAt": "2026-10-28T10:30:00.000Z"
 }

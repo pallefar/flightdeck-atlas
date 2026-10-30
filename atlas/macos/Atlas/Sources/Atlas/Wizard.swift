@@ -8,7 +8,7 @@ struct WizardFlow: View {
   @EnvironmentObject private var model: BrainModel
   @Environment(\.dismiss) private var dismiss
   @State private var step = 0
-  @State private var process = false
+  @State private var kind = "project"
   @State private var name = ""
   @State private var problem = ""
 
@@ -76,21 +76,27 @@ struct WizardFlow: View {
     VStack(alignment: .leading, spacing: 20) {
       Text("What are you onboarding?")
         .font(.title3.weight(.semibold))
-      HStack(spacing: 20) {
+      HStack(spacing: 16) {
         KindCard(
           title: "A project",
           summary: "A piece of work with an outcome, a sponsor and a value case.",
-          selected: !process,
+          selected: kind == "project",
           illustration: { ProjectIllustration() }
-        ) { process = false }
+        ) { kind = "project" }
         KindCard(
           title: "A process",
           summary: "How work runs today, captured before anyone automates it.",
-          selected: process,
+          selected: kind == "process",
           illustration: { ProcessIllustration() }
-        ) { process = true }
+        ) { kind = "process" }
+        KindCard(
+          title: "A workflow",
+          summary: "One repeatable step, automated — a skill or a sub-app.",
+          selected: kind == "workflow",
+          illustration: { WorkflowIllustration() }
+        ) { kind = "workflow" }
       }
-      Text("Both use the same pipeline: reuse check, capture, as-is, alignment, value, build, live.")
+      Text("All three use the same pipeline: reuse check, capture, as-is, alignment, value, build, live.")
         .font(.caption)
         .foregroundStyle(.secondary)
     }
@@ -135,7 +141,12 @@ struct WizardFlow: View {
       Text("Name it, and say what is wrong today.").font(.title3.weight(.semibold))
       VStack(alignment: .leading, spacing: 4) {
         Text("Name").font(.caption).foregroundStyle(.secondary)
-        TextField(process ? "Billing dispute process" : "Contract intake", text: $name)
+        TextField(
+          kind == "process" ? "Billing dispute process"
+            : kind == "workflow" ? "Exception handling skill"
+            : "Contract intake",
+          text: $name
+        )
           .textFieldStyle(.roundedBorder)
           .frame(maxWidth: 460)
       }
@@ -157,7 +168,7 @@ struct WizardFlow: View {
     VStack(alignment: .leading, spacing: 14) {
       Text("Check and create").font(.title3.weight(.semibold))
       VStack(alignment: .leading, spacing: 8) {
-        row("Kind", process ? "A process" : "A project")
+        row("Kind", kindTitle)
         row("Workspace", model.workspaces.first { $0.id == model.workspaceId }?.name ?? "—")
         row("Owner", model.ownerEmail.isEmpty ? "you" : model.ownerEmail)
         row("Name", name.isEmpty ? "—" : name)
@@ -185,7 +196,7 @@ struct WizardFlow: View {
         Button("Back") { step -= 1 }
       }
       Spacer()
-      Button(step == 3 ? (process ? "Create the process" : "Create the project") : "Continue") {
+      Button(step == 3 ? "Create the \(kindTitle.lowercased())" : "Continue") {
         Task { await advance() }
       }
       .keyboardShortcut(.defaultAction)
@@ -193,6 +204,14 @@ struct WizardFlow: View {
     }
     .padding(.horizontal, 24)
     .padding(.vertical, 16)
+  }
+
+  private var kindTitle: String {
+    switch kind {
+    case "process": return "A process"
+    case "workflow": return "A workflow"
+    default: return "A project"
+    }
   }
 
   private var canContinue: Bool {
@@ -209,7 +228,7 @@ struct WizardFlow: View {
       step += 1
       return
     }
-    await model.onboardNew(name: name, process: process, problem: problem)
+    await model.onboardNew(name: name, kind: kind, problem: problem)
     dismiss()
   }
 }
@@ -308,6 +327,43 @@ struct ProjectIllustration: View {
           .font(.system(size: 26))
           .foregroundStyle(Color.accentColor)
           .offset(x: card * 0.42, y: card * 0.30)
+      }
+      .frame(width: geometry.size.width, height: geometry.size.height)
+    }
+    .accessibilityHidden(true)
+  }
+}
+
+/// A step that runs itself: a trigger, a skill tile and an outcome, wired.
+struct WorkflowIllustration: View {
+  var body: some View {
+    GeometryReader { geometry in
+      let width = geometry.size.width
+      let tile = min(width * 0.22, 56)
+      HStack(spacing: 0) {
+        RoundedRectangle(cornerRadius: 7)
+          .fill(Color.accentColor.opacity(0.18))
+          .frame(width: tile * 0.9, height: tile * 0.55)
+        Image(systemName: "arrow.right")
+          .font(.system(size: 10, weight: .bold))
+          .foregroundStyle(Color.accentColor.opacity(0.6))
+          .frame(maxWidth: .infinity)
+        RoundedRectangle(cornerRadius: 10)
+          .fill(Color.accentColor.opacity(0.75))
+          .frame(width: tile, height: tile * 0.9)
+          .overlay(
+            VStack(spacing: 4) {
+              Capsule().fill(.white.opacity(0.9)).frame(width: tile * 0.55, height: 4)
+              Capsule().fill(.white.opacity(0.6)).frame(width: tile * 0.38, height: 4)
+            }
+          )
+        Image(systemName: "arrow.right")
+          .font(.system(size: 10, weight: .bold))
+          .foregroundStyle(Color.accentColor.opacity(0.6))
+          .frame(maxWidth: .infinity)
+        Circle()
+          .fill(Color.accentColor.opacity(0.2))
+          .frame(width: tile * 0.45, height: tile * 0.45)
       }
       .frame(width: geometry.size.width, height: geometry.size.height)
     }

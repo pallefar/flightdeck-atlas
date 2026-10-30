@@ -241,6 +241,7 @@ public enum AtlasOnboardingRecordBuildDecision: String, Codable, CaseIterable, S
 public enum AtlasOnboardingRecordEntryType: String, Codable, CaseIterable, Sendable {
   case project = "project"
   case process = "process"
+  case workflow = "workflow"
 }
 public enum AtlasOnboardingRecordValueBasis: String, Codable, CaseIterable, Sendable {
   case estimate = "estimate"

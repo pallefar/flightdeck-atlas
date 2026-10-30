@@ -620,6 +620,11 @@ export const en = {
   "brain.analysis.broken": "broken",
   "brain.start.hint": "For a project that already exists in Atlas. A new project or process goes through the wizard above.",
   "brain.requirements.note": "Stage requirements are what this gate needs. The checklist below is broader: roles, evidence, value and the audit chain.",
+  "brain.wizard.kind.workflow": "A workflow",
+  "brain.wizard.kind.workflow.summary": "One repeatable step, automated — a skill or a sub-app.",
+  "brain.wizard.create.workflow": "Create the workflow",
+  "brain.entry.workflow": "Workflow",
+  "brain.kind.note.workflow": "A workflow is the automated piece of a process: it still gets the same pipeline, and the same sign-off.",
 } as const;
 
 export type MessageKey = keyof typeof en;
