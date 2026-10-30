@@ -19,7 +19,8 @@ the two workflow contracts and the quick lane.
 
 1. ~~The wizard shows what the quick lane defers, in the review step, on both surfaces~~ — done, with a browser test.
 2. ~~An overdue deferred sign-off is a risk of its own (`deferred_overdue`), not only a debt~~ — done, with a domain test that also proves the score does not move.
-3. Browser device-code sign-in (the promise blocker).
+3. ~~Browser device-code sign-in~~ — done: a code, an approve page, one-time collection, and a
+   **Sign in with the browser** button in Settings. The app no longer needs a typed token.
 4. `workflow-draft/1` gets a home: a route, a workflow tab and a dry-run report.
 5. `process-steps/1` gets a producer route.
 

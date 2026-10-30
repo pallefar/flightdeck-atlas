@@ -302,6 +302,41 @@ public struct AtlasClient: Sendable {
     )
   }
 
+  /// Signing in without a token typed by a human: the app asks for a code, the
+  /// person approves it in their browser, and the app collects a token once.
+  /** A POST with nothing to say: the URL carries the request. */
+  public struct EmptyBody: Encodable, Sendable {}
+  public struct DeviceCode: Decodable, Sendable {
+    public let code: String
+    public let expiresAt: String
+  }
+  public struct DeviceCodeState: Decodable, Sendable {
+    public let state: String
+  }
+  public func startDeviceCode() async throws -> DeviceCode {
+    try await send(
+      try request("/api/access/device-code", method: "POST", body: EmptyBody()),
+      as: DeviceCode.self
+    )
+  }
+  public func deviceCodeState(_ code: String) async throws -> DeviceCodeState {
+    let encoded = code.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? code
+    return try await send(
+      try request("/api/access/device-code?code=\(encoded)"), as: DeviceCodeState.self
+    )
+  }
+  public func collectDeviceToken(_ code: String) async throws -> String {
+    struct Collected: Decodable { let token: String }
+    let encoded = code.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? code
+    let collected = try await send(
+      try request(
+        "/api/access/device-code?collect=1&code=\(encoded)", method: "POST", body: EmptyBody()
+      ),
+      as: Collected.self
+    )
+    return collected.token
+  }
+
   public func brain(_ projectId: String) async throws -> AtlasSnapshot {
     try await send(try request("/api/onboarding/\(projectId)"), as: AtlasSnapshot.self)
   }

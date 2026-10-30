@@ -109,6 +109,8 @@ visibly different, and the form that records the next measurement.
 
 ## Limits, stated rather than hidden
 
+- Sign-in is a **browser device code**: the app shows a code, Atlas approves it, and the app
+  collects a token once. There is no SSO button yet, and the token is still a device token.
 - No screen capture, on-device transcription or offline sync yet.
 - A map request is reserved, never sent: the DiagramForge transport does not
   exist on this side.

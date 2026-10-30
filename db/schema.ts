@@ -631,3 +631,17 @@ export const feedback = sqliteTable(
     ),
   ],
 );
+
+/** A browser-approved sign-in: the app shows a code, the browser approves it,
+ * and the minted token is handed over exactly once. A short-lived row — it is
+ * deleted on delivery, so it is never a second credential at rest. */
+export const deviceCodes = sqliteTable("atlas_device_codes", {
+  code: text("code").primaryKey(),
+  createdAt: text("created_at").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  approvedBy: text("approved_by"),
+  approvedAt: text("approved_at"),
+  /** The minted token, held only until the app collects it. */
+  token: text("token"),
+  deliveredAt: text("delivered_at"),
+});

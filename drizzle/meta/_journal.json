@@ -141,6 +141,13 @@
       "when": 1793344380934,
       "tag": "0019_flowery_morlun",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1793345445853,
+      "tag": "0020_dashing_terrax",
+      "breakpoints": true
     }
   ]
 }

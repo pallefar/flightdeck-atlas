@@ -231,6 +231,57 @@ final class BrainModel: ObservableObject {
     )
   }
 
+  @Published var signInCode: String?
+  @Published var signingIn = false
+
+  /// The browser sign-in: show the code, wait for approval, keep the token.
+  func signInWithBrowser() async {
+    let current = connection
+    guard let base = URL(string: current.baseURL) else { return }
+    signingIn = true
+    defer { signingIn = false }
+    do {
+      let issued = try await AtlasClient(
+        baseURL: base, token: "pending", session: .shared
+      ).startDeviceCode()
+      signInCode = issued.code
+      if let url = URL(string: "\(current.baseURL)/device?code=\(issued.code)") {
+        NSWorkspace.shared.open(url)
+      }
+      // Ten minutes is the code's life; poll a little less than that.
+      for _ in 0..<290 {
+        try await Task.sleep(nanoseconds: 2_000_000_000)
+        let state = try await AtlasClient(
+          baseURL: base, token: "pending", session: .shared
+        ).deviceCodeState(issued.code)
+        if state.state == "approved" {
+          let token = try await AtlasClient(
+            baseURL: base, token: "pending", session: .shared
+          ).collectDeviceToken(issued.code)
+          Keychain.save(token, for: .token)
+          var next = current
+          next.hasToken = true
+          next.save()
+          self.connection = next
+          signInCode = nil
+          notice = "Signed in."
+          await refresh()
+          return
+        }
+        if state.state == "expired" || state.state == "unknown" {
+          error = "The sign-in code expired. Ask for a new one."
+          signInCode = nil
+          return
+        }
+      }
+      error = "The sign-in was not approved in time."
+      signInCode = nil
+    } catch {
+      self.error = "The browser sign-in could not start."
+      signInCode = nil
+    }
+  }
+
   /// Reserve a map request. The body is the server's, so the app cannot ask
   /// for something the lane could not have asked for.
   func requestHandoff(kind: String, mapType: String = "as-is") async {
@@ -683,9 +734,24 @@ struct SettingsView: View {
       Section("Atlas") {
         TextField("Base URL", text: $url)
           .textFieldStyle(.roundedBorder)
+        HStack {
+          Button("Sign in with the browser") {
+            Task { await model.signInWithBrowser() }
+          }
+          .disabled(model.signingIn)
+          if model.signingIn {
+            ProgressView().controlSize(.small)
+            if let code = model.signInCode {
+              Text(code).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+            }
+          }
+        }
+        Text("Shows a code, opens Atlas in your browser, and keeps the token it hands back. No token needs typing.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
         SecureField("Access token (optional)", text: $token)
           .textFieldStyle(.roundedBorder)
-        Text("The token is kept in the Keychain, never in the app's preferences.")
+        Text("A token is kept in the Keychain, never in the app's preferences.")
           .font(.caption)
           .foregroundStyle(.secondary)
         HStack {
