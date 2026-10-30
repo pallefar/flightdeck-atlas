@@ -372,8 +372,8 @@ export default function BrainLane() {
         setNotice(payload.error ?? t("brain.workflow.failed"));
         return;
       }
-      setNotice(t("brain.workflow.saved"));
       await open(view.record.projectId);
+      setNotice(t("brain.workflow.saved"));
     } catch {
       setNotice(t("brain.workflow.failed"));
     } finally {
@@ -409,8 +409,8 @@ export default function BrainLane() {
         setNotice(t("brain.workflow.failed"));
         return;
       }
-      setNotice(t("brain.workflow.attested"));
       await open(view.record.projectId);
+      setNotice(t("brain.workflow.attested"));
     } catch {
       setNotice(t("brain.workflow.failed"));
     } finally {

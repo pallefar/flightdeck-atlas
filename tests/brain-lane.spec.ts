@@ -1,3 +1,36 @@
+test("the workflow editor saves a contract body", async ({ page }) => {
+  const puts: Record<string, unknown>[] = [];
+  const list = { projects: [{ projectId: "p-1", name: "Contract intake", stage: "capture", status: "active", revision: 4, updatedAt: "2026-10-28T10:00:00.000Z", readiness: 43, met: 3, total: 7 }] };
+  const view = {
+    record: { projectId: "p-1", name: "Contract intake", stage: "capture", revision: 4, entryType: "process" },
+    status: "active", data: {}, workspace: { id: "general", name: "General" },
+    assignments: { owner: "me@example.test", processOwner: "po@example.test", teoaApprover: null, visionApprover: null },
+    access: { canEdit: true, canAssignRoles: true, canView: true },
+    stage: { current: "capture", next: "as-is", missing: [], missingForNext: [] },
+    evidence: [], values: [], reuse: null, gates: [], handoffs: [], canGate: {},
+    chain: { ok: true, length: 3 }, workflow: null, deferredGates: [],
+  };
+  await page.route("**/api/onboarding", (route) => route.fulfill({ json: list }));
+  await page.route("**/api/workspaces", (route) => route.fulfill({ json: { workspaces: [] } }));
+  await page.route("**/api/onboarding/*/workflow", async (route) => {
+    if (route.request().method() !== "PUT") return route.fallback();
+    puts.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({ json: { revision: 9 } });
+  });
+  await page.route("**/api/onboarding/*", (route) => route.fulfill({ json: view }));
+  await page.goto("/?view=brain");
+  await page.getByRole("button", { name: /Contract intake/ }).first().click();
+  const workflow = page.getByRole("region", { name: "Workflow" });
+  await workflow.getByLabel("Name").fill("Exception triage");
+  await workflow
+    .getByLabel("The steps, one per line")
+    .fill("Read the email\nMatch the order\nApprove the match");
+  await workflow.getByRole("button", { name: "Save the draft" }).click();
+  await expect(page.locator(".brain-notice")).toContainText("Workflow draft saved.");
+  expect(puts).toHaveLength(1);
+  expect(puts[0].contract).toBe("atlas-workflow-draft/1");
+  expect(puts[0].complexity).toBe("simple");
+});
 import { test, expect } from "@playwright/test";
 
 // The brain lane's surface, in a browser against mocked API responses.
