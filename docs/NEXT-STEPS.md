@@ -1,5 +1,10 @@
 # What to build next
 
+**Every batch follows [the loop rules](LOOP-RULES.md):** walk the web version first, move at least
+one OS/suite integration, never invent a URL, verify both surfaces, stop after five.
+
+
+
 Written after implementing the first slices of [the plan](PLAN-NEXT-LEVEL.md):
 the two workflow contracts and the quick lane.
 
