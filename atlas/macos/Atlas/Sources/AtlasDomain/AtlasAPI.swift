@@ -114,8 +114,13 @@ public struct AtlasSnapshot: Codable, Equatable, Identifiable, Sendable {
 
   public let data: Intake?
   public let access: Access?
+  public struct Reuse: Codable, Equatable, Sendable {
+    public let decision: String
+    public let reason: String
+  }
   public let workspace: WorkspaceRef?
   public let assignments: Assignment?
+  public let reuse: Reuse?
   public let record: Record
   public let status: String
   public let stage: StageState
@@ -193,6 +198,49 @@ public struct AtlasClient: Sendable {
   public func workspaces() async throws -> [AtlasWorkspace] {
     struct Body: Decodable { let workspaces: [AtlasWorkspace] }
     return try await send(try request("/api/workspaces"), as: Body.self).workspaces
+  }
+
+  /// One feedback note: structural context and the person's own words only.
+  public func sendFeedback(_ note: FeedbackNote) async throws {
+    struct Body: Encodable {
+      let source: String
+      let screen: String
+      let projectId: String?
+      let stage: String?
+      let rating: String
+      let category: String?
+      let comment: String
+      let appVersion: String?
+    }
+    struct Ack: Decodable { let id: String }
+    _ = try await send(
+      try request(
+        "/api/feedback", method: "POST",
+        body: Body(
+          source: "macos", screen: note.screen, projectId: note.projectId,
+          stage: note.stage, rating: note.rating, category: note.category,
+          comment: note.comment, appVersion: note.appVersion
+        )
+      ),
+      as: Ack.self
+    )
+  }
+
+  /// The update verdict for this build, or the server's refusal code.
+  public func checkForUpdates(currentVersion: String) async throws -> UpdateVerdict {
+    var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
+    let path = "/api/app-updates"
+    components.path = path
+    components.queryItems = [URLQueryItem(name: "version", value: currentVersion)]
+    guard let url = components.url else { throw AtlasError(status: 0, message: "Bad URL", code: nil) }
+    var request = URLRequest(url: url)
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    let (data, response) = try await session.data(for: request)
+    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    guard (200..<300).contains(status) else {
+      throw AtlasError(status: status, message: "HTTP \(status)", code: nil)
+    }
+    return try JSONDecoder().decode(UpdateVerdict.self, from: data)
   }
 
   public func brain(_ projectId: String) async throws -> AtlasSnapshot {

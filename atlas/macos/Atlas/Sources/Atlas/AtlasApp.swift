@@ -54,6 +54,28 @@ final class BrainModel: ObservableObject {
   /// The onboarding wizard, as a sheet. Opened by the front-door button, and
   /// once on a first run, because the choice is the first thing to make.
   @Published var wizardOpen = false
+  @Published var feedbackOpen = false
+  @Published var feedbackNotes: [FeedbackNote] = []
+  @Published var updateVerdict: UpdateVerdict?
+  @Published var checkingUpdates = false
+  /// The build's version, as the bundle reports it.
+  let appVersion = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.1.0"
+  /// Stored URL templates for the three apps this client adds (see Integration).
+  @Published var integrationTemplates: [String: String] = Integration.allCases.reduce(into: [:]) { result, item in
+    result[item.rawValue] = UserDefaults.standard.string(forKey: item.defaultsKey) ?? ""
+  }
+
+  func setIntegration(_ item: Integration, template: String) {
+    UserDefaults.standard.set(template, forKey: item.defaultsKey)
+    integrationTemplates[item.rawValue] = template
+  }
+
+  func integrationURL(_ item: Integration) -> URL? {
+    resolvedIntegrationURL(
+      template: integrationTemplates[item.rawValue] ?? "",
+      projectId: selected?.record.projectId
+    )
+  }
   /// True only after a fetch actually succeeded: a configured address is not
   /// a connection, and the window must not claim one.
   @Published var verified = false
@@ -280,6 +302,46 @@ final class BrainModel: ObservableObject {
     }
   }
 
+  func addFeedbackNote(_ note: FeedbackNote) {
+    feedbackNotes.append(note)
+  }
+
+  func sendFeedback(_ note: FeedbackNote) async {
+    guard let client else {
+      error = "Connect to Atlas before sending feedback."
+      return
+    }
+    busy = true
+    defer { busy = false }
+    do {
+      try await client.sendFeedback(note)
+      feedbackNotes.append(note)
+      notice = "Feedback sent."
+      error = nil
+    } catch let refusal as AtlasError {
+      error = refusal.message
+    } catch {
+      self.error = "The feedback could not be sent."
+    }
+  }
+
+  func checkUpdates() async {
+    guard let client else {
+      error = "Connect to Atlas before checking for updates."
+      return
+    }
+    checkingUpdates = true
+    defer { checkingUpdates = false }
+    do {
+      updateVerdict = try await client.checkForUpdates(currentVersion: appVersion)
+      error = nil
+    } catch let refusal as AtlasError {
+      error = refusal.message
+    } catch {
+      self.error = "Could not check for updates: NETWORK."
+    }
+  }
+
   func connect(url: String, token: String) {
     var next = connection
     next.baseURL = url
@@ -332,6 +394,10 @@ struct RootView: View {
           SettingsView()
         }
       }
+    }
+    .sheet(isPresented: $model.feedbackOpen) {
+      FeedbackSheet()
+        .environmentObject(model)
     }
     .sheet(isPresented: $model.wizardOpen) {
       WizardFlow()
@@ -394,11 +460,13 @@ struct OverviewView: View {
       Text("Onboarding brain").font(.largeTitle.bold())
       Text("Every project and process from intake to measured value.")
         .foregroundStyle(.secondary)
-      HStack(spacing: 10) {
+      HStack(spacing: 12) {
         if let url = model.atlasOverviewURL {
-          Link("Open Atlas ↗", destination: url)
-            .font(.callout)
+          Link("Open Atlas ↗", destination: url).font(.callout)
         }
+        Button("Feedback") { model.feedbackOpen = true }
+          .font(.callout)
+          .disabled(!model.connected)
       }
       if model.connected {
         Text("Connected to \(model.connection.baseURL)")
@@ -593,11 +661,13 @@ struct ProjectBrainView: View {
         VStack(alignment: .leading, spacing: 18) {
           header(snapshot)
           requirements(snapshot)
+          analysisSection(snapshot)
           intakeForm(snapshot)
           reuseForm
           evidenceSection(snapshot)
           valueSection(snapshot)
           rolesSection(snapshot)
+          appsSection(snapshot)
           gateSection(snapshot)
           timeline(snapshot)
         }
@@ -639,6 +709,9 @@ struct ProjectBrainView: View {
           Link("Open in Atlas ↗", destination: url)
             .font(.caption)
         }
+        Button("Feedback") { model.feedbackOpen = true }
+          .font(.caption)
+          .disabled(!model.connected)
       }
     }
   }
@@ -652,6 +725,55 @@ struct ProjectBrainView: View {
           Label(requirementText(requirement), systemImage: "circle.dashed")
         }
       }
+    }
+  }
+
+  /// What the app can say without inventing anything: a checklist score, the
+  /// counts behind it, the risks those counts imply, and the next actions the
+  /// server's missing requirements already name.
+  private func analysisSection(_ snapshot: AtlasSnapshot) -> some View {
+    let analysis = analyse(snapshot)
+    return section("Analysis") {
+      HStack(alignment: .firstTextBaseline) {
+        Text("Readiness").font(.headline)
+        Spacer()
+        Text("\(analysis.readiness)%").font(.title3.bold())
+      }
+      ProgressView(value: Double(analysis.readiness), total: 100)
+      Text("Checklist: \(analysis.met) of \(analysis.total) onboarding facts in place. A checklist score, not a judgement of value.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      HStack(spacing: 18) {
+        fact("Roles", "\(analysis.rolesFilled)/4")
+        fact("Evidence", "\(analysis.evidenceAccepted) ok · \(analysis.evidencePending) pending · \(analysis.evidenceNeedsReview) review")
+        fact("Value", analysis.hasBaseline ? "baseline recorded" : "\(analysis.valueRecords) record(s), no baseline")
+        fact("Audit", analysis.chainOk ? "chain ok · \(analysis.chainLength)" : "chain broken")
+      }
+      .font(.caption)
+      if !analysis.risks.isEmpty {
+        VStack(alignment: .leading, spacing: 4) {
+          ForEach(analysis.risks, id: \.self) { risk in
+            Label(risk, systemImage: "exclamationmark.triangle")
+              .font(.caption)
+              .foregroundStyle(.orange)
+          }
+        }
+      }
+      if !analysis.nextActions.isEmpty {
+        VStack(alignment: .leading, spacing: 3) {
+          Text("Next actions").font(.caption.bold()).foregroundStyle(.secondary)
+          ForEach(analysis.nextActions.prefix(8), id: \.self) { action in
+            Text("• \(action)").font(.callout)
+          }
+        }
+      }
+    }
+  }
+
+  private func fact(_ title: String, _ value: String) -> some View {
+    VStack(alignment: .leading, spacing: 1) {
+      Text(title).font(.caption2).foregroundStyle(.secondary)
+      Text(value)
     }
   }
 
@@ -815,6 +937,31 @@ struct ProjectBrainView: View {
     }
   }
 
+  /// The three apps this client adds. An unconfigured one says so; it never
+  /// opens a guessed address.
+  private func appsSection(_ snapshot: AtlasSnapshot) -> some View {
+    section("Apps") {
+      ForEach(Integration.allCases) { item in
+        HStack(spacing: 10) {
+          Image(systemName: item.icon).frame(width: 22)
+          VStack(alignment: .leading, spacing: 1) {
+            Text(item.title).font(.callout.weight(.medium))
+            Text(item.purpose).font(.caption).foregroundStyle(.secondary)
+          }
+          Spacer()
+          if let url = resolvedIntegrationURL(
+            template: model.integrationTemplates[item.rawValue] ?? "",
+            projectId: snapshot.record.projectId
+          ) {
+            Link("Open ↗", destination: url).font(.callout)
+          } else {
+            Text("Set the link in Settings").font(.caption).foregroundStyle(.secondary)
+          }
+        }
+      }
+    }
+  }
+
   private func gateSection(_ snapshot: AtlasSnapshot) -> some View {
     section("Stage gate") {
       TextField("Reason", text: $gateReason).textFieldStyle(.roundedBorder)
@@ -889,6 +1036,44 @@ struct SettingsView: View {
           }
           Button("Refresh") { Task { await model.refresh() } }
             .disabled(!model.connected || model.busy)
+        }
+      }
+      Section("Apps") {
+        Text("This client adds three apps to the onboarding. Each link is yours to set; {project} is replaced with the project id.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        ForEach(Integration.allCases) { item in
+          VStack(alignment: .leading, spacing: 3) {
+            Text(item.title).font(.callout)
+            TextField(
+              "https://… (optional {project})",
+              text: Binding(
+                get: { model.integrationTemplates[item.rawValue] ?? "" },
+                set: { model.setIntegration(item, template: $0) }
+              )
+            )
+            .textFieldStyle(.roundedBorder)
+          }
+        }
+      }
+      Section("Updates") {
+        Text("Atlas \(model.appVersion)").font(.callout)
+        HStack {
+          Button(model.checkingUpdates ? "Checking…" : "Check for updates") {
+            Task { await model.checkUpdates() }
+          }
+          .disabled(!model.connected || model.checkingUpdates)
+          if let verdict = model.updateVerdict {
+            Text(verdict.headline).font(.callout)
+          }
+        }
+        if let verdict = model.updateVerdict, verdict.hasUpdate, let latest = verdict.latest {
+          Text(latest.notes).font(.caption).foregroundStyle(.secondary)
+          if let url = verdict.downloadURL {
+            Link("Download \(latest.version)", destination: url)
+          } else {
+            Text("No download is published for this release yet.").font(.caption).foregroundStyle(.secondary)
+          }
         }
       }
       Section("State") {

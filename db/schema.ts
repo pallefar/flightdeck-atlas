@@ -591,3 +591,34 @@ export const projectRoles = sqliteTable(
     ),
   ],
 );
+/** Feedback from the apps and the lane (owner request, 2026-10-30).
+ *
+ * Deliberately small and structural: what was being looked at (screen, project,
+ * stage, action) and the person's own words. No page text, no project data, no
+ * screenshot. The Maps admin overlay set the pattern: capture the context, let
+ * the human write the note, and copy it as one prompt. */
+export const feedback = sqliteTable(
+  "atlas_feedback",
+  {
+    id: text("id").primaryKey(),
+    /** Who wrote it: the signed-in email, attributed like every audit event. */
+    by: text("by").notNull(),
+    /** "macos" | "web" — which surface the note came from. */
+    source: text("source").notNull(),
+    screen: text("screen").notNull().default(""),
+    projectId: text("project_id"),
+    stage: text("stage"),
+    rating: text("rating").notNull(),
+    category: text("category"),
+    comment: text("comment").notNull().default(""),
+    appVersion: text("app_version"),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    index("idx_atlas_feedback_by").on(t.by, t.createdAt),
+    check(
+      "atlas_feedback_rating",
+      sql`${t.rating} IN ('ok','minor_issue','major_issue')`,
+    ),
+  ],
+);

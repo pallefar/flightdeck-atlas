@@ -99,21 +99,34 @@ export function FeedbackOverlay({ pathname, appName }: {
   const [pins, setPins] = useState<Record<string, Pin | null>>({});
   const [copied, setCopied] = useState(false);
   const notesRef = useRef(notes);
-  notesRef.current = notes;
   const pathRef = useRef(path);
-  pathRef.current = path;
+  // Refs are updated after commit, not during render: writing them while
+  // rendering is what the hooks lint refuses, and nothing here reads them
+  // before the first effect runs.
+  useEffect(() => {
+    notesRef.current = notes;
+    pathRef.current = path;
+  }, [notes, path]);
 
   // Annotate: the page is frozen. Hover outlines what a click would mark; a
   // click or right-click opens the composer on it. Browse: none of this runs,
   // and the app works as normal (pins stay, and can still be opened).
   useEffect(() => {
-    if (!on) { setHover(null); setComposer(null); setPanel(false); return; }
+    if (!on) {
+      // Scheduled, so the effect body itself never calls setState: turning the
+      // overlay off must not cascade a render inside the effect.
+      queueMicrotask(() => { setHover(null); setComposer(null); setPanel(false); });
+      return;
+    }
     const escape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setComposer(null); setPanel(false);
     };
     window.addEventListener("keydown", escape);
-    if (!annotating) { setHover(null); return () => window.removeEventListener("keydown", escape); }
+    if (!annotating) {
+      queueMicrotask(() => setHover(null));
+      return () => window.removeEventListener("keydown", escape);
+    }
     document.documentElement.classList.add("fb-annotating");
     let frame = 0;
     const move = (event: MouseEvent) => {

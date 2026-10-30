@@ -232,4 +232,96 @@ final class ClientTests: XCTestCase {
     XCTAssertTrue(link.contains("view=brain"), link)
     XCTAssertTrue(link.contains("project=p%202"), link)
   }
+  // Analysis is a checklist over facts the server sent, so it is pure and
+  // testable: no category of "score" is invented beyond what is counted.
+  private func snapshotJSON(stage: String, missing: [String], evidence: String, roles: String, reuse: String, values: String, chainOK: Bool) -> String {
+    let missingJSON = missing.map { "\"\($0)\"" }.joined(separator: ",")
+    return #"{"record":{"projectId":"p-1","name":"P","stage":"\#(stage)","revision":2,"entryType":"process"},"status":"active","stage":{"current":"\#(stage)","next":"capture","missing":[\#(missingJSON)],"missingForNext":[]},"chain":{"ok":\#(chainOK),"length":2},"gates":[],"evidence":[\#(evidence)],"values":[\#(values)],"canGate":{},"data":{},"access":{"canEdit":true,"canAssignRoles":true,"canView":true},"workspace":{"id":"general","name":"General"},"assignments":\#(roles),"reuse":\#(reuse)}"#
+  }
+
+  func testAnalysisCountsOnlyWhatTheServerSaid() throws {
+    let empty = try JSONDecoder().decode(AtlasSnapshot.self, from: Data(snapshotJSON(
+      stage: "intake", missing: ["classification", "problem"], evidence: "",
+      roles: #"{"owner":"me@example.test","processOwner":null,"teoaApprover":null,"visionApprover":null}"#,
+      reuse: "null", values: "", chainOK: true).utf8))
+    let bare = analyse(empty)
+    XCTAssertLessThan(bare.readiness, 50)
+    XCTAssertEqual(bare.rolesFilled, 1)
+    XCTAssertEqual(bare.evidenceAccepted, 0)
+    XCTAssertTrue(bare.nextActions.contains("State the problem"))
+    XCTAssertTrue(bare.risks.contains { $0.contains("process owner") }, "\(bare.risks)")
+
+    let ready = try JSONDecoder().decode(AtlasSnapshot.self, from: Data(snapshotJSON(
+      stage: "value", missing: [],
+      evidence: #"{"id":"e1","kind":"document","source":"a.docx","scanState":"clear","status":"accepted"}"#,
+      roles: #"{"owner":"me@example.test","processOwner":"po@example.test","teoaApprover":"t@example.test","visionApprover":"v@example.test"}"#,
+      reuse: #"{"decision":"extend","reason":"sub-app exists"}"#,
+      values: #"{"id":"v1","basis":"measured","period":"baseline","sourceRef":"export.csv"}"#,
+      chainOK: true).utf8))
+    let full = analyse(ready)
+    XCTAssertEqual(full.readiness, 100)
+    XCTAssertEqual(full.rolesFilled, 4)
+    XCTAssertEqual(full.evidenceAccepted, 1)
+    XCTAssertTrue(full.hasBaseline)
+    XCTAssertTrue(full.hasReuseDecision)
+    XCTAssertTrue(full.nextActions.isEmpty)
+  }
+
+  func testAnalysisFlagsAReviewAndABrokenChain() throws {
+    let snapshot = try JSONDecoder().decode(AtlasSnapshot.self, from: Data(snapshotJSON(
+      stage: "capture", missing: ["scan"],
+      evidence: #"{"id":"e1","kind":"voice","source":"a.m4a","scanState":"review","status":"pending"}"#,
+      roles: #"{"owner":"me@example.test","processOwner":null,"teoaApprover":null,"visionApprover":null}"#,
+      reuse: "null", values: "", chainOK: false).utf8))
+    let analysis = analyse(snapshot)
+    XCTAssertEqual(analysis.evidenceNeedsReview, 1)
+    XCTAssertFalse(analysis.chainOk)
+    XCTAssertTrue(analysis.risks.contains { $0.contains("review") })
+    XCTAssertTrue(analysis.risks.contains { $0.contains("chain") })
+  }
+
+  func testFeedbackNoteBecomesTheSameLineTheWebBuilds() {
+    let note = FeedbackNote(
+      screen: "Project brain", projectId: "p-1", stage: "capture",
+      rating: "minor_issue", category: "wording", comment: "Unclear."
+    )
+    XCTAssertEqual(note.promptLine, "- [minor_issue/wording] Project brain · project p-1 · stage capture: Unclear.")
+    XCTAssertTrue(feedbackPrompt([note]).hasPrefix("Feedback from the Atlas apps:"))
+    XCTAssertEqual(feedbackPrompt([]), "")
+  }
+
+  func testTheUpdateHeadlineCannotDressARefusalAsUpToDate() {
+    let refused = UpdateVerdict(status: "refused", current: nil, latest: nil, downloadable: nil, code: "RELEASE_METADATA_INVALID")
+    XCTAssertTrue(refused.isRefused)
+    XCTAssertFalse(refused.isUpToDate)
+    XCTAssertTrue(refused.headline.contains("RELEASE_METADATA_INVALID"))
+    let available = UpdateVerdict(
+      status: "update_available", current: "0.1.0",
+      latest: UpdateVerdict.Release(
+        version: "0.2.0", releasedAt: "2026-10-30T00:00:00.000Z", notes: "n",
+        url: "https://example.test/a.dmg", sha256: String(repeating: "a", count: 64)),
+      downloadable: true, code: nil)
+    XCTAssertNotNil(available.downloadURL)
+  }
+  func testAnIntegrationTemplateIsResolvedOrLeftUnconfigured() {
+    XCTAssertNil(resolvedIntegrationURL(template: "   ", projectId: "p-1"))
+    let url = resolvedIntegrationURL(
+      template: "https://os.example.test/console/apps/advantage?fdProject={project}",
+      projectId: "p-1")
+    XCTAssertEqual(url?.absoluteString, "https://os.example.test/console/apps/advantage?fdProject=p-1")
+    // A template without the placeholder still opens; it just has no id.
+    XCTAssertNotNil(resolvedIntegrationURL(template: "https://os.example.test/apps/maps", projectId: "p-1"))
+    // The three apps this client adds are the three the owner named.
+    XCTAssertEqual(Integration.allCases.map({ $0.title }), ["TEOA Advantage", "PDF app", "FlightDeck Maps"])
+  }
+
+  func testTheScanActionIsNotOfferedWhenNothingWasCaptured() throws {
+    let snapshot = try JSONDecoder().decode(AtlasSnapshot.self, from: Data(snapshotJSON(
+      stage: "capture", missing: ["evidence"], evidence: "",
+      roles: #"{"owner":"me@example.test","processOwner":null,"teoaApprover":null,"visionApprover":null}"#,
+      reuse: "null", values: "", chainOK: true).utf8))
+    let analysis = analyse(snapshot)
+    XCTAssertFalse(analysis.nextActions.contains("Review the flagged evidence, or redact it"))
+    XCTAssertTrue(analysis.nextActions.contains("Attach evidence and have it accepted"))
+  }
 }
