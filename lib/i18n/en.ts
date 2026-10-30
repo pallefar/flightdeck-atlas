@@ -625,6 +625,16 @@ export const en = {
   "brain.wizard.create.workflow": "Create the workflow",
   "brain.entry.workflow": "Workflow",
   "brain.kind.note.workflow": "A workflow is the automated piece of a process: it still gets the same pipeline, and the same sign-off.",
+  "brain.map.title": "Map",
+  "brain.map.note": "Atlas reserves the request; DiagramForge does the drawing. Nothing is claimed to exist until its reference comes back.",
+  "brain.map.requestAsIs": "Request the as-is map",
+  "brain.map.requestToBe": "Request the to-be map",
+  "brain.map.requests": "Requests",
+  "brain.map.none": "No map has been requested yet.",
+  "brain.map.requested": "Map request recorded.",
+  "brain.map.failed": "The map request could not be recorded.",
+  "brain.field.asIsSignedOff": "As-is signed off",
+  "brain.value.chart": "Hours by period",
 } as const;
 
 export type MessageKey = keyof typeof en;

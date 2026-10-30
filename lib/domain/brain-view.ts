@@ -51,5 +51,5 @@ export type BrainView = {
   gates: { stage: string; decision: string; at: string }[];
   canGate: Record<string, boolean>;
   facts?: Record<string, boolean | string | null>;
-  handoffs?: unknown[];
+  handoffs?: { id: string; kind: string; status: string; createdAt: string }[];
 };

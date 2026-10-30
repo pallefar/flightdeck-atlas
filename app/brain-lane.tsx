@@ -281,6 +281,33 @@ export default function BrainLane() {
     },
     [workspaceId, ownerEmail, t, open],
   );
+  /** Reserve a map request. The body is the server's, so the lane cannot ask
+   * for something the app could not have asked for. */
+  const requestMap = useCallback(
+    async (mapType: "as-is" | "future") => {
+      if (!view) return;
+      setBusy(true);
+      try {
+        const response = await fetch(`/api/onboarding/${view.record.projectId}/handoff`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ kind: "diagramforge", mapType }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        if (!response.ok) {
+          setNotice(payload.error ?? t("brain.map.failed"));
+          return;
+        }
+        setView(payload as unknown as BrainView);
+        setNotice(t("brain.map.requested"));
+      } catch {
+        setNotice(t("brain.map.failed"));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [view, t],
+  );
   const assignRole = useCallback(async () => {
     if (!view) return;
     const email = roleDraft.email.trim();
@@ -627,8 +654,6 @@ export default function BrainLane() {
                     ["objective", "brain.field.objective"],
                     ["successMeasure", "brain.field.successMeasure"],
                     ["teoaScopeId", "brain.field.teoaScope"],
-                    ["asIsMapRef", "brain.field.asIsMap"],
-                    ["toBeMapRef", "brain.field.toBeMap"],
                   ] as const
                 ).map(([key, label]) => (
                   <label key={key}>
@@ -649,6 +674,72 @@ export default function BrainLane() {
                 >
                   {busy ? t("brain.saving") : t("brain.save")}
                 </button>
+              </section>
+              <section id="brain-section-map" aria-label={t("brain.map.title")}>
+                <h3>{t("brain.map.title")}</h3>
+                <p className="brain-hint">{t("brain.map.note")}</p>
+                <label>
+                  {t("brain.field.asIsMap")}
+                  <input
+                    value={String(fields.asIsMapRef ?? "")}
+                    onChange={(event) =>
+                      setFields((f) => ({ ...f, asIsMapRef: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="brain-check">
+                  <input
+                    type="checkbox"
+                    checked={fields.asIsSignedOff === true}
+                    onChange={(event) =>
+                      setFields((f) => ({ ...f, asIsSignedOff: event.target.checked }))
+                    }
+                  />
+                  {t("brain.field.asIsSignedOff")}
+                </label>
+                <label>
+                  {t("brain.field.toBeMap")}
+                  <input
+                    value={String(fields.toBeMapRef ?? "")}
+                    onChange={(event) =>
+                      setFields((f) => ({ ...f, toBeMapRef: event.target.value }))
+                    }
+                  />
+                </label>
+                <button type="button" className="brain-secondary" disabled={busy} onClick={() => void save()}>
+                  {busy ? t("brain.saving") : t("brain.save")}
+                </button>
+                <div className="brain-row">
+                  <button
+                    type="button"
+                    className="brain-secondary"
+                    disabled={busy}
+                    onClick={() => void requestMap("as-is")}
+                  >
+                    {t("brain.map.requestAsIs")}
+                  </button>
+                  <button
+                    type="button"
+                    className="brain-secondary"
+                    disabled={busy}
+                    onClick={() => void requestMap("future")}
+                  >
+                    {t("brain.map.requestToBe")}
+                  </button>
+                </div>
+                <h4 className="brain-subhead">{t("brain.map.requests")}</h4>
+                {view.handoffs && view.handoffs.length > 0 ? (
+                  <ul className="brain-handoffs">
+                    {view.handoffs.map((item) => (
+                      <li key={item.id}>
+                        <strong>{item.kind}</strong> · {item.status} ·{" "}
+                        <time dateTime={item.createdAt}>{item.createdAt.slice(0, 10)}</time>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="brain-hint">{t("brain.map.none")}</p>
+                )}
               </section>
               <section id="brain-section-reuse" aria-label={t("brain.reuse.title")}>
                 <h3>{t("brain.reuse.title")}</h3>
@@ -770,6 +861,40 @@ export default function BrainLane() {
                       </li>
                     ))}
                   </ul>
+                )}
+                {view.values.some((item) => item.figures.hours) && (
+                  <figure className="brain-chart" aria-label={t("brain.value.chart")}>
+                    {(() => {
+                      const max = Math.max(
+                        ...view.values.map((item) => item.figures.hours ?? 0),
+                        1,
+                      );
+                      return view.values
+                        .filter((item) => (item.figures.hours ?? 0) > 0)
+                        .map((item) => (
+                          <div className="brain-chart-row" key={item.id}>
+                            <span className="brain-chart-label">
+                              {t(`brain.period.${item.period}` as never)}
+                            </span>
+                            <span className="brain-chart-track">
+                              <span
+                                className={
+                                  item.basis === "measured"
+                                    ? "brain-chart-bar is-measured"
+                                    : "brain-chart-bar"
+                                }
+                                style={{
+                                  width: `${Math.round(((item.figures.hours ?? 0) / max) * 100)}%`,
+                                }}
+                              />
+                            </span>
+                            <span className="brain-chart-value">
+                              {item.figures.hours} h · {t(`brain.basis.${item.basis}` as never)}
+                            </span>
+                          </div>
+                        ));
+                    })()}
+                  </figure>
                 )}
                 <div className="brain-row">
                   <label>
