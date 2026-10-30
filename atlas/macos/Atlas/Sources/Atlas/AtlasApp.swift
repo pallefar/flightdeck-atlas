@@ -282,6 +282,33 @@ final class BrainModel: ObservableObject {
     }
   }
 
+  /// Create or replace a workflow draft from the app. It is the same body the
+  /// attestation writes, only with no test report yet — because it has not run.
+  func saveWorkflow(name: String, trigger: String, steps: [String]) async {
+    guard let snapshot = selected else { return }
+    let now = ISO8601DateFormatter().string(from: Date())
+    let body = AtlasSnapshot.WorkflowAttestation(
+      projectId: snapshot.record.projectId,
+      name: name,
+      trigger: trigger,
+      inputs: [],
+      steps: steps.map { .init(action: $0, actor: "workflow", system: nil, app: nil) },
+      decisions: [],
+      signOff: .init(
+        role: "process_owner",
+        email: snapshot.assignments?.processOwner ?? snapshot.assignments?.owner ?? ""
+      ),
+      complexity: steps.count > 3 ? "studio" : "simple",
+      testReport: nil,
+      createdAt: now
+    )
+    await run(
+      { client, _ in try await client.putWorkflow(snapshot, body: body) },
+      notice: "Workflow draft saved.",
+      failure: "The draft could not be saved."
+    )
+  }
+
   /// A person ran the workflow once and confirms nothing was written. Their
   /// word is the test report; Atlas never invents one.
   func attestWorkflowTest() async {

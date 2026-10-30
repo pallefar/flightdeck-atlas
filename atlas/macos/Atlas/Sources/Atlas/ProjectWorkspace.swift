@@ -28,6 +28,9 @@ struct ProjectWorkspace: View {
   @State private var valueCost = ""
   @State private var valueTarget = ""
   @State private var valueSource = ""
+  @State private var workflowName = ""
+  @State private var workflowTrigger = "new-case"
+  @State private var workflowSteps = ""
   @State private var role = "process_owner"
   @State private var roleEmail = ""
 
@@ -76,6 +79,9 @@ struct ProjectWorkspace: View {
         .task(id: snapshot.record.revision) {
           if seededRevision != snapshot.record.revision {
             draft = snapshot.data?.draft ?? IntakeDraft()
+            workflowName = snapshot.data?.workflow?.name ?? ""
+            workflowTrigger = snapshot.data?.workflow?.trigger ?? "new-case"
+            workflowSteps = (snapshot.data?.workflow?.steps ?? []).map(\.action).joined(separator: "\n")
             seededRevision = snapshot.record.revision
           }
         }
@@ -486,7 +492,38 @@ struct ProjectWorkspace: View {
             .foregroundStyle(.secondary)
         }
       } else {
-        Text("No workflow yet. Build one in Atlas, then it appears here.")
+        Text("No workflow yet. Describe it here, one step per line.")
+          .foregroundStyle(.secondary)
+      }
+      Divider()
+      TextField("Name", text: $workflowName).textFieldStyle(.roundedBorder)
+      Picker("Trigger", selection: $workflowTrigger) {
+        Text("A new case").tag("new-case")
+        Text("A form").tag("form")
+        Text("A schedule").tag("schedule")
+        Text("On demand").tag("on-demand")
+      }
+      .frame(maxWidth: 260)
+      TextEditor(text: $workflowSteps)
+        .frame(minHeight: 90)
+        .font(.callout)
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
+      HStack(spacing: 10) {
+        Button("Save the draft") {
+          let name = workflowName.trimmingCharacters(in: .whitespacesAndNewlines)
+          let steps = workflowSteps
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+          guard !name.isEmpty, !steps.isEmpty else { return }
+          Task { await model.saveWorkflow(name: name, trigger: workflowTrigger, steps: steps) }
+        }
+        .disabled(
+          model.busy || workflowName.trimmingCharacters(in: .whitespaces).isEmpty
+            || workflowSteps.trimmingCharacters(in: .whitespaces).isEmpty
+        )
+        Text("The server refuses a draft that does not match its contract.")
+          .font(.caption)
           .foregroundStyle(.secondary)
       }
     }
