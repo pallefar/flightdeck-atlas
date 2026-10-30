@@ -150,7 +150,6 @@ export default function Atlas() {
   const { theme, setTheme } = useTheme();
   const [access, setAccess] = useState<AccessProfile | null>(null);
   const pathname = usePathname();
-  const isFeedbackAdmin = !!access && (access.superAdmin || access.roleId === "admin");
   const [requesterRequests, setRequesterRequests] = useState(false);
   const [flight, setFlight] = useState<{
     from: PortfolioView;
