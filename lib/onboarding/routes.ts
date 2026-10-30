@@ -1352,6 +1352,22 @@ export function createOnboardingRoutes(deps: BrainDeps) {
       .bind(projectId)
       .first<{ data: string; revision: number }>();
     if (!found) return json({ error: "That project is not onboarding.", code: "not_found" }, 404);
+    // A receipt closes a hand-off that was actually reserved. One that arrives
+    // for work nobody asked for is refused, not filed: otherwise the loop can
+    // be "closed" by anyone with a session.
+    const reserved = await deps.db
+      .prepare(
+        `SELECT id FROM atlas_handoffs
+          WHERE project_id = ? AND kind = ? AND status = 'reserved'
+          ORDER BY created_at LIMIT 1`,
+      )
+      .bind(projectId, parsed.value.kind)
+      .first<{ id: string }>();
+    if (!reserved)
+      return json(
+        { error: "No hand-off is waiting for that app.", code: "no_handoff" },
+        409,
+      );
     const data = JSON.parse(found.data) as Record<string, unknown>;
     const now = new Date().toISOString();
     const receipts = Array.isArray(data.receipts) ? data.receipts : [];
@@ -1361,6 +1377,16 @@ export function createOnboardingRoutes(deps: BrainDeps) {
         "UPDATE atlas_onboarding SET data = ?, revision = ?, updated_at = ? WHERE project_id = ?",
       )
       .bind(JSON.stringify(next), found.revision + 1, now, projectId)
+      .run();
+    // The hand-off is now observed: its receipt is the row's own record.
+    await deps.db
+      .prepare("UPDATE atlas_handoffs SET status = ?, receipt = ?, updated_at = ? WHERE id = ?")
+      .bind(
+        parsed.value.status === "failed" ? "failed" : "delivered",
+        JSON.stringify(parsed.value),
+        now,
+        reserved.id,
+      )
       .run();
     return json({ revision: found.revision + 1, receipt: parsed.value }, 201);
   };

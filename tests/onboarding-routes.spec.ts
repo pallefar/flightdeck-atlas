@@ -299,7 +299,22 @@ test.describe("opening an intake", () => {
       notes: "Two steps automated, one kept by a person.",
       at: new Date().toISOString(),
     };
+    // A receipt only closes a hand-off that was reserved for that app.
+    const noHandoff = await jsonOf(await h.routes.receiptAdd(call(receipt, "POST"), P));
+    expect(noHandoff.status).toBe(409);
+    // A reserved hand-off for that app. Inserted directly so the test does not
+    // depend on what the hand-off route requires to reserve one.
+    const at = new Date().toISOString();
+    h.sqlite
+      .prepare(
+        `INSERT INTO atlas_handoffs
+           (id, project_id, kind, direction, idempotency_key, request_body, status, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
+      )
+      .run("h-1", P, "studio", "atlas->tool", "k-1", "{}", "reserved", at, at);
     expect((await jsonOf(await h.routes.receiptAdd(call(receipt, "POST"), P))).status).toBe(201);
+    // The hand-off is consumed: a second receipt has nothing left to close.
+    expect((await jsonOf(await h.routes.receiptAdd(call(receipt, "POST"), P))).status).toBe(409);
     const view = await jsonOf(await h.routes.get(P));
     expect(
       (view.body as { receipts?: { artifactRef: string }[] }).receipts?.map((r) => r.artifactRef),
