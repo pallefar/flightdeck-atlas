@@ -2,6 +2,8 @@
 
 A TE Connectivity themed portfolio and action hub, with a dashboard, Project Eye globe, daily/weekly briefings, consultancy pilots, and Super Admin-controlled access.
 
+What the app is, screen by screen: [the app description](docs/APP-DESCRIPTION.md).
+
 Latest runtime handover: [Atlas live cutover — 5 October 2026](docs/HANDOVER-2026-10-05-ATLAS-LIVE-CUTOVER.md). It records the deployed version, private audience, browser-only Vision launcher and the remaining hosted OS connection work.
 
 ## Included
