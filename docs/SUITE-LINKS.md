@@ -29,3 +29,21 @@ Either
    `wt-central-updater/subapps.json`, and tell me where Atlas can read that file or an API of it; or
 2. set `ATLAS_TEOA_URL`, `ATLAS_PDF_URL`, `ATLAS_MAPS_URL`, `ATLAS_STUDIO_URL`, `ATLAS_VISION_URL`
    in the Atlas environment — the registry already reads them per project.
+
+## The registration is prepared, not applied
+
+`scripts/register-subapp.mjs` puts Atlas into `subapps.json` and is a **dry run by default**:
+
+```
+node scripts/register-subapp.mjs --registry ../wt-central-updater/subapps.json \
+  --base-url https://<atlas-host> --version 1.0.1 [--write]
+```
+
+It adds one entry — `id: "atlas"`, `baseUrl`, `entry: "/?view=brain&project={project}"` — and a
+second run is a no-op rather than a second Atlas. It refuses to run without a base URL, because a
+guessed one is worse than none.
+
+It has **not** been applied: on 2026-10-30 the central-updater worktree was on `main` with three
+uncommitted changes that are not mine (`host-a.txt`, `host-b.txt` deleted,
+`scripts/studio-ship-guarded-branches.txt` modified). Sweeping those into a commit would be the
+worst kind of help.
