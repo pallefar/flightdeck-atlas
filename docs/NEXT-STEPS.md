@@ -32,6 +32,19 @@ the two workflow contracts and the quick lane.
 5. ~~`process-steps/1` gets a producer route~~ — done: `PUT /api/onboarding/:id/steps`, one
    contract for KG extraction and for a person typing the steps.
 
+## Batch 3 (in progress: 3 of 5)
+
+Done: the editor's browser test (it caught `open()` wiping the notice), the suite registry and
+`GET /api/suite`, and the Suite section in the lane plus Studio and Vision in the app.
+
+Next, in order:
+
+1. **Attest a test run in the app.** Attempted and reverted: `[String: Any]` is not `Sendable`, so
+   Swift 6 refuses to hand it to the client's detached call. The fix is an `Encodable` body type in
+   `AtlasDomain` (`WorkflowAttestation`), not a `@unchecked` escape.
+2. **Build a workflow in the app**, not only read it — the same body type serves both.
+3. The deferred-signoff digest, or measured value arriving from workflow runs.
+
 ## Batch 2 (five improvements)
 
 1. ~~A workflow editor in the lane~~ — name, trigger and steps, saved as a contract body.
