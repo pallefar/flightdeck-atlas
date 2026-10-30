@@ -97,6 +97,9 @@ export function studioSpec(input: {
   objective: string;
   successMeasure: string;
   classification: Classification;
+  /** The draft's steps, when there is one: Studio needs to know which app does
+   * which step, and which steps a person keeps. */
+  steps?: { action: string; actor: string; app: string | null }[];
 }) {
   return {
     schema: "atlas-studio-spec/1",
@@ -109,6 +112,14 @@ export function studioSpec(input: {
       objective: input.objective,
       successMeasure: input.successMeasure,
     },
+    // The steps travel as the draft has them, app included. Atlas does not
+    // reinterpret them for Studio; it hands over what a person wrote.
+    steps: (input.steps ?? []).slice(0, 10).map((step, index) => ({
+      number: String((index + 1) * 10),
+      action: step.action,
+      actor: step.actor,
+      app: step.app,
+    })),
     constraints: {
       classification: input.classification,
       // The PRD's non-goal, restated where a builder can read it.

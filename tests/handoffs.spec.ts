@@ -113,6 +113,10 @@ test.describe("payload builders", () => {
   });
   test("the Studio spec states the constraints the PRD sets", () => {
     const spec = studioSpec({
+      steps: [
+        { action: "Draw the as-is", actor: "workflow", app: "maps" },
+        { action: "Approve the match", actor: "person", app: null },
+      ],
       projectId: P,
       projectName: "Contract intake",
       decision: "studio",
@@ -123,6 +127,12 @@ test.describe("payload builders", () => {
       classification: "internal",
     });
     expect(spec.schema).toBe("atlas-studio-spec/1");
+    // The steps travel with the app that does each one: that is what Studio
+    // builds against, and what tells it a person still keeps one step.
+    expect(spec.steps).toEqual([
+      { number: "10", action: "Draw the as-is", actor: "workflow", app: "maps" },
+      { number: "20", action: "Approve the match", actor: "person", app: null },
+    ]);
     expect(spec.constraints).toMatchObject({
       classification: "internal",
       drawsMaps: false,
