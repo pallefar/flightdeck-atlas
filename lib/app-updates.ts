@@ -74,6 +74,22 @@ export function servedUpdateCheck(current: string | null) {
   if (check.status === "refused") return { ok: false as const, code: check.code };
   return { ok: true as const, check };
 }
+/** The releases a feed carries, put through the same comparison. Used when the
+ * central updater is the source, so there is one verdict, not two. */
+export const updatePayloadFrom = (
+  releases: Release[],
+  current: string | null,
+  source: "feed" | "local",
+) => {
+  const parsed = manifestSchema.safeParse({ schema: "atlas-app-updates/1", releases });
+  if (!parsed.success) return { status: "refused", code: "UPDATES_UNREADABLE" as const };
+  if (!current) return { status: "refused", code: "UPDATES_NOT_CONFIGURED" as const };
+  const check = checkForUpdate(current, parsed.data);
+  return check.status === "refused"
+    ? { status: "refused", code: check.code }
+    : { ...check, source };
+};
+
 /** What the route returns for a caller that names its version. */
 export const updatePayload = (current: string | null) => {
   const served = servedUpdateCheck(current);

@@ -501,7 +501,7 @@ export default function Atlas() {
       key={access?.userId || "loading"}
       userId={access?.userId}
     >
-      {isFeedbackAdmin ? <FeedbackOverlay pathname={pathname} appName="Atlas" /> : null}
+      {access ? <FeedbackOverlay pathname={pathname} appName="Atlas" /> : null}
       <div
         className={`atlas-shell ${view === "globe" ? "immersive-globe" : ""}`}
       >
@@ -545,7 +545,7 @@ export default function Atlas() {
             <div className="system-label">
               <span className="tiny-orbit" /> A WIDER PERSPECTIVE
             </div>
-            {isFeedbackAdmin ? <FeedbackToggle /> : null}
+            {access ? <FeedbackToggle /> : null}
             <AccountMenu
               name={access?.name || "My workspace"}
               role={

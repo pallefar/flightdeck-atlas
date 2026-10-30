@@ -6,6 +6,7 @@ import {
   manifestSchema,
   REFUSAL_CODES,
   updatePayload,
+  updatePayloadFrom,
 } from "../lib/app-updates";
 import { manifest } from "../lib/app-updates-manifest";
 import { readFileSync } from "node:fs";
@@ -24,7 +25,27 @@ const manifestWith = (versions: string[]) => ({
   releases: versions.map((version) => release(version)),
 });
 test.describe("version comparison", () => {
-  test("numeric, dotted, and missing parts count as zero", () => {
+  test("a central feed is put through the same verdict, and says where it came from", () => {
+  const releases = [
+    { version: "0.4.1", releasedAt: "2026-10-30T02:00:00.000Z", notes: "Canvas fit.", url: "https://x.test/0.4.1.dmg", sha256: "a".repeat(64) },
+  ];
+  const newer = updatePayloadFrom(releases, "0.4.0", "feed");
+  expect(newer.status).toBe("update_available");
+  expect("source" in newer && newer.source).toBe("feed");
+  const same = updatePayloadFrom(releases, "0.4.1", "feed");
+  expect(same.status).toBe("up_to_date");
+  // A caller that names no version is refused, never told it is current.
+  expect(updatePayloadFrom(releases, null, "feed")).toEqual({
+    status: "refused",
+    code: "UPDATES_NOT_CONFIGURED",
+  });
+  // An unreadable feed is a refusal too.
+  expect(updatePayloadFrom([{ version: "nope" }] as never, "0.4.0", "feed")).toEqual({
+    status: "refused",
+    code: "UPDATES_UNREADABLE",
+  });
+});
+test("versions compare numeric, dotted, and missing parts count as zero", () => {
     expect(compareVersions("1.2.0", "1.2")).toBe(0);
     expect(compareVersions("1.10.0", "1.9.9")).toBe(1);
     expect(compareVersions("0.1.0", "0.1.1")).toBe(-1);
