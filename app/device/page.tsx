@@ -6,24 +6,21 @@ import { useEffect, useState } from "react";
 // so approving is one button. The token never appears on this page — the app
 // collects it.
 export default function DevicePage() {
-  const [code, setCode] = useState("");
-  const [state, setState] = useState("checking");
+  const [code] = useState(
+    () => new URLSearchParams(window.location.search).get("code") ?? "",
+  );
+  const [state, setState] = useState(code ? "checking" : "missing");
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    const fromUrl = new URLSearchParams(window.location.search).get("code") ?? "";
-    setCode(fromUrl);
-    if (!fromUrl) {
-      setState("missing");
-      return;
-    }
-    fetch(`/api/access/device-code?code=${encodeURIComponent(fromUrl)}`)
+    if (!code) return;
+    fetch(`/api/access/device-code?code=${encodeURIComponent(code)}`)
       .then(async (response) =>
         response.ok ? ((await response.json()) as { state?: string }) : { state: "unknown" },
       )
       .then((body) => setState(body.state ?? "unknown"))
       .catch(() => setState("unknown"));
-  }, []);
+  }, [code]);
 
   const approve = async () => {
     const response = await fetch("/api/access/device-code", {
