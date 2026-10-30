@@ -271,6 +271,12 @@ test.describe("opening an intake", () => {
     };
     const saved = await jsonOf(await h.routes.workflowPut(call(draft, "PUT"), P));
     expect(saved.status).toBe(200);
+    // A write must not reset the brain: the strict schema rejects unknown root
+    // keys, so revision/updatedAt belong in columns, never in the JSON.
+    const readBack = await jsonOf(await h.routes.get(P));
+    expect((readBack.body as { workflow?: { name: string } }).workflow?.name).toBe(
+      "Exception triage",
+    );
     // A test run that wrote something is refused, and nothing is stored.
     const refused = await jsonOf(
       await h.routes.workflowPut(
@@ -280,6 +286,24 @@ test.describe("opening an intake", () => {
     );
     expect(refused.status).toBe(400);
     expect(String(refused.body.problems)).toContain("writes nothing");
+  });
+  test("a receipt from another app is accepted and read back", async () => {
+    const h = await onboarded();
+    const receipt = {
+      contract: "atlas-handoff-receipt/1",
+      projectId: P,
+      kind: "studio",
+      status: "built",
+      artifactRef: "studio/workflow/exception-triage",
+      version: "0.3.0",
+      notes: "Two steps automated, one kept by a person.",
+      at: new Date().toISOString(),
+    };
+    expect((await jsonOf(await h.routes.receiptAdd(call(receipt, "POST"), P))).status).toBe(201);
+    const view = await jsonOf(await h.routes.get(P));
+    expect(
+      (view.body as { receipts?: { artifactRef: string }[] }).receipts?.map((r) => r.artifactRef),
+    ).toEqual(["studio/workflow/exception-triage"]);
   });
   test("process steps are stored with their source labels", async () => {
     const h = await onboarded();

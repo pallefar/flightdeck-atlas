@@ -1287,7 +1287,9 @@ export function createOnboardingRoutes(deps: BrainDeps) {
     request: Request,
     projectId: string,
     key: "workflow" | "steps",
-    parse: (input: unknown) => { ok: boolean; data?: unknown; problems?: string[] },
+    parse: (input: unknown) =>
+      | { ok: true; value: unknown }
+      | { ok: false; problems: string[] },
   ) => {
     if (!sameOrigin(request)) return json({ error: "Request origin is not allowed." }, 403);
     const auth = await deps.authorize("onboarding.triage", request);
@@ -1301,7 +1303,7 @@ export function createOnboardingRoutes(deps: BrainDeps) {
     const parsed = parse(body);
     if (!parsed.ok)
       return json(
-        { error: "The payload does not match its contract.", problems: parsed.problems ?? [] },
+        { error: "The payload does not match its contract.", problems: parsed.problems },
         400,
       );
     const found = await deps.db
@@ -1311,14 +1313,14 @@ export function createOnboardingRoutes(deps: BrainDeps) {
     if (!found) return json({ error: "That project is not onboarding.", code: "not_found" }, 404);
     const data = JSON.parse(found.data) as Record<string, unknown>;
     const now = new Date().toISOString();
-    const next = { ...data, [key]: parsed.data, revision: found.revision + 1, updatedAt: now };
+    const next = { ...data, [key]: parsed.value };
     await deps.db
       .prepare(
         "UPDATE atlas_onboarding SET data = ?, revision = ?, updated_at = ? WHERE project_id = ?",
       )
       .bind(JSON.stringify(next), found.revision + 1, now, projectId)
       .run();
-    return json({ revision: found.revision + 1, [key]: parsed.data }, 200);
+    return json({ revision: found.revision + 1, [key]: parsed.value }, 200);
   };
   const workflowPut = (request: Request, projectId: string) =>
     putContract(request, projectId, "workflow", parseWorkflow);
@@ -1353,12 +1355,7 @@ export function createOnboardingRoutes(deps: BrainDeps) {
     const data = JSON.parse(found.data) as Record<string, unknown>;
     const now = new Date().toISOString();
     const receipts = Array.isArray(data.receipts) ? data.receipts : [];
-    const next = {
-      ...data,
-      receipts: [...receipts, parsed.value].slice(-50),
-      revision: found.revision + 1,
-      updatedAt: now,
-    };
+    const next = { ...data, receipts: [...receipts, parsed.value].slice(-50) };
     await deps.db
       .prepare(
         "UPDATE atlas_onboarding SET data = ?, revision = ?, updated_at = ? WHERE project_id = ?",
