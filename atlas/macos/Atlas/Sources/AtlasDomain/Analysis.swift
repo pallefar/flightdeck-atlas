@@ -95,8 +95,6 @@ public func analyse(_ snapshot: AtlasSnapshot) -> BrainAnalysis {
          action: AnalysisAction(label: "Record the reuse decision (reuse / extend / new)", anchor: .reuse)),
     Item(met: baseline, risk: nil,
          action: AnalysisAction(label: "Record the value baseline before build", anchor: .value)),
-    Item(met: snapshot.chain.ok, risk: "The audit chain is broken",
-         action: AnalysisAction(label: "Investigate the broken audit event", anchor: .gate)),
   ]
   // The current stage's own facts come from the server's requirement codes.
   for code in snapshot.stage.missing {
@@ -107,14 +105,25 @@ public func analyse(_ snapshot: AtlasSnapshot) -> BrainAnalysis {
       )
     )
   }
+  // Seven scored facts, the same seven the list API counts for every project
+  // so a card's badge and this card always agree. The chain and the stage's
+  // own requirements are shown beside the score, never inside it.
   let met = items.filter(\.met).count
   let total = items.count
+  var unscoredActions: [AnalysisAction] = []
+  var risks = items.filter { !$0.met }.compactMap(\.risk)
+  if !snapshot.chain.ok {
+    risks.append("The audit chain is broken")
+    unscoredActions.append(
+      AnalysisAction(label: "Investigate the broken audit event", anchor: .gate)
+    )
+  }
   // Actions keep the checklist order, so the list reads like a plan.
-  let actions = items
+  let actions = (items
     .filter { !$0.met }
     .compactMap(\.action)
-    .filter { !(!hasAnyEvidence && $0.label == "Attach evidence, then clear the scan") }
-  let risks = items.compactMap { $0.met ? nil : $0.risk }
+    .filter { !(!hasAnyEvidence && $0.label == "Attach evidence, then clear the scan") })
+    + unscoredActions
   return BrainAnalysis(
     readiness: total == 0 ? 0 : Int((Double(met) / Double(total) * 100).rounded()),
     met: met,

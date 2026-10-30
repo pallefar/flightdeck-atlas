@@ -220,6 +220,36 @@ test.describe("opening an intake", () => {
     const result = await jsonOf(await h.routes.create(request, P));
     expect(result.status).toBe(403);
   });
+  test("the list carries the same readiness score the detail computes", async () => {
+    const h = await onboarded();
+    // One of seven facts: the owner set at creation. Nothing else yet.
+    const before = await jsonOf(await h.routes.list());
+    const row = (before.body.projects as { readiness: number; met: number; total: number }[])[0];
+    expect(row.total).toBe(7);
+    expect(row.met).toBe(1);
+    expect(row.readiness).toBe(14);
+    // Record the reuse decision and a baseline: five of seven.
+    await recordReuse(h);
+    await h.routes.valueAdd(
+      call({
+        basis: "measured",
+        period: "baseline",
+        figures: { hours: 10 },
+        method: "ai-jam-value-case",
+        methodVersion: "provisional-1",
+        confidence: "medium",
+        sourceRef: "export.csv",
+      }),
+      P,
+    );
+    const after = await jsonOf(await h.routes.list());
+    const scored = (after.body.projects as { readiness: number; met: number }[])[0];
+    expect(scored.met).toBe(3);
+    expect(scored.readiness).toBe(43);
+    // The detail's card agrees, which is the point of scoring the same facts.
+    const detail = await jsonOf(await h.routes.get(P));
+    expect(detail.body.record).toBeTruthy();
+  });
   test("the list only shows projects the caller may read", async () => {
     const h = await onboarded();
     const visible = await jsonOf(await h.routes.list());

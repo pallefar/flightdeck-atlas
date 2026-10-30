@@ -15,6 +15,10 @@ const list = {
       status: "active",
       revision: 4,
       updatedAt: "2026-10-28T10:00:00.000Z",
+      kind: "process",
+      readiness: 43,
+      met: 3,
+      total: 7,
     },
     {
       projectId: "p-2",
@@ -92,6 +96,9 @@ test.describe("the board", () => {
     await expect(
       capture.getByRole("button", { name: /Contract intake/ }),
     ).toBeVisible();
+    // A card carries its readiness, so the board can be scanned without
+    // opening every project.
+    await expect(capture.getByText("43%")).toBeVisible();
     await expect(
       page
         .getByRole("region", { name: "Aligned", exact: true })

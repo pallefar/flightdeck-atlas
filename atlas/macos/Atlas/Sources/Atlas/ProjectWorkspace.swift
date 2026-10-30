@@ -256,7 +256,7 @@ struct ProjectWorkspace: View {
           Label(requirementLabel(code), systemImage: "circle.dashed")
         }
       }
-      Text("Stage requirements are what this gate needs. The readiness card is broader: roles, evidence, value and the audit chain.")
+      Text("Stage requirements are what this gate needs. The readiness card counts seven facts across roles, evidence and value; the audit chain is shown beside it.")
         .font(.caption)
         .foregroundStyle(.secondary)
     }

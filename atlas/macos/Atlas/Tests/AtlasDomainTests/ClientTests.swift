@@ -72,12 +72,17 @@ final class ClientTests: XCTestCase {
     var authorization: String?
     StubProtocol.handler = { request in
       authorization = request.value(forHTTPHeaderField: "Authorization")
-      return (200, Data(#"{"projects":[{"projectId":"p-1","name":"Contract intake","stage":"capture","status":"active","revision":4,"updatedAt":"2026-10-28T10:00:00.000Z"}]}"#.utf8))
+      return (200, Data(#"{"projects":[{"projectId":"p-1","name":"Contract intake","stage":"capture","status":"active","revision":4,"updatedAt":"2026-10-28T10:00:00.000Z","readiness":43,"met":3,"total":7,"kind":"process"}]}"#.utf8))
     }
     let rows = try await client.list()
     XCTAssertEqual(rows.count, 1)
     XCTAssertEqual(rows.first?.name, "Contract intake")
     XCTAssertEqual(rows.first?.stage, "capture")
+    // A card can show readiness without opening the project.
+    XCTAssertEqual(rows.first?.readiness, 43)
+    XCTAssertEqual(rows.first?.met, 3)
+    XCTAssertEqual(rows.first?.total, 7)
+    XCTAssertEqual(rows.first?.kind, "process")
     XCTAssertEqual(authorization, "Bearer secret-token")
   }
 

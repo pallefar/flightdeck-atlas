@@ -22,6 +22,10 @@ type ListRow = {
   status: string;
   revision: number;
   updatedAt: string;
+  kind?: string;
+  readiness?: number;
+  met?: number;
+  total?: number;
 };
 const CLASSIFICATIONS = [
   "public",
@@ -587,6 +591,18 @@ export default function BrainLane() {
                           {t("brain.revision", { revision: card.revision })} ·{" "}
                           {t("brain.updated", { at: card.updatedAt.slice(0, 10) })}
                         </span>
+                        {typeof card.readiness === "number" && (
+                          <span
+                            className="brain-card-ready"
+                            title={t("brain.card.readiness", {
+                              met: String(card.met ?? 0),
+                              total: String(card.total ?? 0),
+                            })}
+                          >
+                            {card.readiness}%
+                            <span className="brain-sr">{t("brain.analysis.readiness")}</span>
+                          </span>
+                        )}
                       </button>
                     </li>
                   ))}

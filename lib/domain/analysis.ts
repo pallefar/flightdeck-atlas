@@ -44,98 +44,110 @@ export type BrainAnalysis = {
   risks: RiskKind[];
 };
 const roleKeys = ["owner", "processOwner", "teoaApprover", "visionApprover"] as const;
-export function analyseBrain(view: BrainView): BrainAnalysis {
+
+/** The facts the readiness score counts — the same seven the list API can
+ * count for every project without opening it. The audit chain and the stage's
+ * own requirements are shown beside the score, never inside it. */
+export type ReadinessFacts = {
+  rolesFilled: number;
+  processOwner: boolean;
+  approvers: boolean;
+  accepted: number;
+  pending: number;
+  review: number;
+  reuse: boolean;
+  baseline: boolean;
+};
+export function readinessFacts(view: BrainView): ReadinessFacts {
   const assigned = view.assignments;
-  const rolesFilled = roleKeys.filter((key) => {
-    const email = assigned?.[key];
-    return typeof email === "string" && email.trim().length > 0;
-  }).length;
   const accepted = view.evidence.filter((item) =>
     ["accepted", "redacted"].includes(item.status),
   ).length;
-  const pending = view.evidence.filter((item) => item.status === "pending").length;
-  const review = view.evidence.filter((item) => item.scanState === "review").length;
-  const baseline = view.values.some(
-    (item) => item.period === "baseline" && item.basis !== "not-tracked",
-  );
-  const reuse = view.reuse !== null;
-  const hasAnyEvidence = accepted + pending > 0;
-  type Item = { met: boolean; risk: RiskKind | null; action: AnalysisAction | null };
-  const items: Item[] = [
+  return {
+    rolesFilled: roleKeys.filter((key) => {
+      const email = assigned?.[key];
+      return typeof email === "string" && email.trim().length > 0;
+    }).length,
+    processOwner: Boolean(assigned?.processOwner?.trim()),
+    approvers:
+      Boolean(assigned?.teoaApprover?.trim()) && Boolean(assigned?.visionApprover?.trim()),
+    accepted,
+    pending: view.evidence.filter((item) => item.status === "pending").length,
+    review: view.evidence.filter((item) => item.scanState === "review").length,
+    reuse: view.reuse !== null,
+    baseline: view.values.some(
+      (item) => item.period === "baseline" && item.basis !== "not-tracked",
+    ),
+  };
+}
+/** The score, from the seven facts alone. Shared with the list route so a
+ * project's badge and its detail can never disagree. */
+export function portfolioReadiness(facts: ReadinessFacts): { met: number; total: number; readiness: number } {
+  const hasAnyEvidence = facts.accepted + facts.pending > 0;
+  const scored = [
+    facts.rolesFilled > 0,
+    facts.processOwner,
+    facts.approvers,
+    facts.accepted > 0,
+    facts.review === 0 && hasAnyEvidence,
+    facts.reuse,
+    facts.baseline,
+  ];
+  const met = scored.filter(Boolean).length;
+  const total = scored.length;
+  return { met, total, readiness: Math.round((met / total) * 100) };
+}
+export function analyseBrain(view: BrainView): BrainAnalysis {
+  const facts = readinessFacts(view);
+  const score = portfolioReadiness(facts);
+  type Extra = { risk: RiskKind | null; action: AnalysisAction | null };
+  // Not scored, but shown beside the score: the chain's health and the stage's
+  // own requirements. An unscored fact is why the badge and the card agree.
+  const extras: Extra[] = [
     {
-      met: rolesFilled > 0,
-      risk: null,
-      action: { kind: "owner", anchor: "roles" },
-    },
-    {
-      met: Boolean(assigned?.processOwner?.trim()),
-      risk: "process_owner",
-      action: { kind: "process_owner", anchor: "roles" },
-    },
-    {
-      met: Boolean(assigned?.teoaApprover?.trim()) && Boolean(assigned?.visionApprover?.trim()),
-      risk: "approvers",
-      action: { kind: "approvers", anchor: "roles" },
-    },
-    {
-      met: accepted > 0,
-      risk: accepted === 0 ? "evidence" : null,
-      action: { kind: "evidence", anchor: "evidence" },
-    },
-    {
-      met: review === 0 && hasAnyEvidence,
-      risk: review > 0 ? "scan" : null,
-      action: review > 0
-        ? { kind: "scan", anchor: "evidence" }
-        : { kind: "scan_none", anchor: "evidence" },
-    },
-    {
-      met: reuse,
-      risk: null,
-      action: { kind: "reuse", anchor: "reuse" },
-    },
-    {
-      met: baseline,
-      risk: null,
-      action: { kind: "baseline", anchor: "value" },
-    },
-    {
-      met: view.chain.ok,
-      risk: "chain",
+      risk: view.chain.ok ? null : "chain",
       action: { kind: "chain", anchor: "gate" },
     },
     ...view.stage.missing.map((code) => ({
-      met: false,
-      risk: null,
+      risk: null as RiskKind | null,
       action: { kind: "requirement" as const, requirement: code, anchor: "intake" as const },
     })),
   ];
-  const met = items.filter((item) => item.met).length;
-  const total = items.length;
-  const actions = items
-    .filter((item) => !item.met && item.action)
-    .map((item) => item.action as AnalysisAction)
-    // With nothing captured, "attach evidence, then clear the scan" would sit
-    // next to "attach evidence": one action, said once.
-    .filter(
-      (action) =>
-        hasAnyEvidence || action.kind !== "scan_none",
-    );
+  const nextActions = [
+    ...(facts.rolesFilled > 0 ? [] : [{ kind: "owner" as const, anchor: "roles" as const }]),
+    ...(facts.processOwner ? [] : [{ kind: "process_owner" as const, anchor: "roles" as const }]),
+    ...(facts.approvers ? [] : [{ kind: "approvers" as const, anchor: "roles" as const }]),
+    ...(facts.accepted > 0 ? [] : [{ kind: "evidence" as const, anchor: "evidence" as const }]),
+    // With nothing captured the evidence action already covers the scan; a
+    // second line saying "attach evidence, then clear the scan" is noise.
+    ...(facts.review > 0 ? [{ kind: "scan" as const, anchor: "evidence" as const }] : []),
+    ...(facts.reuse ? [] : [{ kind: "reuse" as const, anchor: "reuse" as const }]),
+    ...(facts.baseline ? [] : [{ kind: "baseline" as const, anchor: "value" as const }]),
+    ...extras
+      .filter((extra) => extra.risk === "chain" || (extra.action?.kind === "requirement"))
+      .flatMap((extra) => (extra.action ? [extra.action] : [])),
+  ];
   return {
-    readiness: total === 0 ? 0 : Math.round((met / total) * 100),
-    met,
-    total,
-    rolesFilled,
-    evidenceAccepted: accepted,
-    evidencePending: pending,
-    evidenceNeedsReview: review,
+    readiness: score.readiness,
+    met: score.met,
+    total: score.total,
+    rolesFilled: facts.rolesFilled,
+    evidenceAccepted: facts.accepted,
+    evidencePending: facts.pending,
+    evidenceNeedsReview: facts.review,
     valueRecords: view.values.length,
-    hasBaseline: baseline,
-    hasReuseDecision: reuse,
+    hasBaseline: facts.baseline,
+    hasReuseDecision: facts.reuse,
     chainOk: view.chain.ok,
     chainLength: view.chain.length ?? 0,
-    nextActions: actions,
-    risks: items.filter((item) => !item.met).flatMap((item) => (item.risk ? [item.risk] : [])),
+    nextActions,
+    risks: [
+      ...(facts.processOwner ? [] : (["process_owner"] as RiskKind[])),
+      ...(facts.approvers ? [] : (["approvers"] as RiskKind[])),
+      ...(facts.accepted > 0 ? [] : (["evidence"] as RiskKind[])),
+      ...(facts.review > 0 ? (["scan"] as RiskKind[]) : []),
+      ...(view.chain.ok ? [] : (["chain"] as RiskKind[])),
+    ],
   };
 }
 /** The readable form of a requirement code, beside the analysis so a new code

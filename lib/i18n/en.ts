@@ -619,7 +619,7 @@ export const en = {
   "brain.analysis.baselineNo": "{count} record(s), no baseline",
   "brain.analysis.broken": "broken",
   "brain.start.hint": "For a project that already exists in Atlas. A new project or process goes through the wizard above.",
-  "brain.requirements.note": "Stage requirements are what this gate needs. The checklist below is broader: roles, evidence, value and the audit chain.",
+  "brain.requirements.note": "Stage requirements are what this gate needs. The readiness card counts seven facts across roles, evidence and value; the audit chain is shown beside it.",
   "brain.wizard.kind.workflow": "A workflow",
   "brain.wizard.kind.workflow.summary": "One repeatable step, automated — a skill or a sub-app.",
   "brain.wizard.create.workflow": "Create the workflow",
@@ -635,6 +635,7 @@ export const en = {
   "brain.map.failed": "The map request could not be recorded.",
   "brain.field.asIsSignedOff": "As-is signed off",
   "brain.value.chart": "Hours by period",
+  "brain.card.readiness": "{met} of {total} onboarding facts in place",
 } as const;
 
 export type MessageKey = keyof typeof en;

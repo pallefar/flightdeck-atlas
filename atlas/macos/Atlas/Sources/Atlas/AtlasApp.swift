@@ -593,6 +593,11 @@ struct OverviewView: View {
               Text(row.name)
               Spacer()
               Text(stageTitle(row.stage)).font(.caption).foregroundStyle(.secondary)
+              if let readiness = row.readiness {
+                Text("\(readiness)%").font(.caption.weight(.semibold))
+                  .foregroundStyle(Color.accentColor)
+                  .accessibilityLabel("Readiness \(readiness) percent")
+              }
               Text("rev \(row.revision)").font(.caption2).foregroundStyle(.tertiary)
             }
             .contentShape(Rectangle())
@@ -628,7 +633,16 @@ struct PipelineView: View {
               Button { open(card.projectId) } label: {
                 VStack(alignment: .leading, spacing: 2) {
                   Text(card.name).font(.callout.weight(.semibold))
-                  Text("rev \(card.revision)").font(.caption2).foregroundStyle(.secondary)
+                  HStack(spacing: 6) {
+                    Text("rev \(card.revision)").font(.caption2).foregroundStyle(.secondary)
+                    if let readiness = card.readiness {
+                      Text("\(readiness)%").font(.caption2.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .accessibilityLabel(
+                          "Readiness \(readiness) percent, \(card.met ?? 0) of \(card.total ?? 0) facts"
+                        )
+                    }
+                  }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)

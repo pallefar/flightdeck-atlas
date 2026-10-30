@@ -14,6 +14,12 @@ public struct AtlasSnapshot: Codable, Equatable, Identifiable, Sendable {
     public let status: String
     public let revision: Int
     public let updatedAt: String
+    /// Carried by the list so a card can show readiness without opening the
+    /// project; the same seven facts the detail scores.
+    public let readiness: Int?
+    public let met: Int?
+    public let total: Int?
+    public let kind: String?
     public var id: String { projectId }
   }
   public struct Chain: Codable, Equatable, Sendable {

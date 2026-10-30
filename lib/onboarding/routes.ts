@@ -45,6 +45,7 @@ import {
   type ValueBasis,
 } from "../domain/value";
 import { json, sameOrigin } from "../http";
+import { portfolioReadiness } from "../domain/analysis";
 import { findingCodes, scanText } from "../governance/scan";
 import {
   HANDOFF_KINDS,
@@ -356,9 +357,32 @@ export function createOnboardingRoutes(deps: BrainDeps) {
     const auth = await deps.authorize("onboarding.view", request);
     if (auth.error) return auth.error;
     const visible = await deps.visibleIds(auth.access);
+    // One query for the whole board: the seven readiness facts are counted by
+    // correlated subqueries, so the badge on a card is the same score the
+    // project's detail shows.
     const { results } = await deps.db
       .prepare(
-        `SELECT o.project_id, o.stage, o.status, o.revision, o.updated_at, p.data
+        `SELECT o.project_id, o.stage, o.status, o.revision, o.updated_at, p.data, o.data AS brain_data,
+          (SELECT COUNT(*) FROM atlas_project_roles r
+            WHERE r.project_id = o.project_id AND r.role = 'owner') AS has_owner,
+          (SELECT COUNT(*) FROM atlas_project_roles r
+            WHERE r.project_id = o.project_id AND r.role = 'process_owner') AS has_process_owner,
+          (SELECT COUNT(*) FROM atlas_project_roles r
+            WHERE r.project_id = o.project_id AND r.role IN ('teoa_approver','vision_approver')) AS approvers,
+          (SELECT COUNT(*) FROM atlas_evidence e
+            WHERE e.project_id = o.project_id AND e.status IN ('accepted','redacted')) AS accepted,
+          (SELECT COUNT(*) FROM atlas_evidence e
+            WHERE e.project_id = o.project_id AND e.status = 'pending') AS pending,
+          (SELECT COUNT(*) FROM atlas_evidence e
+            WHERE e.project_id = o.project_id AND e.scan_state = 'review'
+              AND e.status IN ('accepted','pending','redacted')) AS review,
+          (SELECT COUNT(*) FROM atlas_reuse_checks rc
+            WHERE rc.project_id = o.project_id) AS reuse,
+          (SELECT COUNT(*) FROM atlas_value v
+            WHERE v.project_id = o.project_id AND v.period = 'baseline'
+              AND v.basis <> 'not-tracked') AS baseline,
+          (SELECT COUNT(*) FROM atlas_gate_events g
+            WHERE g.project_id = o.project_id) AS events
            FROM atlas_onboarding o JOIN atlas_projects p ON p.id = o.project_id
           ORDER BY o.updated_at DESC LIMIT 500`,
       )
@@ -366,14 +390,36 @@ export function createOnboardingRoutes(deps: BrainDeps) {
       .all<Record<string, unknown>>();
     const projects = results
       .filter((r) => visible.has(r.project_id as string))
-      .map((r) => ({
-        projectId: r.project_id as string,
-        name: nameOf(r.data as string),
-        stage: r.stage as string,
-        status: r.status as string,
-        revision: Number(r.revision),
-        updatedAt: r.updated_at as string,
-      }));
+      .map((r) => {
+        const approvers = Number(r.approvers ?? 0);
+        const facts = {
+          rolesFilled:
+            (Number(r.has_owner ?? 0) > 0 ? 1 : 0) +
+            (Number(r.has_process_owner ?? 0) > 0 ? 1 : 0) +
+            Math.min(approvers, 2),
+          processOwner: Number(r.has_process_owner ?? 0) > 0,
+          approvers: approvers >= 2,
+          accepted: Number(r.accepted ?? 0),
+          pending: Number(r.pending ?? 0),
+          review: Number(r.review ?? 0),
+          reuse: Number(r.reuse ?? 0) > 0,
+          baseline: Number(r.baseline ?? 0) > 0,
+        };
+        const score = portfolioReadiness(facts);
+        return {
+          projectId: r.project_id as string,
+          name: nameOf(r.data as string),
+          stage: r.stage as string,
+          status: r.status as string,
+          revision: Number(r.revision),
+          updatedAt: r.updated_at as string,
+          kind: kindOf((r.brain_data as string) ?? "{}"),
+          readiness: score.readiness,
+          met: score.met,
+          total: score.total,
+          events: Number(r.events ?? 0),
+        };
+      });
     return json({ projects });
   };
   const get = async (id: string, request?: Request): Promise<Response> => {
@@ -1214,6 +1260,15 @@ export function createOnboardingRoutes(deps: BrainDeps) {
 }
 
 
+/** What is being onboarded, read from the stored draft. */
+function kindOf(data: string) {
+  try {
+    const parsed = JSON.parse(data) as { entryType?: string };
+    return parsed.entryType ?? "project";
+  } catch {
+    return "project";
+  }
+}
 function nameOf(data: string) {
   try {
     return (JSON.parse(data) as { name?: string }).name ?? "";

@@ -619,7 +619,7 @@ export const de: Record<MessageKey, string> = {
   "brain.analysis.baselineNo": "{count} Eintrag/Einträge, kein Ausgangswert",
   "brain.analysis.broken": "unterbrochen",
   "brain.start.hint": "Für ein Projekt, das bereits in Atlas existiert. Ein neues Projekt oder Verfahren läuft über den Assistenten oben.",
-  "brain.requirements.note": "Stufenanforderungen sind das, was dieses Gate braucht. Die Checkliste unten ist breiter: Rollen, Nachweise, Wert und Audit-Kette.",
+  "brain.requirements.note": "Stufenanforderungen sind das, was dieses Gate braucht. Die Reifegrad-Karte zählt sieben Fakten aus Rollen, Nachweisen und Wert; die Audit-Kette steht daneben.",
   "brain.wizard.kind.workflow": "Ein Workflow",
   "brain.wizard.kind.workflow.summary": "Ein wiederholbarer Schritt, automatisiert — ein Skill oder eine Sub-App.",
   "brain.wizard.create.workflow": "Workflow anlegen",
@@ -635,4 +635,5 @@ export const de: Record<MessageKey, string> = {
   "brain.map.failed": "Die Kartenanfrage konnte nicht erfasst werden.",
   "brain.field.asIsSignedOff": "Ist-Karte freigegeben",
   "brain.value.chart": "Stunden je Zeitraum",
+  "brain.card.readiness": "{met} von {total} Onboarding-Fakten liegen vor",
 };

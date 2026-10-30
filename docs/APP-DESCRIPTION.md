@@ -64,9 +64,11 @@ Stage counts, the front door (*Onboard a new project, process or workflow*, or
 ![Workspace summary](images/workspace-summary.png)
 
 The header says where it stands (workspace · kind · stage · revision, chain
-badge). The rail shows all ten stages. The readiness card scores the onboarding
-facts — here 3 of 8 — and lists what is missing as actions that open the tab that
-does them. The gate is pinned below every tab.
+badge). The rail shows all ten stages. The readiness card scores seven onboarding
+facts — here 2 of 7 — and lists what is missing as actions that open the tab that
+does them. The same number is on the project's card in the Overview and the
+Pipeline, so the portfolio can be scanned without opening anything. The gate is
+pinned below every tab.
 
 ### Workspace — Map
 
