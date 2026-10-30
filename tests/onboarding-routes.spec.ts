@@ -333,6 +333,28 @@ test.describe("opening an intake", () => {
     const saved = await jsonOf(await h.routes.stepsPut(call(steps, "PUT"), P));
     expect(saved.status).toBe(200);
   });
+  test("the deferred queue lists what is late across the projects you can see", async () => {
+    const h = harness();
+    await h.routes.create(call({ ...intakeFields, workspaceId: "general", lane: "quick" }), P);
+    // Make one sign-off late by moving its date, as time would.
+    const row = h.sqlite
+      .prepare("SELECT data FROM atlas_onboarding WHERE project_id = ?")
+      .get(P) as { data: string };
+    const data = JSON.parse(row.data) as { deferredGates: { stage: string; dueAt: string }[] };
+    data.deferredGates[0].dueAt = new Date(Date.now() - 2 * 86_400_000).toISOString();
+    h.sqlite
+      .prepare("UPDATE atlas_onboarding SET data = ? WHERE project_id = ?")
+      .run(JSON.stringify(data), P);
+    const queue = await jsonOf(await h.routes.deferredList());
+    const requests = (queue.body as { requests: { stage: string; overdue: boolean; daysLate: number }[] })
+      .requests;
+    expect(requests[0].stage).toBe("as-is");
+    expect(requests[0].overdue).toBe(true);
+    expect(requests[0].daysLate).toBe(2);
+    // The two not yet due are still listed, after the late one.
+    expect(requests.length).toBe(3);
+    expect(requests.slice(1).every((item) => !item.overdue)).toBe(true);
+  });
   test("refuses a second intake on the same project", async () => {
     const h = await onboarded();
     const again = await jsonOf(await h.routes.create(call({ workspaceId: "general" }), P));

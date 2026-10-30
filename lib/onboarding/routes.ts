@@ -28,6 +28,7 @@ import {
 } from "../domain/gates";
 import { materialDigest } from "../domain/digest";
 import { parseReceipt, parseSteps, parseWorkflow } from "../domain/contracts";
+import { deferredQueue } from "./deferred";
 import {
   NEXT,
   REUSE_DECISIONS,
@@ -1322,6 +1323,38 @@ export function createOnboardingRoutes(deps: BrainDeps) {
       .run();
     return json({ revision: found.revision + 1, [key]: parsed.value }, 200);
   };
+  /** Every deferred sign-off the caller can see, late ones first. Derived from
+   * the brain rows, so it cannot disagree with a project's own card. */
+  const deferredList = async (request?: Request): Promise<Response> => {
+    const auth = await deps.authorize("onboarding.view", request);
+    if (auth.error) return auth.error;
+    const visible = await deps.visibleIds(auth.access);
+    const { results } = await deps.db
+      .prepare(
+        `SELECT o.project_id, o.data, p.data AS project_data
+           FROM atlas_onboarding o JOIN atlas_projects p ON p.id = o.project_id
+          ORDER BY o.updated_at DESC LIMIT 500`,
+      )
+      .bind()
+      .all<Record<string, unknown>>();
+    const projects = results
+      .filter((row) => visible.has(row.project_id as string))
+      .map((row) => {
+        let deferred: unknown = [];
+        try {
+          deferred = (JSON.parse((row.data as string) ?? "{}") as { deferredGates?: unknown })
+            .deferredGates ?? [];
+        } catch {
+          deferred = [];
+        }
+        return {
+          projectId: row.project_id as string,
+          name: nameOf((row.project_data as string) ?? "{}"),
+          deferred,
+        };
+      });
+    return json({ requests: deferredQueue(projects, new Date()) });
+  };
   const workflowPut = (request: Request, projectId: string) =>
     putContract(request, projectId, "workflow", parseWorkflow);
   const stepsPut = (request: Request, projectId: string) =>
@@ -1409,6 +1442,7 @@ export function createOnboardingRoutes(deps: BrainDeps) {
     workflowPut,
     stepsPut,
     receiptAdd,
+    deferredList,
   };
 }
 

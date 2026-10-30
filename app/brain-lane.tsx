@@ -76,6 +76,8 @@ export default function BrainLane() {
   const [startId, setStartId] = useState("");
   const [wizardOpen, setWizardOpen] = useState(false);
   const [savingWorkflow, setSavingWorkflow] = useState(false);
+  // The debt across every project the person can see, fetched for the board.
+  const [lateQueue, setLateQueue] = useState<{ projectName: string; stage: string }[]>([]);
   // The debt the quick lane left and which part is already late. Read once,
   // when the view is applied, so rendering stays pure.
   const [overdueDeferred, setOverdueDeferred] = useState<{ stage: string; dueAt: string }[]>([]);
@@ -123,6 +125,20 @@ export default function BrainLane() {
       setError(t("brain.error"));
     }
   }, [t]);
+  useEffect(() => {
+    if (view) return;
+    fetch("/api/onboarding/deferred")
+      .then(async (response) =>
+        response.ok
+          ? ((await response.json()) as {
+              requests?: { projectName: string; stage: string; overdue: boolean }[]
+            })
+          : { requests: [] },
+      )
+      .then((body) => setLateQueue((body.requests ?? []).filter((item) => item.overdue)))
+      .catch(() => setLateQueue([]));
+  }, [view]);
+
   useEffect(() => {
     // State is set from the promise callbacks, never synchronously in the
     // effect body: the first paint stays the loading line, and the hooks lint
@@ -630,6 +646,12 @@ export default function BrainLane() {
       {notice && (
         <p className="brain-notice" role="status">
           {notice}
+        </p>
+      )}
+      {!view && lateQueue.length > 0 && (
+        <p className="brain-overdue" role="alert">
+          {t("brain.deferred.board", { count: String(lateQueue.length) })}{" "}
+          {Array.from(new Set(lateQueue.map((item) => item.projectName))).join(", ")}
         </p>
       )}
       <section className="brain-start" aria-label={t("brain.onboard.title")}>

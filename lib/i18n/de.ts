@@ -674,4 +674,5 @@ export const de: Record<MessageKey, string> = {
   "brain.suite.unset": "Keine URL konfiguriert — ATLAS_ setzen",
   "brain.card.late": "{count} überfällig",
   "brain.workflow.toStudio": "An Studio senden",
+  "brain.deferred.board": "{count} aufgeschobene Freigabe(n) überfällig bei",
 };
