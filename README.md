@@ -119,6 +119,11 @@ to-be → build → live → measured, with **retired** as a terminal state. Atl
 owns the brain (who asked, why, what it is worth, how it aligns, where it
 stands); it does not draw maps, build apps or run work. It hands those off.
 
+- **The wizard:** **Onboard a new project or process** opens the same four steps the
+  macOS app opens on — two large illustrated cards ask whether it is a project or a
+  process, then where it belongs, what it is called and what is wrong today, then a
+  review before anything is created. The whole flow is keyboard reachable and closes
+  on Escape.
 - **The lane:** `?view=brain` (also in the sidebar) shows the pipeline by stage
   and one project's brain beside it: the next stage's missing requirements, the
   stage gate, the intake facts, the reuse decision, evidence, value records and

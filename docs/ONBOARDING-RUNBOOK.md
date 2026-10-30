@@ -209,3 +209,14 @@ Rules as code: `lib/onboarding/access.ts`; as tests: `tests/brain-access.spec.ts
   and `sha256`; with either empty the app says no download is published.
 - **The three app links** are stored per installation (`atlas.integration.<app>`),
   with `{project}` replaced by the project id. Set them in Settings.
+
+## The wizard, in both surfaces
+
+The web lane and the macOS app open the same four-step wizard: **what** (project or
+process, as two illustrated cards) → **where** (workspace and owner) → **details**
+(name and problem) → **review** and create. In the web lane it is
+`app/brain-wizard.tsx`, opened from **Start the wizard**; the app's is
+`atlas/macos/Atlas/Sources/Atlas/Wizard.swift`. Both send the same two calls, in the
+same order (`POST /api/projects`, then `POST /api/onboarding/:id`), so a wizard step
+cannot mean different things on the two surfaces. Tests: `tests/brain-wizard.spec.ts`
+(web) and the analysis/client tests plus `ATLAS_SELFTEST` (app).
