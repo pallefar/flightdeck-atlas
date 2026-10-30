@@ -349,4 +349,25 @@ final class ClientTests: XCTestCase {
       XCTAssertEqual(decoded.entryKind, kind)
     }
   }
+
+  func testTheAttestationBodyKeepsTheKeysTheContractRequires() throws {
+    let body = AtlasSnapshot.WorkflowAttestation(
+      projectId: "p-1", name: "Exception triage", trigger: "new-case", inputs: [],
+      steps: [.init(action: "Read the email", actor: "workflow", system: nil, app: "maps")],
+      decisions: [],
+      signOff: .init(role: "process_owner", email: "po@example.test"),
+      complexity: "simple",
+      testReport: .init(ranAt: "2026-10-30T09:00:00.000Z", cases: 1, wroteAnything: false, notes: "dry"),
+      createdAt: "2026-10-30T09:00:00.000Z"
+    )
+    let data = try JSONEncoder().encode(body)
+    let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    XCTAssertEqual(json?["contract"] as? String, "atlas-workflow-draft/1")
+    let steps = json?["steps"] as? [[String: Any]]
+    // A nil optional is written as null: Swift would otherwise omit the key and
+    // the contract would refuse the body.
+    XCTAssertTrue(steps?[0].keys.contains("system") ?? false)
+    XCTAssertEqual(steps?[0]["app"] as? String, "maps")
+    XCTAssertEqual((json?["testReport"] as? [String: Any])?["wroteAnything"] as? Bool, false)
+  }
 }

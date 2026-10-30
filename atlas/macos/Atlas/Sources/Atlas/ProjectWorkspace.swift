@@ -477,7 +477,11 @@ struct ProjectWorkspace: View {
           .font(.caption)
           .foregroundStyle(report.wroteAnything ? Color.red : Color.secondary)
         } else {
-          Text("Not tested yet: record a test run you did yourself.")
+          Button("I tested it — nothing was written") {
+            Task { await model.attestWorkflowTest() }
+          }
+          .disabled(model.busy)
+          Text("Record a test run you did yourself; Atlas never invents one.")
             .font(.caption)
             .foregroundStyle(.secondary)
         }

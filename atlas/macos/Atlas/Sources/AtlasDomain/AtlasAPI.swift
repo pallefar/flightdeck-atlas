@@ -102,6 +102,7 @@ public struct AtlasSnapshot: Codable, Equatable, Identifiable, Sendable {
       public let action: String
       public let actor: String
       public let system: String?
+      public let app: String?
     }
     public struct TestReport: Codable, Equatable, Sendable {
       public let ranAt: String
@@ -114,6 +115,91 @@ public struct AtlasSnapshot: Codable, Equatable, Identifiable, Sendable {
     public let steps: [Step]
     public let complexity: String
     public let testReport: TestReport?
+  }
+  /** A workflow draft as Atlas stores it. Encodable and Sendable so it can be
+   * handed to the client across an isolation boundary without a cast. */
+  public struct WorkflowAttestation: Encodable, Sendable {
+    public struct Step: Encodable, Sendable {
+      public let action: String
+      public let actor: String
+      public let system: String?
+      public let app: String?
+      public init(action: String, actor: String, system: String?, app: String?) {
+        self.action = action
+        self.actor = actor
+        self.system = system
+        self.app = app
+      }
+      enum CodingKeys: String, CodingKey { case action, actor, system, app }
+      public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(action, forKey: .action)
+        try c.encode(actor, forKey: .actor)
+        // The contract requires the key; Swift would omit a nil optional.
+        if let system { try c.encode(system, forKey: .system) } else { try c.encodeNil(forKey: .system) }
+        if let app { try c.encode(app, forKey: .app) } else { try c.encodeNil(forKey: .app) }
+      }
+    }
+    public struct Decision: Encodable, Sendable {
+      public let question: String
+      public let thenStep: String?
+    }
+    public struct Input: Encodable, Sendable {
+      public let name: String
+      public let classification: String
+      public init(name: String, classification: String) {
+        self.name = name
+        self.classification = classification
+      }
+    }
+    public struct SignOff: Encodable, Sendable {
+      public let role: String
+      public let email: String
+      public init(role: String, email: String) {
+        self.role = role
+        self.email = email
+      }
+    }
+    public struct Report: Encodable, Sendable {
+      public let ranAt: String
+      public let cases: Int
+      public let wroteAnything: Bool
+      public let notes: String
+      public init(ranAt: String, cases: Int, wroteAnything: Bool, notes: String) {
+        self.ranAt = ranAt
+        self.cases = cases
+        self.wroteAnything = wroteAnything
+        self.notes = notes
+      }
+    }
+    public let contract = "atlas-workflow-draft/1"
+    public let projectId: String
+    public let name: String
+    public let trigger: String
+    public let inputs: [Input]
+    public let steps: [Step]
+    public let decisions: [Decision]
+    public let signOff: SignOff
+    public let complexity: String
+    public let testReport: Report?
+    public let createdAt: String
+
+    public init(
+      projectId: String, name: String, trigger: String, inputs: [Input], steps: [Step],
+      decisions: [Decision], signOff: SignOff, complexity: String,
+      testReport: Report?, createdAt: String
+    ) {
+      self.projectId = projectId
+      self.name = name
+      self.trigger = trigger
+      self.inputs = inputs
+      self.steps = steps
+      self.decisions = decisions
+      self.signOff = signOff
+      self.complexity = complexity
+      self.testReport = testReport
+      self.createdAt = createdAt
+    }
   }
   public struct Intake: Codable, Equatable, Sendable {
     public let classificationDeclared: Bool?
@@ -341,6 +427,19 @@ public struct AtlasClient: Sendable {
   public struct DeviceCodeState: Decodable, Sendable {
     public let state: String
   }
+  /// Save a workflow draft. The server refuses a body that does not match the
+  /// contract, so "saved" always means "readable by everything else".
+  public func putWorkflow(
+    _ snapshot: AtlasSnapshot, body: AtlasSnapshot.WorkflowAttestation
+  ) async throws -> AtlasSnapshot {
+    try await send(
+      try request(
+        "/api/onboarding/\(snapshot.record.projectId)/workflow", method: "PUT", body: body
+      ),
+      as: AtlasSnapshot.self
+    )
+  }
+
   public func startDeviceCode() async throws -> DeviceCode {
     try await send(
       try request("/api/access/device-code", method: "POST", body: EmptyBody()),

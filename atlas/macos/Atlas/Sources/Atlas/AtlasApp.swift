@@ -282,6 +282,38 @@ final class BrainModel: ObservableObject {
     }
   }
 
+  /// A person ran the workflow once and confirms nothing was written. Their
+  /// word is the test report; Atlas never invents one.
+  func attestWorkflowTest() async {
+    guard let snapshot = selected, let draft = snapshot.data?.workflow else { return }
+    let now = ISO8601DateFormatter().string(from: Date())
+    let body = AtlasSnapshot.WorkflowAttestation(
+      projectId: snapshot.record.projectId,
+      name: draft.name,
+      trigger: draft.trigger,
+      inputs: [],
+      steps: draft.steps.map {
+        .init(action: $0.action, actor: $0.actor, system: $0.system, app: $0.app)
+      },
+      decisions: [],
+      signOff: .init(
+        role: "process_owner",
+        email: snapshot.assignments?.processOwner ?? snapshot.assignments?.owner ?? ""
+      ),
+      complexity: draft.complexity,
+      testReport: .init(
+        ranAt: now, cases: 1, wroteAnything: false,
+        notes: "One real case, dry run, nothing written."
+      ),
+      createdAt: now
+    )
+    await run(
+      { client, _ in try await client.putWorkflow(snapshot, body: body) },
+      notice: "Test run recorded.",
+      failure: "The test run could not be recorded."
+    )
+  }
+
   /// Reserve a map request. The body is the server's, so the app cannot ask
   /// for something the lane could not have asked for.
   func requestHandoff(kind: String, mapType: String = "as-is") async {
