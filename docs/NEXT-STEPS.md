@@ -32,7 +32,12 @@ the two workflow contracts and the quick lane.
 5. ~~`process-steps/1` gets a producer route~~ — done: `PUT /api/onboarding/:id/steps`, one
    contract for KG extraction and for a person typing the steps.
 
-## Batch 3 (in progress: 3 of 5)
+## Batch 3 (in progress: 5 of 5)
+
+Done since: the deferred queue (late first), and **steps that name the suite app that does
+them** — `maps: draw the as-is` in the editor, `app` in the contract, and a step that needs
+Studio makes the workflow complex without anyone ticking a box. Studio's arrival changes
+`complexity: "studio"` from a hand-off *reservation* into a real build.
 
 Done: the editor's browser test (it caught `open()` wiping the notice), the suite registry and
 `GET /api/suite`, and the Suite section in the lane plus Studio and Vision in the app.

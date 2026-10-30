@@ -17,17 +17,20 @@
     {
       "action": "Read the exception email",
       "actor": "workflow",
-      "system": "Outlook"
+      "system": "Outlook",
+      "app": "maps"
     },
     {
       "action": "Match the purchase order",
       "actor": "workflow",
-      "system": "SAP"
+      "system": "SAP",
+      "app": null
     },
     {
       "action": "Approve the match",
       "actor": "person",
-      "system": null
+      "system": null,
+      "app": "advantage"
     }
   ],
   "decisions": [

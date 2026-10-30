@@ -19,21 +19,53 @@
     "createdAt"
   ],
   "properties": {
-    "contract": { "const": "atlas-workflow-draft/1" },
-    "projectId": { "type": "string", "minLength": 1, "maxLength": 80 },
-    "name": { "type": "string", "minLength": 1, "maxLength": 120 },
-    "trigger": { "enum": ["new-case", "form", "schedule", "on-demand"] },
+    "contract": {
+      "const": "atlas-workflow-draft/1"
+    },
+    "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "trigger": {
+      "enum": [
+        "new-case",
+        "form",
+        "schedule",
+        "on-demand"
+      ]
+    },
     "inputs": {
       "type": "array",
       "maxItems": 10,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "classification"],
+        "required": [
+          "name",
+          "classification"
+        ],
         "properties": {
-          "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
           "classification": {
-            "enum": ["public", "internal", "confidential", "export-restricted", "itar", "cui", "customer-pii"]
+            "enum": [
+              "public",
+              "internal",
+              "confidential",
+              "export-restricted",
+              "itar",
+              "cui",
+              "customer-pii"
+            ]
           }
         }
       }
@@ -45,11 +77,44 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["action", "actor", "system"],
+        "required": [
+          "action",
+          "actor",
+          "system"
+        ],
         "properties": {
-          "action": { "type": "string", "minLength": 1, "maxLength": 300 },
-          "actor": { "enum": ["person", "workflow"] },
-          "system": { "type": ["string", "null"], "maxLength": 80 }
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "actor": {
+            "enum": [
+              "person",
+              "workflow"
+            ]
+          },
+          "system": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 80
+          },
+          "app": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "advantage",
+              "pdf",
+              "maps",
+              "studio",
+              "vision",
+              null
+            ]
+          }
         }
       }
     },
@@ -59,34 +124,87 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["question", "thenStep"],
+        "required": [
+          "question",
+          "thenStep"
+        ],
         "properties": {
-          "question": { "type": "string", "minLength": 1, "maxLength": 200 },
-          "thenStep": { "type": ["string", "null"], "maxLength": 20 }
+          "question": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "thenStep": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 20
+          }
         }
       }
     },
     "signOff": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["role", "email"],
+      "required": [
+        "role",
+        "email"
+      ],
       "properties": {
-        "role": { "enum": ["process_owner", "workspace_admin"] },
-        "email": { "type": "string", "minLength": 3, "maxLength": 160 }
+        "role": {
+          "enum": [
+            "process_owner",
+            "workspace_admin"
+          ]
+        },
+        "email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 160
+        }
       }
     },
-    "complexity": { "enum": ["simple", "studio"] },
+    "complexity": {
+      "enum": [
+        "simple",
+        "studio"
+      ]
+    },
     "testReport": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "additionalProperties": false,
-      "required": ["ranAt", "cases", "wroteAnything", "notes"],
+      "required": [
+        "ranAt",
+        "cases",
+        "wroteAnything",
+        "notes"
+      ],
       "properties": {
-        "ranAt": { "type": "string", "format": "date-time" },
-        "cases": { "type": "integer", "minimum": 0, "maximum": 50 },
-        "wroteAnything": { "type": "boolean" },
-        "notes": { "type": "string", "maxLength": 500 }
+        "ranAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "cases": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50
+        },
+        "wroteAnything": {
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 500
+        }
       }
     },
-    "createdAt": { "type": "string", "format": "date-time" }
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    }
   }
 }

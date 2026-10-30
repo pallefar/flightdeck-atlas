@@ -352,7 +352,17 @@ export default function BrainLane() {
       .map((line) => line.trim())
       .filter(Boolean)
       .slice(0, 10)
-      .map((action) => ({ action, actor: "workflow" as const, system: null }));
+      .map((line) => {
+        // "maps: draw the as-is" means the Maps app does that step. Without a
+        // prefix the workflow itself does it; nothing is inferred from words.
+        const named = /^(advantage|pdf|maps|studio|vision):\s*(.+)$/i.exec(line);
+        return {
+          action: named ? named[2] : line,
+          actor: "workflow" as const,
+          system: null,
+          app: named ? (named[1].toLowerCase() as "advantage" | "pdf" | "maps" | "studio" | "vision") : null,
+        };
+      });
     if (!name || steps.length === 0) {
       setNotice(t("brain.workflow.needsName"));
       return;
@@ -371,7 +381,8 @@ export default function BrainLane() {
           role: "process_owner",
           email: view.assignments?.processOwner ?? view.assignments?.owner ?? "",
         },
-        complexity: steps.length > 3 ? "studio" : "simple",
+        complexity:
+          steps.length > 3 || steps.some((step) => step.app === "studio") ? "studio" : "simple",
         testReport: view.workflow?.testReport ?? null,
         createdAt: view.workflow ? new Date().toISOString() : new Date().toISOString(),
       };

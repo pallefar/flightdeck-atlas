@@ -214,6 +214,12 @@ export const workflowContract = z
             action: z.string().trim().min(1).max(300),
             actor: z.enum(["person", "workflow"]),
             system: z.string().trim().max(80).nullable(),
+            /** The suite app that does this step, if one does. Studio is one of
+             * them: a step that needs it is why a workflow is complex. */
+            app: z
+              .enum(["advantage", "pdf", "maps", "studio", "vision"])
+              .nullable()
+              .default(null),
           })
           .strict(),
       )

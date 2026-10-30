@@ -502,21 +502,31 @@ public enum AtlasWorkflowDraftStepsItemActor: String, Codable, CaseIterable, Sen
   case person = "person"
   case workflow = "workflow"
 }
+public enum AtlasWorkflowDraftStepsItemApp: String, Codable, CaseIterable, Sendable {
+  case advantage = "advantage"
+  case pdf = "pdf"
+  case maps = "maps"
+  case studio = "studio"
+  case vision = "vision"
+}
 public struct AtlasWorkflowDraftStepsItem: Codable, Equatable, Sendable {
   public let action: String
   public let actor: AtlasWorkflowDraftStepsItemActor
   public let system: String?
+  public let app: AtlasWorkflowDraftStepsItemApp?
 
-  public init(action: String, actor: AtlasWorkflowDraftStepsItemActor, system: String?) {
+  public init(action: String, actor: AtlasWorkflowDraftStepsItemActor, system: String?, app: AtlasWorkflowDraftStepsItemApp?) {
     self.action = action
     self.actor = actor
     self.system = system
+    self.app = app
   }
 
   enum CodingKeys: String, CodingKey {
     case action = "action"
     case actor = "actor"
     case system = "system"
+    case app = "app"
   }
 }
 public struct AtlasWorkflowDraftDecisionsItem: Codable, Equatable, Sendable {

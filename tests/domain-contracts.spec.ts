@@ -320,6 +320,18 @@ test.describe("refusals that carry a reason the caller can act on", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.problems.join(" ")).toContain("writes nothing");
   });
+  test("a step may name the suite app that does it, but only a real one", () => {
+    const good = fixture("atlas-workflow-draft.v1.json");
+    expect(parseWorkflow(good).ok).toBe(true);
+    // The apps are the OS sub-app ids; anything else is a typo, not a system.
+    const bad = {
+      ...good,
+      steps: good.steps.map((step: { action: string }, index: number) =>
+        index === 0 ? { ...step, app: "sap" } : step,
+      ),
+    };
+    expect(parseWorkflow(bad).ok).toBe(false);
+  });
   test("a three-step workflow cannot claim to need Studio", () => {
     const bad = { ...fixture("atlas-workflow-draft.v1.json"), complexity: "studio" };
     const result = parseWorkflow(bad);
