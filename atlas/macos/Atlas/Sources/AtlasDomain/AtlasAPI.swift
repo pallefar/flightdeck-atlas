@@ -22,6 +22,7 @@ public struct AtlasSnapshot: Codable, Equatable, Identifiable, Sendable {
     public let kind: String?
     public let lane: String?
     public let deferred: Int?
+    public let deferredOverdue: Int?
     public var id: String { projectId }
   }
   public struct Chain: Codable, Equatable, Sendable {

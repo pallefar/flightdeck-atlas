@@ -582,6 +582,7 @@ struct OverviewView: View {
       VStack(alignment: .leading, spacing: 20) {
         header
         stats
+        lateDebt
         frontDoor
         recent
       }
@@ -612,6 +613,25 @@ struct OverviewView: View {
         Text("Not connected to \(model.connection.baseURL) yet. Set the address and a device token in Settings — this app does not invent data.")
           .font(.footnote)
           .foregroundStyle(.orange)
+      }
+    }
+  }
+
+  /// The debt that is late, across the portfolio. The lane has had this banner
+  /// since the queue landed; the app says it too, from the same numbers.
+  private var lateDebt: some View {
+    let late = model.rows.reduce(0) { $0 + ($1.deferredOverdue ?? 0) }
+    let projects = model.rows.filter { ($0.deferredOverdue ?? 0) > 0 }
+    return Group {
+      if late > 0 {
+        Label(
+          "\(late) deferred sign-off(s) are past due on \(projects.map(\.name).joined(separator: ", "))",
+          systemImage: "exclamationmark.triangle.fill"
+        )
+        .font(.callout.weight(.medium))
+        .foregroundStyle(.red)
+        .padding(.vertical, 6)
+        .accessibilityLabel("\(late) deferred sign-offs are past due")
       }
     }
   }
