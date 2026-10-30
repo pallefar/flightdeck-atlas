@@ -220,3 +220,21 @@ process, as two illustrated cards) → **where** (workspace and owner) → **det
 same order (`POST /api/projects`, then `POST /api/onboarding/:id`), so a wizard step
 cannot mean different things on the two surfaces. Tests: `tests/brain-wizard.spec.ts`
 (web) and the analysis/client tests plus `ATLAS_SELFTEST` (app).
+
+## The redesigned project workspace (app)
+
+A project opens in the detail area, not a sheet:
+
+| Part | What it does |
+|---|---|
+| Header | name, workspace · kind · stage · revision, the audit-chain badge, **Open in Atlas**, **Feedback**, close |
+| Stage rail | all ten stages; passed in solid, current in full colour, ahead in grey, with an accessibility label ("Stage 2 of 10") |
+| Tabs | Summary · Map · Measure · Evidence · Roles · Audit |
+| Summary | readiness card (score, counts, risks, next actions that open the tab that does them), the stage's requirements, the facts form, the reuse check |
+| Map | as-is / to-be references and sign-off, **Request the as-is map** / **Request the to-be map** (reserves a DiagramForge hand-off), the request list, the three app links |
+| Measure | bar chart of hours with `measured` / `estimate` labelled per bar, the records, and a form that can also carry a target |
+| Pinned gate | reason, **Reject**, **Pass this stage** — always in reach, disabled with the reason shown when the role cannot pass |
+
+A hand-off is **reserved**, never sent: the Map tab says "Atlas reserves the request;
+DiagramForge does the drawing", and the request list shows `reserved` until the transport
+exists.

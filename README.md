@@ -191,6 +191,17 @@ answers with a verdict or a refusal code (`UPDATES_NOT_CONFIGURED`,
 Maps, each as a link you configure once with an optional `{project}` placeholder;
 an unconfigured app says so rather than opening a guessed address.
 
+**The project is a workspace, not a form.** A project opens in the main window with
+a header that says where it stands, a rail of all ten stages, and six tabs that each
+answer one question — **Summary** (readiness, requirements, facts, reuse), **Map**
+(the as-is and to-be references, sign-off, a request for each map, and the three app
+links), **Measure** (a bar chart of hours per period, measured kept apart from
+estimated, the records and a form to add one), **Evidence**, **Roles** and **Audit**.
+The stage gate is pinned at the bottom, because the gate is the action.
+
+Three kinds can be onboarded — a **project**, a **process** or a **workflow** — from
+the same wizard, in the app and in Atlas.
+
 A whole onboarding can be done in the app: create the project or process, fill the
 intake, record the reuse decision, attach evidence metadata, record value, assign the
 owner, process owner and approvers, and pass or reject each stage gate. What it cannot
