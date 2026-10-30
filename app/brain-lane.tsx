@@ -806,6 +806,31 @@ export default function BrainLane() {
                   {t("brain.reuse.record")}
                 </button>
               </section>
+              <section id="brain-section-workflow" aria-label={t("brain.workflow.title")}>
+                <h3>{t("brain.workflow.title")}</h3>
+                {view.workflow ? (
+                  <dl className="brain-workflow">
+                    <dt>{t("brain.workflow.trigger")}</dt>
+                    <dd>{view.workflow.trigger}</dd>
+                    <dt>{t("brain.workflow.steps")}</dt>
+                    <dd>{view.workflow.steps.length}</dd>
+                    <dt>{t("brain.workflow.complexity")}</dt>
+                    <dd>{view.workflow.complexity}</dd>
+                    <dt>{t("brain.workflow.tested")}</dt>
+                    <dd>
+                      {view.workflow.testReport
+                        ? `${view.workflow.testReport.cases} · ${
+                            view.workflow.testReport.wroteAnything
+                              ? t("brain.workflow.wrote")
+                              : t("brain.workflow.dry")
+                          }`
+                        : t("brain.workflow.untested")}
+                    </dd>
+                  </dl>
+                ) : (
+                  <p className="brain-hint">{t("brain.workflow.none")}</p>
+                )}
+              </section>
               <section id="brain-section-evidence" aria-label={t("brain.evidence.title")}>
                 <h3>{t("brain.evidence.title")}</h3>
                 {view.evidence.length === 0 ? (

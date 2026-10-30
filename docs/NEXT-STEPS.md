@@ -21,8 +21,11 @@ the two workflow contracts and the quick lane.
 2. ~~An overdue deferred sign-off is a risk of its own (`deferred_overdue`), not only a debt~~ — done, with a domain test that also proves the score does not move.
 3. ~~Browser device-code sign-in~~ — done: a code, an approve page, one-time collection, and a
    **Sign in with the browser** button in Settings. The app no longer needs a typed token.
-4. `workflow-draft/1` gets a home: a route, a workflow tab and a dry-run report.
-5. `process-steps/1` gets a producer route.
+4. ~~`workflow-draft/1` gets a home~~ — done: `PUT /api/onboarding/:id/workflow`, stored in the
+   brain only when it matches the contract, and a Workflow section in the lane that shows the
+   trigger, the step count, who builds it and whether its test run wrote anything.
+5. ~~`process-steps/1` gets a producer route~~ — done: `PUT /api/onboarding/:id/steps`, one
+   contract for KG extraction and for a person typing the steps.
 
 ## Not yet done (in order)
 
@@ -31,9 +34,8 @@ the two workflow contracts and the quick lane.
    toggle, one badge, one test. `S`
 2. **The wizard's quick hint has no consequence shown before creating.** Show what
    will be deferred, with the due date and the owner, in the review step. `S`
-3. **`workflow-draft/1` is a contract without a home.** No route stores one and no
-   screen edits one. Next: `POST/GET /api/onboarding/:id/workflow`, a workflow tab,
-   and the dry-run report recorded on the draft. `L`
+3. **The workflow has a home but no editor.** A route stores a draft and the lane shows
+   it; nobody can yet build one in the app, and the **app** has no workflow tab. `L`
 4. **Device-code sign-in.** Still the biggest block on "anyone can use it": the app
    needs a token minted by a Super Admin. Routes + browser approve page + app poll,
    then the app has a Sign in button instead of a token field. `M`

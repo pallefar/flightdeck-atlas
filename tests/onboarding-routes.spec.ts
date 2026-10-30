@@ -250,6 +250,50 @@ test.describe("opening an intake", () => {
     // three opening passes, the capture gate, and this one
     expect(body.chain.length).toBe(5);
   });
+  test("a workflow draft is stored only if it matches its contract", async () => {
+    const h = await onboarded();
+    const draft = {
+      contract: "atlas-workflow-draft/1",
+      projectId: P,
+      name: "Exception triage",
+      trigger: "new-case",
+      inputs: [{ name: "Exception email", classification: "internal" }],
+      steps: [
+        { action: "Read the email", actor: "workflow", system: "Outlook" },
+        { action: "Match the order", actor: "workflow", system: "SAP" },
+        { action: "Approve", actor: "person", system: null },
+      ],
+      decisions: [],
+      signOff: { role: "process_owner", email: "owner@example.test" },
+      complexity: "simple",
+      testReport: null,
+      createdAt: new Date().toISOString(),
+    };
+    const saved = await jsonOf(await h.routes.workflowPut(call(draft, "PUT"), P));
+    expect(saved.status).toBe(200);
+    // A test run that wrote something is refused, and nothing is stored.
+    const refused = await jsonOf(
+      await h.routes.workflowPut(
+        call({ ...draft, testReport: { ranAt: new Date().toISOString(), cases: 1, wroteAnything: true, notes: "" } }, "PUT"),
+        P,
+      ),
+    );
+    expect(refused.status).toBe(400);
+    expect(String(refused.body.problems)).toContain("writes nothing");
+  });
+  test("process steps are stored with their source labels", async () => {
+    const h = await onboarded();
+    const steps = {
+      contract: "atlas-process-steps/1",
+      projectId: P,
+      provenance: "manual",
+      source: { filename: "sop.docx", sha256: "a".repeat(64), documentType: "sop" },
+      steps: [{ number: "10", action: "Open the case", actor: "AP clerk", inputs: null, outputs: null, notes: null }],
+      createdAt: new Date().toISOString(),
+    };
+    const saved = await jsonOf(await h.routes.stepsPut(call(steps, "PUT"), P));
+    expect(saved.status).toBe(200);
+  });
   test("refuses a second intake on the same project", async () => {
     const h = await onboarded();
     const again = await jsonOf(await h.routes.create(call({ workspaceId: "general" }), P));

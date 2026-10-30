@@ -644,4 +644,13 @@ export const de: Record<MessageKey, string> = {
   "brain.wizard.review.deferredList": "Karte, Ausrichtung und Wert — fällig in 14 Tagen, in der Audit-Kette festgehalten",
   "brain.risk.deferred": "Freigaben sind aufgeschoben: die Quick-Lane schuldet sie",
   "brain.risk.deferred_overdue": "Eine aufgeschobene Freigabe ist überfällig",
+  "brain.workflow.title": "Workflow",
+  "brain.workflow.none": "Noch kein Workflow. Ein Workflow ist ein testbarer Entwurf: Auslöser, Eingaben, Schritte, Freigabe.",
+  "brain.workflow.trigger": "Auslöser",
+  "brain.workflow.steps": "Schritte",
+  "brain.workflow.complexity": "Gebaut von",
+  "brain.workflow.tested": "Testlauf",
+  "brain.workflow.untested": "noch nicht getestet",
+  "brain.workflow.wrote": "schrieb Daten",
+  "brain.workflow.dry": "Testlauf, schrieb nichts",
 };

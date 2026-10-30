@@ -27,6 +27,7 @@ import {
   reasonRequired,
 } from "../domain/gates";
 import { materialDigest } from "../domain/digest";
+import { parseSteps, parseWorkflow } from "../domain/contracts";
 import {
   NEXT,
   REUSE_DECISIONS,
@@ -286,6 +287,8 @@ export function createOnboardingRoutes(deps: BrainDeps) {
       status: row.status,
       lane: (row as { lane?: string }).lane ?? "governed",
       deferredGates: data.deferredGates,
+      workflow: data.workflow,
+      steps: data.steps,
       facts,
       /** The editable fields as stored, so a client form starts from the
        * truth rather than from empty inputs. */
@@ -1274,6 +1277,52 @@ export function createOnboardingRoutes(deps: BrainDeps) {
       .run();
     return workspacesList(request);
   };
+
+  /** The workflow draft and the steps it was built from live in the brain, so
+   * one read gives a project its whole story. Both are contract-validated on
+   * the way in: the server stores what the schema says. */
+  const putContract = async (
+    request: Request,
+    projectId: string,
+    key: "workflow" | "steps",
+    parse: (input: unknown) => { ok: boolean; data?: unknown; problems?: string[] },
+  ) => {
+    if (!sameOrigin(request)) return json({ error: "Request origin is not allowed." }, 403);
+    const auth = await deps.authorize("onboarding.triage", request);
+    if (auth.error) return auth.error;
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: "Send a JSON body.", code: "bad_body" }, 400);
+    }
+    const parsed = parse(body);
+    if (!parsed.ok)
+      return json(
+        { error: "The payload does not match its contract.", problems: parsed.problems ?? [] },
+        400,
+      );
+    const found = await deps.db
+      .prepare("SELECT data, revision, updated_at FROM atlas_onboarding WHERE project_id = ?")
+      .bind(projectId)
+      .first<{ data: string; revision: number }>();
+    if (!found) return json({ error: "That project is not onboarding.", code: "not_found" }, 404);
+    const data = JSON.parse(found.data) as Record<string, unknown>;
+    const now = new Date().toISOString();
+    const next = { ...data, [key]: parsed.data, revision: found.revision + 1, updatedAt: now };
+    await deps.db
+      .prepare(
+        "UPDATE atlas_onboarding SET data = ?, revision = ?, updated_at = ? WHERE project_id = ?",
+      )
+      .bind(JSON.stringify(next), found.revision + 1, now, projectId)
+      .run();
+    return json({ revision: found.revision + 1, [key]: parsed.data }, 200);
+  };
+  const workflowPut = (request: Request, projectId: string) =>
+    putContract(request, projectId, "workflow", parseWorkflow);
+  const stepsPut = (request: Request, projectId: string) =>
+    putContract(request, projectId, "steps", parseSteps);
+
   return {
     list,
     get,
@@ -1289,6 +1338,8 @@ export function createOnboardingRoutes(deps: BrainDeps) {
     workspacesList,
     workspaceCreate,
     workspaceMemberAdd,
+    workflowPut,
+    stepsPut,
   };
 }
 

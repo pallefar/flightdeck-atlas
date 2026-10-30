@@ -1,3 +1,4 @@
+import { parseSteps, parseWorkflow } from "../domain/contracts";
 // The brain's stored shape, and the pure mapping from stored rows to the
 // facts the stage rules and the client projection need.
 //
@@ -58,6 +59,11 @@ export const brainDataSchema = z
     /** The digest of the material fields as last accepted at stage 4. A save
      * that changes them reopens alignment (PRD §6). */
     materialDigest: z.string().regex(/^[0-9a-f]{64}$/).nullable().default(null),
+    /** The workflow a person is testing, and the steps it was built from.
+     * Stored as the contract bodies so the app, the lane and Studio read one
+     * shape. */
+    workflow: z.unknown().nullable().default(null),
+    steps: z.unknown().nullable().default(null),
     /** Sign-offs the quick lane left open: who owes them and by when. */
     deferredGates: z
       .array(

@@ -644,6 +644,15 @@ export const en = {
   "brain.wizard.review.deferredList": "Map, alignment and value — due in 14 days, written into the audit chain",
   "brain.risk.deferred": "Sign-offs are deferred: the quick lane owes them",
   "brain.risk.deferred_overdue": "A deferred sign-off is past its date",
+  "brain.workflow.title": "Workflow",
+  "brain.workflow.none": "No workflow yet. A workflow is a draft you can test: trigger, inputs, steps, sign-off.",
+  "brain.workflow.trigger": "Trigger",
+  "brain.workflow.steps": "Steps",
+  "brain.workflow.complexity": "Built by",
+  "brain.workflow.tested": "Test run",
+  "brain.workflow.untested": "not tested yet",
+  "brain.workflow.wrote": "wrote data",
+  "brain.workflow.dry": "dry run, wrote nothing",
 } as const;
 
 export type MessageKey = keyof typeof en;
