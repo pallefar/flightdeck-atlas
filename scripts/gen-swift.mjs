@@ -71,7 +71,7 @@ function swiftType(node, key, prefix, nestedName) {
   if (base === "array") {
     const item = node.items ?? {};
     if (item.type === "object") return `[${nestedName}]`;
-    if (isEnum(item)) return `[${prefix}${upper(ident(key))}]`;
+    // An array of enum values travels as strings; the contract validates them.
     return "[String]";
   }
   if (base === "object") return nestedName;
@@ -87,7 +87,8 @@ function enumDecl(name, node) {
 /** A plain object property gets its own struct, named after the property; an
  * array of objects uses `<Owner>Item`. Both are declared beside their owner. */
 function nestedFor(node, key, owner) {
-  if (node.type === "array" && node.items?.type === "object") return `${owner}Item`;
+  if (node.type === "array" && node.items?.type === "object")
+    return `${owner}${upper(ident(key))}Item`;
   const base = Array.isArray(node.type) ? node.type.find((t) => t && t !== "null") : node.type;
   if (base === "object") return `${owner}${upper(ident(key))}`;
   return undefined;
@@ -108,7 +109,7 @@ function structDecl(name, schema) {
   for (const [key, node] of Object.entries(properties)) {
     if (isEnum(node)) declarations.push(enumDecl(`${name}${upper(ident(key))}`, node));
     if (node.type === "array" && node.items?.type === "object")
-      declarations.push(structDecl(`${name}Item`, node.items));
+      declarations.push(structDecl(`${name}${upper(ident(key))}Item`, node.items));
     const objectProp = nestedFor(node, key, name);
     if (objectProp && !(node.type === "array"))
       declarations.push(structDecl(objectProp, node));

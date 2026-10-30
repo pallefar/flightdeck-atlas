@@ -137,7 +137,9 @@ final class BrainModel: ObservableObject {
     }
   }
 
-  func onboardNew(name: String, kind: String, problem: String = "") async {
+  func onboardNew(
+    name: String, kind: String, problem: String = "", lane: String = "governed"
+  ) async {
     guard let client else { return }
     busy = true
     defer { busy = false }
@@ -147,7 +149,8 @@ final class BrainModel: ObservableObject {
         kind: kind,
         workspaceId: workspaceId,
         ownerEmail: ownerEmail.trimmingCharacters(in: .whitespaces).isEmpty ? nil : ownerEmail,
-        problem: problem
+        problem: problem,
+        lane: lane
       )
       await refresh()
       selected = try await client.brain(id)
@@ -635,6 +638,10 @@ struct PipelineView: View {
                   Text(card.name).font(.callout.weight(.semibold))
                   HStack(spacing: 6) {
                     Text("rev \(card.revision)").font(.caption2).foregroundStyle(.secondary)
+                    if card.lane == "quick", let deferred = card.deferred, deferred > 0 {
+                      Text("quick · \(deferred) deferred").font(.caption2)
+                        .foregroundStyle(.orange)
+                    }
                     if let readiness = card.readiness {
                       Text("\(readiness)%").font(.caption2.weight(.semibold))
                         .foregroundStyle(Color.accentColor)

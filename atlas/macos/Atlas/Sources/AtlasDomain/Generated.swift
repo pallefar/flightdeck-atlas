@@ -139,7 +139,7 @@ public struct AtlasGateEvent: Codable, Equatable, Sendable {
   public let role: String
   public let decision: AtlasGateEventDecision
   public let lane: AtlasGateEventLane?
-  public let deferred: [AtlasGateEventDeferred]?
+  public let deferred: [String]?
   public let reason: String
   public let evidenceRef: String?
   public let materialDigest: String?
@@ -147,7 +147,7 @@ public struct AtlasGateEvent: Codable, Equatable, Sendable {
   public let hash: String
   public let createdAt: String
 
-  public init(contract: String, id: String, projectId: String, seq: Int, stage: AtlasGateEventStage, fromStage: AtlasGateEventFromStage?, toStage: AtlasGateEventToStage?, actor: String, role: String, decision: AtlasGateEventDecision, lane: AtlasGateEventLane?, deferred: [AtlasGateEventDeferred]?, reason: String, evidenceRef: String?, materialDigest: String?, prevHash: String, hash: String, createdAt: String) {
+  public init(contract: String, id: String, projectId: String, seq: Int, stage: AtlasGateEventStage, fromStage: AtlasGateEventFromStage?, toStage: AtlasGateEventToStage?, actor: String, role: String, decision: AtlasGateEventDecision, lane: AtlasGateEventLane?, deferred: [String]?, reason: String, evidenceRef: String?, materialDigest: String?, prevHash: String, hash: String, createdAt: String) {
     self.contract = contract
     self.id = id
     self.projectId = projectId
@@ -203,7 +203,7 @@ public enum AtlasOnboardingRecordStage: String, Codable, CaseIterable, Sendable 
   case measured = "measured"
   case retired = "retired"
 }
-public enum AtlasOnboardingRecordItemStage: String, Codable, CaseIterable, Sendable {
+public enum AtlasOnboardingRecordGatesItemStage: String, Codable, CaseIterable, Sendable {
   case intake = "intake"
   case reuse = "reuse"
   case capture = "capture"
@@ -216,17 +216,17 @@ public enum AtlasOnboardingRecordItemStage: String, Codable, CaseIterable, Senda
   case measured = "measured"
   case retired = "retired"
 }
-public enum AtlasOnboardingRecordItemDecision: String, Codable, CaseIterable, Sendable {
+public enum AtlasOnboardingRecordGatesItemDecision: String, Codable, CaseIterable, Sendable {
   case pass = "pass"
   case reject = "reject"
   case reopen = "reopen"
 }
-public struct AtlasOnboardingRecordItem: Codable, Equatable, Sendable {
-  public let stage: AtlasOnboardingRecordItemStage
-  public let decision: AtlasOnboardingRecordItemDecision
+public struct AtlasOnboardingRecordGatesItem: Codable, Equatable, Sendable {
+  public let stage: AtlasOnboardingRecordGatesItemStage
+  public let decision: AtlasOnboardingRecordGatesItemDecision
   public let at: String
 
-  public init(stage: AtlasOnboardingRecordItemStage, decision: AtlasOnboardingRecordItemDecision, at: String) {
+  public init(stage: AtlasOnboardingRecordGatesItemStage, decision: AtlasOnboardingRecordGatesItemDecision, at: String) {
     self.stage = stage
     self.decision = decision
     self.at = at
@@ -264,7 +264,7 @@ public struct AtlasOnboardingRecord: Codable, Equatable, Sendable {
   public let name: String
   public let stage: AtlasOnboardingRecordStage
   public let revision: Int
-  public let gates: [AtlasOnboardingRecordItem]
+  public let gates: [AtlasOnboardingRecordGatesItem]
   public let evidenceAccepted: Int
   public let evidencePending: Int
   public let osProjectId: String?
@@ -276,7 +276,7 @@ public struct AtlasOnboardingRecord: Codable, Equatable, Sendable {
   public let valueBasis: AtlasOnboardingRecordValueBasis?
   public let updatedAt: String
 
-  public init(contract: String, projectId: String, name: String, stage: AtlasOnboardingRecordStage, revision: Int, gates: [AtlasOnboardingRecordItem], evidenceAccepted: Int, evidencePending: Int, osProjectId: String?, teoaScopeId: String?, visionObjectiveId: String?, reuseDecision: AtlasOnboardingRecordReuseDecision?, buildDecision: AtlasOnboardingRecordBuildDecision?, entryType: AtlasOnboardingRecordEntryType, valueBasis: AtlasOnboardingRecordValueBasis?, updatedAt: String) {
+  public init(contract: String, projectId: String, name: String, stage: AtlasOnboardingRecordStage, revision: Int, gates: [AtlasOnboardingRecordGatesItem], evidenceAccepted: Int, evidencePending: Int, osProjectId: String?, teoaScopeId: String?, visionObjectiveId: String?, reuseDecision: AtlasOnboardingRecordReuseDecision?, buildDecision: AtlasOnboardingRecordBuildDecision?, entryType: AtlasOnboardingRecordEntryType, valueBasis: AtlasOnboardingRecordValueBasis?, updatedAt: String) {
     self.contract = contract
     self.projectId = projectId
     self.name = name
@@ -337,7 +337,7 @@ public struct AtlasProcessStepsSource: Codable, Equatable, Sendable {
     case documentType = "documentType"
   }
 }
-public struct AtlasProcessStepsItem: Codable, Equatable, Sendable {
+public struct AtlasProcessStepsStepsItem: Codable, Equatable, Sendable {
   public let number: String
   public let action: String
   public let actor: String?
@@ -368,10 +368,10 @@ public struct AtlasProcessSteps: Codable, Equatable, Sendable {
   public let projectId: String
   public let provenance: AtlasProcessStepsProvenance
   public let source: AtlasProcessStepsSource
-  public let steps: [AtlasProcessStepsItem]
+  public let steps: [AtlasProcessStepsStepsItem]
   public let createdAt: String
 
-  public init(contract: String, projectId: String, provenance: AtlasProcessStepsProvenance, source: AtlasProcessStepsSource, steps: [AtlasProcessStepsItem], createdAt: String) {
+  public init(contract: String, projectId: String, provenance: AtlasProcessStepsProvenance, source: AtlasProcessStepsSource, steps: [AtlasProcessStepsStepsItem], createdAt: String) {
     self.contract = contract
     self.projectId = projectId
     self.provenance = provenance
@@ -475,7 +475,7 @@ public enum AtlasWorkflowDraftTrigger: String, Codable, CaseIterable, Sendable {
   case schedule = "schedule"
   case onDemand = "on-demand"
 }
-public enum AtlasWorkflowDraftItemClassification: String, Codable, CaseIterable, Sendable {
+public enum AtlasWorkflowDraftInputsItemClassification: String, Codable, CaseIterable, Sendable {
   case `public` = "public"
   case `internal` = "internal"
   case confidential = "confidential"
@@ -484,11 +484,11 @@ public enum AtlasWorkflowDraftItemClassification: String, Codable, CaseIterable,
   case cui = "cui"
   case customerPii = "customer-pii"
 }
-public struct AtlasWorkflowDraftItem: Codable, Equatable, Sendable {
+public struct AtlasWorkflowDraftInputsItem: Codable, Equatable, Sendable {
   public let name: String
-  public let classification: AtlasWorkflowDraftItemClassification
+  public let classification: AtlasWorkflowDraftInputsItemClassification
 
-  public init(name: String, classification: AtlasWorkflowDraftItemClassification) {
+  public init(name: String, classification: AtlasWorkflowDraftInputsItemClassification) {
     self.name = name
     self.classification = classification
   }
@@ -498,16 +498,16 @@ public struct AtlasWorkflowDraftItem: Codable, Equatable, Sendable {
     case classification = "classification"
   }
 }
-public enum AtlasWorkflowDraftItemActor: String, Codable, CaseIterable, Sendable {
+public enum AtlasWorkflowDraftStepsItemActor: String, Codable, CaseIterable, Sendable {
   case person = "person"
   case workflow = "workflow"
 }
-public struct AtlasWorkflowDraftItem: Codable, Equatable, Sendable {
+public struct AtlasWorkflowDraftStepsItem: Codable, Equatable, Sendable {
   public let action: String
-  public let actor: AtlasWorkflowDraftItemActor
+  public let actor: AtlasWorkflowDraftStepsItemActor
   public let system: String?
 
-  public init(action: String, actor: AtlasWorkflowDraftItemActor, system: String?) {
+  public init(action: String, actor: AtlasWorkflowDraftStepsItemActor, system: String?) {
     self.action = action
     self.actor = actor
     self.system = system
@@ -519,7 +519,7 @@ public struct AtlasWorkflowDraftItem: Codable, Equatable, Sendable {
     case system = "system"
   }
 }
-public struct AtlasWorkflowDraftItem: Codable, Equatable, Sendable {
+public struct AtlasWorkflowDraftDecisionsItem: Codable, Equatable, Sendable {
   public let question: String
   public let thenStep: String?
 
@@ -580,15 +580,15 @@ public struct AtlasWorkflowDraft: Codable, Equatable, Sendable {
   public let projectId: String
   public let name: String
   public let trigger: AtlasWorkflowDraftTrigger
-  public let inputs: [AtlasWorkflowDraftItem]
-  public let steps: [AtlasWorkflowDraftItem]
-  public let decisions: [AtlasWorkflowDraftItem]
+  public let inputs: [AtlasWorkflowDraftInputsItem]
+  public let steps: [AtlasWorkflowDraftStepsItem]
+  public let decisions: [AtlasWorkflowDraftDecisionsItem]
   public let signOff: AtlasWorkflowDraftSignOff
   public let complexity: AtlasWorkflowDraftComplexity
   public let testReport: AtlasWorkflowDraftTestReport?
   public let createdAt: String
 
-  public init(contract: String, projectId: String, name: String, trigger: AtlasWorkflowDraftTrigger, inputs: [AtlasWorkflowDraftItem], steps: [AtlasWorkflowDraftItem], decisions: [AtlasWorkflowDraftItem], signOff: AtlasWorkflowDraftSignOff, complexity: AtlasWorkflowDraftComplexity, testReport: AtlasWorkflowDraftTestReport?, createdAt: String) {
+  public init(contract: String, projectId: String, name: String, trigger: AtlasWorkflowDraftTrigger, inputs: [AtlasWorkflowDraftInputsItem], steps: [AtlasWorkflowDraftStepsItem], decisions: [AtlasWorkflowDraftDecisionsItem], signOff: AtlasWorkflowDraftSignOff, complexity: AtlasWorkflowDraftComplexity, testReport: AtlasWorkflowDraftTestReport?, createdAt: String) {
     self.contract = contract
     self.projectId = projectId
     self.name = name

@@ -72,7 +72,7 @@ final class ClientTests: XCTestCase {
     var authorization: String?
     StubProtocol.handler = { request in
       authorization = request.value(forHTTPHeaderField: "Authorization")
-      return (200, Data(#"{"projects":[{"projectId":"p-1","name":"Contract intake","stage":"capture","status":"active","revision":4,"updatedAt":"2026-10-28T10:00:00.000Z","readiness":43,"met":3,"total":7,"kind":"process"}]}"#.utf8))
+      return (200, Data(#"{"projects":[{"projectId":"p-1","name":"Contract intake","stage":"capture","status":"active","revision":4,"updatedAt":"2026-10-28T10:00:00.000Z","readiness":43,"met":3,"total":7,"kind":"process","lane":"quick","deferred":3}]}"#.utf8))
     }
     let rows = try await client.list()
     XCTAssertEqual(rows.count, 1)
@@ -83,6 +83,8 @@ final class ClientTests: XCTestCase {
     XCTAssertEqual(rows.first?.met, 3)
     XCTAssertEqual(rows.first?.total, 7)
     XCTAssertEqual(rows.first?.kind, "process")
+    XCTAssertEqual(rows.first?.lane, "quick")
+    XCTAssertEqual(rows.first?.deferred, 3)
     XCTAssertEqual(authorization, "Bearer secret-token")
   }
 

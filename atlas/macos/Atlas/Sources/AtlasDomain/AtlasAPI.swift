@@ -20,6 +20,8 @@ public struct AtlasSnapshot: Codable, Equatable, Identifiable, Sendable {
     public let met: Int?
     public let total: Int?
     public let kind: String?
+    public let lane: String?
+    public let deferred: Int?
     public var id: String { projectId }
   }
   public struct Chain: Codable, Equatable, Sendable {
@@ -312,7 +314,8 @@ public struct AtlasClient: Sendable {
     kind: String,
     workspaceId: String,
     ownerEmail: String?,
-    problem: String = ""
+    problem: String = "",
+    lane: String = "governed"
   ) async throws -> String {
     // `latitude` and `longitude` are required by the project schema and may be
     // null. Swift omits nil optionals when it encodes, which the server reads
@@ -353,6 +356,7 @@ public struct AtlasClient: Sendable {
       let workspaceId: String
       let ownerEmail: String?
       let problem: String
+      let lane: String
     }
     _ = try await send(
       try request(
@@ -361,7 +365,8 @@ public struct AtlasClient: Sendable {
           entryType: kind,
           workspaceId: workspaceId,
           ownerEmail: ownerEmail,
-          problem: problem
+          problem: problem,
+          lane: lane
         )
       ),
       as: AtlasSnapshot.self

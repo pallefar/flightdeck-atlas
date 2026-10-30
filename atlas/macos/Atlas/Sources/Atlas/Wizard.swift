@@ -9,6 +9,7 @@ struct WizardFlow: View {
   @Environment(\.dismiss) private var dismiss
   @State private var step = 0
   @State private var kind = "project"
+  @State private var quick = false
   @State private var name = ""
   @State private var problem = ""
 
@@ -96,7 +97,15 @@ struct WizardFlow: View {
           illustration: { WorkflowIllustration() }
         ) { kind = "workflow" }
       }
-      Text("All three use the same pipeline: reuse check, capture, as-is, alignment, value, build, live.")
+      Toggle("Fast start (quick lane)", isOn: $quick)
+        .toggleStyle(.checkbox)
+      Text(
+        quick
+          ? "Starts at capture. The map, alignment and value sign-offs are recorded as deferred, with an owner and a date, in the audit chain."
+          : "All three use the same pipeline: reuse check, capture, as-is, alignment, value, build, live."
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
         .font(.caption)
         .foregroundStyle(.secondary)
     }
@@ -228,7 +237,9 @@ struct WizardFlow: View {
       step += 1
       return
     }
-    await model.onboardNew(name: name, kind: kind, problem: problem)
+    await model.onboardNew(
+      name: name, kind: kind, problem: problem, lane: quick ? "quick" : "governed"
+    )
     dismiss()
   }
 }
