@@ -193,3 +193,19 @@ Rules as code: `lib/onboarding/access.ts`; as tests: `tests/brain-access.spec.ts
   lands on that project's brain inside the full lane.
 - Both URLs come from `AtlasLink` (tested), so the app and the web cannot drift on
   what a link means.
+
+## Analysis, feedback, updates and the three app links
+
+- **Analysis** is computed in `AtlasDomain/Analysis.swift` from the snapshot only:
+  a checklist score (facts in place / facts known), the counts, the risks and next
+  actions. It never scores a project's worth.
+- **Feedback** (`lib/feedback.ts`, `POST /api/feedback`, `atlas_feedback`) stores
+  structural context and your note, capped at 30 notes an hour. The web overlay
+  (`components/feedback-overlay`) keeps its notes in the browser and copies them as
+  one prompt; the app can do both, copy or send.
+- **Updates**: `app-updates.json` is the published manifest (`atlas-app-updates/1`);
+  `GET /api/app-updates?version=<v>` answers `up_to_date`, `update_available`,
+  `ahead_of_release` or a refusal code. A release with a download carries both `url`
+  and `sha256`; with either empty the app says no download is published.
+- **The three app links** are stored per installation (`atlas.integration.<app>`),
+  with `{project}` replaced by the project id. Set them in Settings.

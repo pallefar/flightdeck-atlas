@@ -169,6 +169,23 @@ review before anything is created. A **direct link into Atlas** sits in the wind
 `?view=brain` and `?view=brain&project=<id>` — the full portfolio with that project
 already open.
 
+**Analysis.** Every project's brain opens with a checklist score — how many of
+the onboarding facts are in place (owner, process owner, both approvers, accepted
+evidence, a clear scan, a reuse decision, a value baseline, a verified chain, and
+the stage's own requirements) — with the counts behind it, the risks those counts
+imply, and the next actions the server's missing requirements already name. It is
+labelled a checklist score, not a judgement of value.
+
+**Feedback and updates.** Feedback records the screen, project and stage plus your
+own words (never page text or project data), can be copied as one prompt — the
+Maps admin overlay's pattern — or sent to Atlas. Settings has a version check that
+answers with a verdict or a refusal code (`UPDATES_NOT_CONFIGURED`,
+`RELEASE_METADATA_INVALID`) and never shows a refusal as "up to date".
+
+**The three apps this client adds.** TEOA Advantage, the PDF app and FlightDeck
+Maps, each as a link you configure once with an optional `{project}` placeholder;
+an unconfigured app says so rather than opening a guessed address.
+
 A whole onboarding can be done in the app: create the project or process, fill the
 intake, record the reuse decision, attach evidence metadata, record value, assign the
 owner, process owner and approvers, and pass or reject each stage gate. What it cannot
