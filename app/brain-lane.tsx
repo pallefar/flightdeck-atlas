@@ -28,6 +28,7 @@ type ListRow = {
   total?: number;
   lane?: string;
   deferred?: number;
+  deferredOverdue?: number;
 };
 const CLASSIFICATIONS = [
   "public",
@@ -721,6 +722,11 @@ export default function BrainLane() {
                           {t("brain.revision", { revision: card.revision })} ·{" "}
                           {t("brain.updated", { at: card.updatedAt.slice(0, 10) })}
                         </span>
+                        {(card.deferredOverdue ?? 0) > 0 && (
+                          <span className="brain-card-ready is-late">
+                            {t("brain.card.late", { count: String(card.deferredOverdue ?? 0) })}
+                          </span>
+                        )}
                         {card.lane === "quick" && (card.deferred ?? 0) > 0 && (
                           <span className="brain-card-lane">
                             {t("brain.card.quick", { count: String(card.deferred ?? 0) })}

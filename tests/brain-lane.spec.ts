@@ -52,6 +52,9 @@ const list = {
       readiness: 43,
       met: 3,
       total: 7,
+      lane: "quick",
+      deferred: 3,
+      deferredOverdue: 2,
     },
     {
       projectId: "p-2",
@@ -132,6 +135,8 @@ test.describe("the board", () => {
     // A card carries its readiness, so the board can be scanned without
     // opening every project.
     await expect(capture.getByText("43%")).toBeVisible();
+    // A late sign-off is visible from the board, without opening the project.
+    await expect(capture.getByText("2 late")).toBeVisible();
     await expect(
       page
         .getByRole("region", { name: "Aligned", exact: true })

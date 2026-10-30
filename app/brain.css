@@ -732,3 +732,7 @@
   opacity: 0.65;
   font-size: 0.78rem;
 }
+.brain-card-ready.is-late {
+  color: #8a1c1c;
+  background: #fdecec;
+}

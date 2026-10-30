@@ -672,4 +672,5 @@ export const de: Record<MessageKey, string> = {
   "brain.deferred.overdue": "{count} aufgeschobene Freigabe(n) sind überfällig:",
   "brain.suite.title": "Suite",
   "brain.suite.unset": "Keine URL konfiguriert — ATLAS_ setzen",
+  "brain.card.late": "{count} überfällig",
 };

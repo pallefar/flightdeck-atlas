@@ -420,7 +420,8 @@ export function createOnboardingRoutes(deps: BrainDeps) {
           updatedAt: r.updated_at as string,
           kind: kindOf((r.brain_data as string) ?? "{}"),
           lane: (r.lane as string) ?? "governed",
-          deferred: deferredCountOf((r.brain_data as string) ?? "{}"),
+          deferred: deferredOf((r.brain_data as string) ?? "{}").total,
+          deferredOverdue: deferredOf((r.brain_data as string) ?? "{}").overdue,
           readiness: score.readiness,
           met: score.met,
           total: score.total,
@@ -1345,12 +1346,16 @@ export function createOnboardingRoutes(deps: BrainDeps) {
 
 
 /** How many sign-offs a project's quick lane still owes. */
-function deferredCountOf(data: string) {
+function deferredOf(data: string, now = Date.now()) {
   try {
-    const parsed = JSON.parse(data) as { deferredGates?: unknown[] };
-    return Array.isArray(parsed.deferredGates) ? parsed.deferredGates.length : 0;
+    const parsed = JSON.parse(data) as { deferredGates?: { dueAt?: unknown }[] };
+    const gates = Array.isArray(parsed.deferredGates) ? parsed.deferredGates : [];
+    const late = gates.filter(
+      (gate) => typeof gate.dueAt === "string" && Date.parse(gate.dueAt) < now,
+    ).length;
+    return { total: gates.length, overdue: late };
   } catch {
-    return 0;
+    return { total: 0, overdue: 0 };
   }
 }
 /** What is being onboarded, read from the stored draft. */

@@ -672,6 +672,7 @@ export const en = {
   "brain.deferred.overdue": "{count} deferred sign-off(s) are past due:",
   "brain.suite.title": "Suite",
   "brain.suite.unset": "No URL configured — set ATLAS_",
+  "brain.card.late": "{count} late",
 } as const;
 
 export type MessageKey = keyof typeof en;
