@@ -670,6 +670,8 @@ export const en = {
   "brain.workflow.complexity.simple": "Atlas",
   "brain.workflow.complexity.studio": "Studio",
   "brain.deferred.overdue": "{count} deferred sign-off(s) are past due:",
+  "brain.suite.title": "Suite",
+  "brain.suite.unset": "No URL configured — set ATLAS_",
 } as const;
 
 export type MessageKey = keyof typeof en;

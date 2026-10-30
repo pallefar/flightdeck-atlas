@@ -319,7 +319,10 @@ final class ClientTests: XCTestCase {
     // A template without the placeholder still opens; it just has no id.
     XCTAssertNotNil(resolvedIntegrationURL(template: "https://os.example.test/apps/maps", projectId: "p-1"))
     // The three apps this client adds are the three the owner named.
-    XCTAssertEqual(Integration.allCases.map({ $0.title }), ["TEOA Advantage", "PDF app", "FlightDeck Maps"])
+    XCTAssertEqual(
+      Integration.allCases.map({ $0.title }),
+      ["TEOA Advantage", "PDF app", "FlightDeck Maps", "FlightDeck Studio", "Vision"]
+    )
   }
 
   func testTheScanActionIsNotOfferedWhenNothingWasCaptured() throws {

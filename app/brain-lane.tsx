@@ -78,6 +78,11 @@ export default function BrainLane() {
   // The debt the quick lane left and which part is already late. Read once,
   // when the view is applied, so rendering stays pure.
   const [overdueDeferred, setOverdueDeferred] = useState<{ stage: string; dueAt: string }[]>([]);
+  // The suite, for this project: an app without a URL says so rather than
+  // hiding, because a missing link is something a person can fix.
+  const [suite, setSuite] = useState<
+    { key: string; title: string; purpose: string; url: string | null }[]
+  >([]);
   const applyView = useCallback((next: BrainView) => {
     const now = Date.now();
     setView(next);
@@ -86,6 +91,14 @@ export default function BrainLane() {
         (item) => Date.parse(item.dueAt) < now,
       ),
     );
+    fetch(`/api/suite?project=${encodeURIComponent(next.record.projectId)}`)
+      .then(async (response) =>
+        response.ok
+          ? ((await response.json()) as { apps?: { key: string; title: string; purpose: string; url: string | null }[] })
+          : { apps: [] },
+      )
+      .then((body) => setSuite(body.apps ?? []))
+      .catch(() => setSuite([]));
   }, []);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspaceId, setWorkspaceId] = useState("");
@@ -993,6 +1006,26 @@ export default function BrainLane() {
                   </div>
                   <p className="brain-hint">{t("brain.workflow.attestHint")}</p>
                 </div>
+              </section>
+              <section id="brain-section-suite" aria-label={t("brain.suite.title")}>
+                <h3>{t("brain.suite.title")}</h3>
+                <ul className="brain-suite">
+                  {suite.map((app) => (
+                    <li key={app.key}>
+                      {app.url ? (
+                        <a href={app.url} target="_blank" rel="noreferrer">
+                          {app.title} ↗
+                        </a>
+                      ) : (
+                        <span>{app.title}</span>
+                      )}
+                      <span className="brain-suite-purpose">{app.purpose}</span>
+                      {app.url ? null : (
+                        <span className="brain-hint">{t("brain.suite.unset")}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               </section>
               <section id="brain-section-evidence" aria-label={t("brain.evidence.title")}>
                 <h3>{t("brain.evidence.title")}</h3>

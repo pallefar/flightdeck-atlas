@@ -670,4 +670,6 @@ export const de: Record<MessageKey, string> = {
   "brain.workflow.complexity.simple": "Atlas",
   "brain.workflow.complexity.studio": "Studio",
   "brain.deferred.overdue": "{count} aufgeschobene Freigabe(n) sind überfällig:",
+  "brain.suite.title": "Suite",
+  "brain.suite.unset": "Keine URL konfiguriert — ATLAS_ setzen",
 };

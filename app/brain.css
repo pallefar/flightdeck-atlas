@@ -713,3 +713,22 @@
     color: #ffb4b4;
   }
 }
+.brain-suite {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+.brain-suite li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+}
+.brain-suite-purpose {
+  opacity: 0.65;
+  font-size: 0.78rem;
+}

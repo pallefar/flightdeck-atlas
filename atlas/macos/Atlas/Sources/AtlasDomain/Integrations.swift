@@ -10,6 +10,8 @@ public enum Integration: String, CaseIterable, Identifiable, Sendable {
   case advantage
   case pdf
   case maps
+  case studio
+  case vision
 
   public var id: String { rawValue }
 
@@ -18,6 +20,8 @@ public enum Integration: String, CaseIterable, Identifiable, Sendable {
     case .advantage: return "TEOA Advantage"
     case .pdf: return "PDF app"
     case .maps: return "FlightDeck Maps"
+    case .studio: return "FlightDeck Studio"
+    case .vision: return "Vision"
     }
   }
 
@@ -26,6 +30,8 @@ public enum Integration: String, CaseIterable, Identifiable, Sendable {
     case .advantage: return "chart.bar.doc.horizontal"
     case .pdf: return "doc.richtext"
     case .maps: return "map"
+    case .studio: return "hammer"
+    case .vision: return "scope"
     }
   }
 
@@ -35,6 +41,8 @@ public enum Integration: String, CaseIterable, Identifiable, Sendable {
     case .advantage: return "Value streams, scorecards and improvement work for this project."
     case .pdf: return "The documents this process runs on."
     case .maps: return "The as-is and to-be maps."
+    case .studio: return "Complex workflows, built and owned there."
+    case .vision: return "The objective this outcome serves."
     }
   }
 
