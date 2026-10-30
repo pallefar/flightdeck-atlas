@@ -640,4 +640,8 @@ export const de: Record<MessageKey, string> = {
   "brain.wizard.quickHint": "Beginnt bei der Aufnahme und merkt Karte, Ausrichtung und Wert als aufgeschoben vor — mit Eigentümer und Datum, in der Audit-Kette.",
   "brain.card.quick": "Quick · {count} aufgeschoben",
   "brain.lane.deferred": "Aufgeschobene Freigaben",
+  "brain.wizard.review.deferred": "Aufgeschobene Freigaben",
+  "brain.wizard.review.deferredList": "Karte, Ausrichtung und Wert — fällig in 14 Tagen, in der Audit-Kette festgehalten",
+  "brain.risk.deferred": "Freigaben sind aufgeschoben: die Quick-Lane schuldet sie",
+  "brain.risk.deferred_overdue": "Eine aufgeschobene Freigabe ist überfällig",
 };

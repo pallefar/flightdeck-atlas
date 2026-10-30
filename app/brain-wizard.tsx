@@ -225,6 +225,12 @@ export default function BrainWizard({
                 <dd>{ownerEmail.trim() || t("brain.owner")}</dd>
                 <dt>{t("brain.wizard.review.name")}</dt>
                 <dd>{name.trim()}</dd>
+                {quick && (
+                  <>
+                    <dt>{t("brain.wizard.review.deferred")}</dt>
+                    <dd>{t("brain.wizard.review.deferredList")}</dd>
+                  </>
+                )}
               </dl>
               <p className="brain-hint">{t("brain.wizard.review.note")}</p>
             </section>

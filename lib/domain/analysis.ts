@@ -24,7 +24,8 @@ export type RiskKind =
   | "evidence"
   | "scan"
   | "chain"
-  | "deferred";
+  | "deferred"
+  | "deferred_overdue";
 export type AnalysisAction = {
   /** What to do next as a KIND, so both surfaces translate it themselves. */
   kind: ActionKind;
@@ -154,6 +155,7 @@ export function analyseBrain(view: BrainView): BrainAnalysis {
       ...(facts.review > 0 ? (["scan"] as RiskKind[]) : []),
       ...(view.chain.ok ? [] : (["chain"] as RiskKind[])),
       ...(deferredCount(view) > 0 ? (["deferred"] as RiskKind[]) : []),
+      ...(deferredOverdue(view) > 0 ? (["deferred_overdue"] as RiskKind[]) : []),
     ],
   };
 }
@@ -161,6 +163,11 @@ export function analyseBrain(view: BrainView): BrainAnalysis {
  * deferred sign-off is a governance debt, not a fact the project has. */
 export const deferredCount = (view: BrainView) =>
   Array.isArray(view.data?.deferredGates) ? (view.data.deferredGates as unknown[]).length : 0;
+/** Deferred sign-offs whose date has passed. A due date nobody reads is not a
+ * control, so the panel says when one is late. */
+export const deferredOverdue = (view: BrainView, now = Date.now()) =>
+  (Array.isArray(view.data?.deferredGates) ? (view.data.deferredGates as { dueAt?: string }[]) : [])
+    .filter((item) => typeof item.dueAt === "string" && Date.parse(item.dueAt) < now).length;
 /** The readable form of a requirement code, beside the analysis so a new code
  * shows up here rather than rendering raw. Mirrors requirementText in Swift. */
 export function requirementText(code: string): string {

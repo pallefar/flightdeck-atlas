@@ -109,6 +109,21 @@ test.describe("a project with its facts in place", () => {
     expect(kinds).toEqual(expect.arrayContaining(["scan", "chain", "evidence"]));
   });
 });
+test("a deferred sign-off is a risk, and a late one says so", () => {
+  const soon = new Date(Date.now() + 7 * 86400_000).toISOString();
+  const past = new Date(Date.now() - 86400_000).toISOString();
+  const open = analyseBrain(
+    view({ data: { deferredGates: [{ stage: "as-is", owner: "me@example.test", dueAt: soon }] } }),
+  );
+  expect(open.risks).toContain("deferred");
+  expect(open.risks).not.toContain("deferred_overdue");
+  const late = analyseBrain(
+    view({ data: { deferredGates: [{ stage: "as-is", owner: "me@example.test", dueAt: past }] } }),
+  );
+  expect(late.risks).toContain("deferred_overdue");
+  // Neither moves the score: a debt is not a fact the project has.
+  expect(late.met).toBe(open.met);
+});
 test("a requirement code has a readable label, and an unknown one is itself", () => {
   expect(requirementText("as-is-map")).toBe("Link the as-is map");
   expect(requirementText("a-new-code")).toBe("a-new-code");

@@ -640,6 +640,10 @@ export const en = {
   "brain.wizard.quickHint": "Starts at capture and records the map, alignment and value sign-offs as deferred, with an owner and a date — the chain says so.",
   "brain.card.quick": "quick · {count} deferred",
   "brain.lane.deferred": "Deferred sign-offs",
+  "brain.wizard.review.deferred": "Sign-offs deferred",
+  "brain.wizard.review.deferredList": "Map, alignment and value — due in 14 days, written into the audit chain",
+  "brain.risk.deferred": "Sign-offs are deferred: the quick lane owes them",
+  "brain.risk.deferred_overdue": "A deferred sign-off is past its date",
 } as const;
 
 export type MessageKey = keyof typeof en;

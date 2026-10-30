@@ -76,10 +76,15 @@ test("the whole flow creates the project and opens its intake", async ({ page })
   await expect(next).toBeDisabled();
   await dialog.getByRole("textbox", { name: "Name" }).fill("Purchase order exception handling");
   await dialog.getByRole("textbox", { name: "Problem" }).fill("Exceptions arrive by email and are retyped.");
+  // The fast start is offered with the details, where its consequence is stated.
+  await dialog.getByRole("checkbox", { name: "Fast start (quick lane)" }).check();
   await expect(next).toBeEnabled();
   await next.click();
   // Review names every choice before anything is created.
   await expect(dialog.getByText("A workflow")).toBeVisible();
+  await expect(
+    dialog.getByText("Map, alignment and value — due in 14 days, written into the audit chain"),
+  ).toBeVisible();
   await expect(dialog.getByText("General")).toBeVisible();
   await expect(dialog.getByText("Purchase order exception handling")).toBeVisible();
   await dialog.getByRole("button", { name: "Create the workflow" }).click();

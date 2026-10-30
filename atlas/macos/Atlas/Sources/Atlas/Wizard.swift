@@ -182,6 +182,7 @@ struct WizardFlow: View {
         row("Owner", model.ownerEmail.isEmpty ? "you" : model.ownerEmail)
         row("Name", name.isEmpty ? "—" : name)
         if !problem.isEmpty { row("Problem", problem) }
+        if quick { row("Deferred", "Map, alignment and value — due in 14 days") }
       }
       .padding(16)
       .frame(maxWidth: 560, alignment: .leading)
