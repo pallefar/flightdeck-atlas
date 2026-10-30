@@ -379,9 +379,9 @@ struct RootView: View {
     } detail: {
       VStack(spacing: 0) {
         if let error = model.error {
-          Banner(text: error, tone: .bad)
+          Banner(text: error, tone: .bad) { model.error = nil }
         } else if let notice = model.notice {
-          Banner(text: notice, tone: .good)
+          Banner(text: notice, tone: .good) { model.notice = nil }
         }
         switch tab {
         case .overview:
@@ -414,18 +414,26 @@ struct RootView: View {
   }
 }
 
+/// A one-line message that can be dismissed: an old error must not sit at the
+/// top of the window until the next action happens to clear it.
 struct Banner: View {
   enum Tone { case good, bad }
   let text: String
   let tone: Tone
+  let dismiss: () -> Void
   var body: some View {
-    Text(text)
-      .font(.callout)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.horizontal, 16)
-      .padding(.vertical, 8)
-      .background(tone == .bad ? Color.red.opacity(0.12) : Color.green.opacity(0.12))
-      .foregroundStyle(tone == .bad ? Color.red : Color.green)
+    HStack(alignment: .firstTextBaseline) {
+      Text(text).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
+      Button(action: dismiss) {
+        Image(systemName: "xmark").font(.caption2)
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("Dismiss")
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 8)
+    .background(tone == .bad ? Color.red.opacity(0.12) : Color.green.opacity(0.12))
+    .foregroundStyle(tone == .bad ? Color.red : Color.green)
   }
 }
 
@@ -656,31 +664,37 @@ struct ProjectBrainView: View {
   private let kinds = ["document", "recording", "voice", "interview", "connector", "capture"]
 
   var body: some View {
-    ScrollView {
-      if let snapshot = model.selected {
-        VStack(alignment: .leading, spacing: 18) {
-          header(snapshot)
-          requirements(snapshot)
-          analysisSection(snapshot)
-          intakeForm(snapshot)
-          reuseForm
-          evidenceSection(snapshot)
-          valueSection(snapshot)
-          rolesSection(snapshot)
-          appsSection(snapshot)
-          gateSection(snapshot)
-          timeline(snapshot)
-        }
-        .padding(24)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .task(id: snapshot.record.revision) {
-          if seededRevision != snapshot.record.revision {
-            draft = snapshot.data?.draft ?? IntakeDraft()
-            seededRevision = snapshot.record.revision
+    // A ScrollViewReader, so the analysis's next actions can take you to the
+    // section that does them instead of leaving you to hunt for it.
+    ScrollViewReader { proxy in
+      ScrollView {
+        if let snapshot = model.selected {
+          VStack(alignment: .leading, spacing: 18) {
+            header(snapshot)
+            requirements(snapshot)
+            analysisSection(snapshot) { anchor in
+              withAnimation(.snappy) { proxy.scrollTo(anchor, anchor: .top) }
+            }
+            intakeForm(snapshot).id("intake")
+            reuseForm.id("reuse")
+            evidenceSection(snapshot).id("evidence")
+            valueSection(snapshot).id("value")
+            rolesSection(snapshot).id("roles")
+            appsSection(snapshot).id("apps")
+            gateSection(snapshot).id("gate")
+            timeline(snapshot).id("timeline")
           }
+          .padding(24)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .task(id: snapshot.record.revision) {
+            if seededRevision != snapshot.record.revision {
+              draft = snapshot.data?.draft ?? IntakeDraft()
+              seededRevision = snapshot.record.revision
+            }
+          }
+        } else {
+          Text("No project selected.").padding(24)
         }
-      } else {
-        Text("No project selected.").padding(24)
       }
     }
     .navigationTitle(model.selected?.record.name ?? "Project")
@@ -731,7 +745,10 @@ struct ProjectBrainView: View {
   /// What the app can say without inventing anything: a checklist score, the
   /// counts behind it, the risks those counts imply, and the next actions the
   /// server's missing requirements already name.
-  private func analysisSection(_ snapshot: AtlasSnapshot) -> some View {
+  private func analysisSection(
+    _ snapshot: AtlasSnapshot,
+    onJump: @escaping (String) -> Void
+  ) -> some View {
     let analysis = analyse(snapshot)
     return section("Analysis") {
       HStack(alignment: .firstTextBaseline) {
@@ -763,7 +780,17 @@ struct ProjectBrainView: View {
         VStack(alignment: .leading, spacing: 3) {
           Text("Next actions").font(.caption.bold()).foregroundStyle(.secondary)
           ForEach(analysis.nextActions.prefix(8), id: \.self) { action in
-            Text("• \(action)").font(.callout)
+            Button {
+              onJump(action.anchor.rawValue)
+            } label: {
+              HStack(spacing: 5) {
+                Image(systemName: "arrow.turn.down.right").font(.caption2)
+                Text(action.label).font(.callout).multilineTextAlignment(.leading)
+              }
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.accentColor)
+            .accessibilityHint("Takes you to the section that does this")
           }
         }
       }

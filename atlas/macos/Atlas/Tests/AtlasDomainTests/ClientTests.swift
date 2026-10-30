@@ -248,7 +248,7 @@ final class ClientTests: XCTestCase {
     XCTAssertLessThan(bare.readiness, 50)
     XCTAssertEqual(bare.rolesFilled, 1)
     XCTAssertEqual(bare.evidenceAccepted, 0)
-    XCTAssertTrue(bare.nextActions.contains("State the problem"))
+    XCTAssertTrue(bare.nextActions.contains { $0.label == "State the problem" && $0.anchor == .intake })
     XCTAssertTrue(bare.risks.contains { $0.contains("process owner") }, "\(bare.risks)")
 
     let ready = try JSONDecoder().decode(AtlasSnapshot.self, from: Data(snapshotJSON(
@@ -321,7 +321,7 @@ final class ClientTests: XCTestCase {
       roles: #"{"owner":"me@example.test","processOwner":null,"teoaApprover":null,"visionApprover":null}"#,
       reuse: "null", values: "", chainOK: true).utf8))
     let analysis = analyse(snapshot)
-    XCTAssertFalse(analysis.nextActions.contains("Review the flagged evidence, or redact it"))
-    XCTAssertTrue(analysis.nextActions.contains("Attach evidence and have it accepted"))
+    XCTAssertFalse(analysis.nextActions.contains { $0.label == "Review the flagged evidence, or redact it" })
+    XCTAssertTrue(analysis.nextActions.contains { $0.label == "Attach evidence and have it accepted" && $0.anchor == .evidence })
   }
 }

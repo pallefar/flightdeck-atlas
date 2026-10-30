@@ -11,6 +11,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "@/lib/i18n/react";
 import BrainWizard from "./brain-wizard";
+import BrainAnalysisPanel, { type SectionAnchor } from "./brain-analysis";
+import type { BrainView } from "@/lib/domain/brain-view";
 import { STAGES, RETIRED } from "@/lib/domain/stages";
 type Workspace = { id: string; name: string; slug: string; role?: string };
 type ListRow = {
@@ -20,55 +22,6 @@ type ListRow = {
   status: string;
   revision: number;
   updatedAt: string;
-};
-type Evidence = {
-  id: string;
-  kind: string;
-  source: string;
-  classification: string;
-  scanState: string;
-  status: string;
-  bytes: number;
-};
-type ValueRow = {
-  id: string;
-  basis: string;
-  period: string;
-  figures: { hours?: number; cost?: number };
-  sourceRef: string | null;
-  confidence: string;
-};
-type Gate = { stage: string; decision: string; at: string };
-type BrainView = {
-  workspace: { id: string; name: string } | null;
-  assignments: {
-    owner: string | null;
-    processOwner: string | null;
-    teoaApprover: string | null;
-    visionApprover: string | null;
-  };
-  access: { canEdit: boolean; canAssignRoles: boolean; canView: boolean };
-  record: {
-    projectId: string;
-    name: string;
-    stage: string;
-    revision: number;
-    entryType: "project" | "process";
-  };
-  status: string;
-  data: Record<string, string | boolean | null>;
-  stage: {
-    current: string;
-    next: string | null;
-    missing: string[];
-    missingForNext: string[];
-  };
-  chain: { ok: boolean; length?: number; brokenAt?: number };
-  evidence: Evidence[];
-  values: ValueRow[];
-  reuse: { decision: string; reason: string; matches: unknown[] } | null;
-  gates: Gate[];
-  canGate: Record<string, boolean>;
 };
 const CLASSIFICATIONS = [
   "public",
@@ -82,16 +35,29 @@ const CLASSIFICATIONS = [
 const KINDS = ["recording", "voice", "document", "connector", "interview", "capture"] as const;
 /** Only the editable keys, and only as form values: a null becomes "", a
  * boolean stays a boolean. */
-function initialFields(data: Record<string, string | boolean | null> | undefined) {
+function initialFields(
+  data: Record<string, unknown> | undefined,
+): Record<string, string | boolean> {
   if (!data) return {};
   return Object.fromEntries(
-    Object.entries(data).filter(([, value]) => value !== null),
+    Object.entries(data).filter(
+      ([, value]) => typeof value === "string" || typeof value === "boolean",
+    ),
   ) as Record<string, string | boolean>;
 }
 const hex = (buffer: ArrayBuffer) =>
   Array.from(new Uint8Array(buffer))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+/** Jump to the section that does the next action, and mark it so the eye
+ * follows: the analysis says what to do, this takes you there. */
+function focusSection(anchor: SectionAnchor) {
+  const target = document.getElementById(`brain-section-${anchor}`);
+  if (!target) return;
+  target.scrollIntoView({ behavior: "smooth", block: "start" });
+  target.classList.add("is-focus");
+  window.setTimeout(() => target.classList.remove("is-focus"), 1400);
+}
 export default function BrainLane() {
   const t = useT();
   const [rows, setRows] = useState<ListRow[] | null>(null);
@@ -526,6 +492,7 @@ export default function BrainLane() {
       )}
       <section className="brain-start" aria-label={t("brain.start.title")}>
         <h2>{t("brain.start.title")}</h2>
+        <p className="brain-hint">{t("brain.start.hint")}</p>
         {candidates.length === 0 ? (
           <p className="brain-hint">{t("brain.start.none")}</p>
         ) : (
@@ -605,76 +572,6 @@ export default function BrainLane() {
             <p aria-live="polite">{t("brain.loading")}</p>
           ) : (
             <>
-              <p className="brain-meta">
-                {view.workspace ? `${view.workspace.name} · ` : ""}
-                {t(`brain.entry.${view.record.entryType === "process" ? "process" : "project"}` as never)} ·{" "}
-                {stageLabel(view.stage.current)} ·{" "}
-                {t("brain.revision", { revision: view.record.revision })}
-              </p>
-              <p
-                className={view.chain.ok ? "brain-chain ok" : "brain-chain broken"}
-                role="status"
-              >
-                {view.chain.ok
-                  ? t("brain.chain.ok", { length: view.chain.length ?? 0 })
-                  : t("brain.chain.broken", { seq: view.chain.brokenAt ?? 0 })}
-              </p>
-              <section aria-label={t("brain.roles.title")}>
-                <h3>{t("brain.roles.title")}</h3>
-                <ul className="brain-roles">
-                  {(
-                    [
-                      ["owner", view.assignments.owner],
-                      ["process_owner", view.assignments.processOwner],
-                      ["teoa_approver", view.assignments.teoaApprover],
-                      ["vision_approver", view.assignments.visionApprover],
-                    ] as const
-                  )
-                    .filter(([, email]) => email)
-                    .map(([role, email]) => (
-                      <li key={role}>
-                        <strong>{t(`brain.roles.${role}` as never)}</strong> {email}
-                      </li>
-                    ))}
-                </ul>
-                {view.access.canAssignRoles ? (
-                  <div className="brain-row">
-                    <label>
-                      {t("brain.roles.title")}
-                      <select
-                        value={roleDraft.role}
-                        onChange={(event) =>
-                          setRoleDraft((draft) => ({ ...draft, role: event.target.value }))
-                        }
-                      >
-                        <option value="owner">{t("brain.roles.owner")}</option>
-                        <option value="process_owner">{t("brain.roles.process_owner")}</option>
-                        <option value="teoa_approver">{t("brain.roles.teoa_approver")}</option>
-                        <option value="vision_approver">{t("brain.roles.vision_approver")}</option>
-                      </select>
-                    </label>
-                    <label>
-                      {t("brain.roles.assign")}
-                      <input
-                        value={roleDraft.email}
-                        onChange={(event) =>
-                          setRoleDraft((draft) => ({ ...draft, email: event.target.value }))
-                        }
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className="brain-secondary"
-                      disabled={busy}
-                      onClick={() => void assignRole()}
-                    >
-                      {t("brain.roles.assign")}
-                    </button>
-                  </div>
-                ) : (
-                  <p className="brain-hint">{t("brain.roles.onlyAdmin")}</p>
-                )}
-              </section>
               <section aria-label={t("brain.requirements.title")}>
                 <h3>{t("brain.requirements.title")}</h3>
                 {view.stage.missing.length === 0 ? (
@@ -686,45 +583,10 @@ export default function BrainLane() {
                     ))}
                   </ul>
                 )}
+                <p className="brain-hint">{t("brain.requirements.note")}</p>
               </section>
-              <section aria-label={t("brain.gate.title")}>
-                <h3>{t("brain.gate.title")}</h3>
-                <label>
-                  {t("brain.gate.reason")}
-                  <textarea
-                    value={gateReason}
-                    onChange={(event) => setGateReason(event.target.value)}
-                    rows={2}
-                  />
-                </label>
-                <div className="brain-row">
-                  <button
-                    type="button"
-                    className="brain-primary"
-                    disabled={busy || !view.canGate[view.stage.current]}
-                    onClick={() => void decide("pass")}
-                  >
-                    {t("brain.gate.pass")}
-                  </button>
-                  <button
-                    type="button"
-                    className="brain-secondary"
-                    disabled={busy || !view.canGate[view.stage.current]}
-                    onClick={() => void decide("reject")}
-                  >
-                    {t("brain.gate.reject")}
-                  </button>
-                </div>
-                {!view.canGate[view.stage.current] && (
-                  <p className="brain-hint">{t("brain.gate.noRole")}</p>
-                )}
-                {view.stage.next && (
-                  <p className="brain-hint">
-                    {t("brain.next")}: {stageLabel(view.stage.next)}
-                  </p>
-                )}
-              </section>
-              <section aria-label={t("brain.intake.title")}>
+              <BrainAnalysisPanel view={view} t={t} onGo={focusSection} />
+              <section id="brain-section-intake" aria-label={t("brain.intake.title")}>
                 <h3>{t("brain.intake.title")}</h3>
                 <label>
                   {t("brain.field.classification")}
@@ -779,7 +641,7 @@ export default function BrainLane() {
                   {busy ? t("brain.saving") : t("brain.save")}
                 </button>
               </section>
-              <section aria-label={t("brain.reuse.title")}>
+              <section id="brain-section-reuse" aria-label={t("brain.reuse.title")}>
                 <h3>{t("brain.reuse.title")}</h3>
                 {view.reuse ? (
                   <p>
@@ -819,7 +681,7 @@ export default function BrainLane() {
                   {t("brain.reuse.record")}
                 </button>
               </section>
-              <section aria-label={t("brain.evidence.title")}>
+              <section id="brain-section-evidence" aria-label={t("brain.evidence.title")}>
                 <h3>{t("brain.evidence.title")}</h3>
                 {view.evidence.length === 0 ? (
                   <p className="brain-hint">{t("brain.evidence.none")}</p>
@@ -884,7 +746,7 @@ export default function BrainLane() {
                   {t("brain.evidence.add")}
                 </button>
               </section>
-              <section aria-label={t("brain.value.title")}>
+              <section id="brain-section-value" aria-label={t("brain.value.title")}>
                 <h3>{t("brain.value.title")}</h3>
                 {view.values.length === 0 ? (
                   <p className="brain-hint">{t("brain.value.none")}</p>
@@ -968,6 +830,99 @@ export default function BrainLane() {
                   {t("brain.value.add")}
                 </button>
               </section>
+              <section id="brain-section-roles" aria-label={t("brain.roles.title")}>
+                <h3>{t("brain.roles.title")}</h3>
+                <ul className="brain-roles">
+                  {(
+                    [
+                      ["owner", view.assignments.owner],
+                      ["process_owner", view.assignments.processOwner],
+                      ["teoa_approver", view.assignments.teoaApprover],
+                      ["vision_approver", view.assignments.visionApprover],
+                    ] as const
+                  )
+                    .filter(([, email]) => email)
+                    .map(([role, email]) => (
+                      <li key={role}>
+                        <strong>{t(`brain.roles.${role}` as never)}</strong> {email}
+                      </li>
+                    ))}
+                </ul>
+                {view.access.canAssignRoles ? (
+                  <div className="brain-row">
+                    <label>
+                      {t("brain.roles.title")}
+                      <select
+                        value={roleDraft.role}
+                        onChange={(event) =>
+                          setRoleDraft((draft) => ({ ...draft, role: event.target.value }))
+                        }
+                      >
+                        <option value="owner">{t("brain.roles.owner")}</option>
+                        <option value="process_owner">{t("brain.roles.process_owner")}</option>
+                        <option value="teoa_approver">{t("brain.roles.teoa_approver")}</option>
+                        <option value="vision_approver">{t("brain.roles.vision_approver")}</option>
+                      </select>
+                    </label>
+                    <label>
+                      {t("brain.roles.assign")}
+                      <input
+                        value={roleDraft.email}
+                        onChange={(event) =>
+                          setRoleDraft((draft) => ({ ...draft, email: event.target.value }))
+                        }
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="brain-secondary"
+                      disabled={busy}
+                      onClick={() => void assignRole()}
+                    >
+                      {t("brain.roles.assign")}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="brain-hint">{t("brain.roles.onlyAdmin")}</p>
+                )}
+              </section>
+              <section id="brain-section-gate" aria-label={t("brain.gate.title")}>
+                <h3>{t("brain.gate.title")}</h3>
+                <label>
+                  {t("brain.gate.reason")}
+                  <textarea
+                    value={gateReason}
+                    onChange={(event) => setGateReason(event.target.value)}
+                    rows={2}
+                  />
+                </label>
+                <div className="brain-row">
+                  <button
+                    type="button"
+                    className="brain-primary"
+                    disabled={busy || !view.canGate[view.stage.current]}
+                    onClick={() => void decide("pass")}
+                  >
+                    {t("brain.gate.pass")}
+                  </button>
+                  <button
+                    type="button"
+                    className="brain-secondary"
+                    disabled={busy || !view.canGate[view.stage.current]}
+                    onClick={() => void decide("reject")}
+                  >
+                    {t("brain.gate.reject")}
+                  </button>
+                </div>
+                {!view.canGate[view.stage.current] && (
+                  <p className="brain-hint">{t("brain.gate.noRole")}</p>
+                )}
+                {view.stage.next && (
+                  <p className="brain-hint">
+                    {t("brain.next")}: {stageLabel(view.stage.next)}
+                  </p>
+                )}
+              </section>
               <section aria-label={t("brain.timeline.title")}>
                 <h3>{t("brain.timeline.title")}</h3>
                 {view.gates.length === 0 ? (
@@ -984,6 +939,20 @@ export default function BrainLane() {
                   </ol>
                 )}
               </section>
+              <p className="brain-meta">
+                {view.workspace ? `${view.workspace.name} · ` : ""}
+                {t(`brain.entry.${view.record.entryType === "process" ? "process" : "project"}` as never)} ·{" "}
+                {stageLabel(view.stage.current)} ·{" "}
+                {t("brain.revision", { revision: view.record.revision })}
+              </p>
+              <p
+                className={view.chain.ok ? "brain-chain ok" : "brain-chain broken"}
+                role="status"
+              >
+                {view.chain.ok
+                  ? t("brain.chain.ok", { length: view.chain.length ?? 0 })
+                  : t("brain.chain.broken", { seq: view.chain.brokenAt ?? 0 })}
+              </p>
             </>
           )}
         </aside>

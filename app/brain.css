@@ -499,3 +499,114 @@
     max-height: 92vh;
   }
 }
+/* Readiness: a checklist score, its counts, its risks and its next actions. */
+.brain-analysis-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 600;
+}
+.brain-analysis-head strong {
+  font-size: 1.35rem;
+}
+.brain-meter {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border, #e3e3e8);
+  overflow: hidden;
+}
+.brain-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--primary, #e98300);
+  transition: width 0.25s ease;
+}
+.brain-analysis-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px 14px;
+  margin: 0;
+}
+.brain-analysis-facts div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.brain-analysis-facts dt {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
+}
+.brain-analysis-facts dd {
+  margin: 0;
+  font-size: 0.85rem;
+}
+.brain-risks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.brain-risks li {
+  font-size: 0.82rem;
+  color: #a2610b;
+  padding-left: 16px;
+  position: relative;
+}
+.brain-risks li::before {
+  content: "!";
+  position: absolute;
+  left: 2px;
+  font-weight: 700;
+}
+.brain-subhead {
+  margin: 4px 0 0;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.65;
+}
+.brain-actions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.brain-actions button {
+  border: 0;
+  background: none;
+  padding: 3px 0;
+  text-align: left;
+  font: inherit;
+  font-size: 0.85rem;
+  color: color-mix(in srgb, var(--primary, #e98300) 80%, #333);
+  cursor: pointer;
+  display: flex;
+  gap: 6px;
+}
+.brain-actions button:hover {
+  text-decoration: underline;
+}
+.brain-actions button:focus-visible {
+  outline: 2px solid var(--primary, #e98300);
+  outline-offset: 2px;
+}
+/* The section an action took you to, marked briefly so the eye follows. */
+.brain-detail section.is-focus {
+  border-radius: 10px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary, #e98300) 60%, transparent);
+  transition: box-shadow 0.2s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .brain-meter > span,
+  .brain-detail section.is-focus {
+    transition: none;
+  }
+}

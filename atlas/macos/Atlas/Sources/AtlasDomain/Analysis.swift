@@ -8,6 +8,15 @@ import Foundation
 /// how many of the onboarding facts are in place — and it is labelled that way
 /// everywhere it is shown. It is not a judgement of the project's worth, and
 /// it never claims a fact the project does not have.
+/// Where an action is carried out, so the panel can take you there.
+public enum AnalysisAnchor: String, Equatable, Sendable {
+  case intake, reuse, evidence, value, roles, gate
+}
+/// One next action: what to do, and which section does it.
+public struct AnalysisAction: Hashable, Sendable {
+  public let label: String
+  public let anchor: AnalysisAnchor
+}
 public struct BrainAnalysis: Equatable, Sendable {
   public struct Requirement: Equatable, Sendable {
     public let code: String
@@ -26,16 +35,15 @@ public struct BrainAnalysis: Equatable, Sendable {
   public let hasReuseDecision: Bool
   public let chainOk: Bool
   public let chainLength: Int
-  public let nextActions: [String]
+  public let nextActions: [AnalysisAction]
   public let risks: [String]
 }
 
 /// The checklist. Each item is a fact the project may or may not have.
 private struct Item {
-  let label: String
   let met: Bool
   let risk: String?
-  let action: String
+  let action: AnalysisAction?
 }
 
 public func analyse(_ snapshot: AtlasSnapshot) -> BrainAnalysis {
@@ -52,48 +60,50 @@ public func analyse(_ snapshot: AtlasSnapshot) -> BrainAnalysis {
 
   var items: [Item] = [
     Item(
-      label: "Owner assigned", met: rolesFilled > 0, risk: nil,
-      action: "Assign an owner"
+      met: rolesFilled > 0, risk: nil,
+      action: AnalysisAction(label: "Assign an owner", anchor: .roles)
     ),
     Item(
-      label: "Process owner assigned", met: (assignments?.processOwner ?? "").isEmpty == false,
+      met: (assignments?.processOwner ?? "").isEmpty == false,
       risk: "No process owner: the as-is, value and go-live gates have nobody to pass them",
-      action: "Assign a process owner"
+      action: AnalysisAction(label: "Assign a process owner", anchor: .roles)
     ),
     Item(
-      label: "Both alignment approvers named",
       met: (assignments?.teoaApprover ?? "").isEmpty == false
         && (assignments?.visionApprover ?? "").isEmpty == false,
       risk: "Stage 4 cannot pass until both approvers are assigned",
-      action: "Assign the TEOA and Vision approvers"
+      action: AnalysisAction(label: "Assign the TEOA and Vision approvers", anchor: .roles)
     ),
     Item(
-      label: "At least one accepted evidence item", met: accepted > 0,
+      met: accepted > 0,
       risk: accepted == 0 ? "Capture has no evidence: the process is described, not shown" : nil,
-      action: "Attach evidence and have it accepted"
+      action: AnalysisAction(label: "Attach evidence and have it accepted", anchor: .evidence)
     ),
     Item(
-      label: "Governance scan clear", met: review == 0 && hasAnyEvidence,
+      met: review == 0 && hasAnyEvidence,
       risk: review > 0 ? "\(review) evidence item(s) need a review before AI drafting" : nil,
       // With nothing captured there is nothing to review, so the scan action
       // would be noise next to "attach evidence".
-      action: review > 0
-        ? "Review the flagged evidence, or redact it"
-        : "Attach evidence, then clear the scan"
+      action: AnalysisAction(
+        label: review > 0
+          ? "Review the flagged evidence, or redact it"
+          : "Attach evidence, then clear the scan",
+        anchor: .evidence
+      )
     ),
-    Item(label: "Reuse decision recorded", met: reuse, risk: nil,
-         action: "Record the reuse decision (reuse / extend / new)"),
-    Item(label: "Value baseline recorded", met: baseline, risk: nil,
-         action: "Record the value baseline before build"),
-    Item(label: "Audit chain verified", met: snapshot.chain.ok, risk: "The audit chain is broken",
-         action: "Investigate the broken audit event"),
+    Item(met: reuse, risk: nil,
+         action: AnalysisAction(label: "Record the reuse decision (reuse / extend / new)", anchor: .reuse)),
+    Item(met: baseline, risk: nil,
+         action: AnalysisAction(label: "Record the value baseline before build", anchor: .value)),
+    Item(met: snapshot.chain.ok, risk: "The audit chain is broken",
+         action: AnalysisAction(label: "Investigate the broken audit event", anchor: .gate)),
   ]
   // The current stage's own facts come from the server's requirement codes.
   for code in snapshot.stage.missing {
     items.append(
       Item(
-        label: "Stage fact: \(code)", met: false, risk: nil,
-        action: requirementLabel(code)
+        met: false, risk: nil,
+        action: AnalysisAction(label: requirementLabel(code), anchor: .intake)
       )
     )
   }
@@ -102,8 +112,8 @@ public func analyse(_ snapshot: AtlasSnapshot) -> BrainAnalysis {
   // Actions keep the checklist order, so the list reads like a plan.
   let actions = items
     .filter { !$0.met }
-    .map(\.action)
-    .filter { !(!hasAnyEvidence && $0 == "Attach evidence, then clear the scan") }
+    .compactMap(\.action)
+    .filter { !(!hasAnyEvidence && $0.label == "Attach evidence, then clear the scan") }
   let risks = items.compactMap { $0.met ? nil : $0.risk }
   return BrainAnalysis(
     readiness: total == 0 ? 0 : Int((Double(met) / Double(total) * 100).rounded()),

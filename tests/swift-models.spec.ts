@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 // The native client is generated from the same schemas the web suite parses.
 // This spec makes it impossible to change a schema and leave the committed
@@ -22,6 +22,23 @@ test("the native package, its tests and its build script exist", () => {
     "atlas/macos/Atlas/Tests/AtlasDomainTests/ContractTests.swift",
   ])
     expect(existsSync(path), path).toBe(true);
+});
+test("every analysis anchor has a section to jump to", () => {
+  // The next actions call scrollTo(anchor). An anchor without a matching
+  // `.id(...)` fails silently at runtime, so the wiring is checked here.
+  const analysis = readFileSync(
+    "atlas/macos/Atlas/Sources/AtlasDomain/Analysis.swift",
+    "utf8",
+  );
+  const declaration = analysis.match(/public enum AnalysisAnchor[^{]*\{([\s\S]*?)\}/);
+  const anchors = (declaration?.[1] ?? "")
+    .split(/[\n,]/)
+    .map((line) => line.replace(/case/g, "").trim())
+    .filter(Boolean);
+  expect(anchors.sort()).toEqual(["evidence", "gate", "intake", "reuse", "roles", "value"]);
+  const view = readFileSync("atlas/macos/Atlas/Sources/Atlas/AtlasApp.swift", "utf8");
+  for (const anchor of anchors)
+    expect(view, anchor).toContain(`.id("${anchor}")`);
 });
 test("the Swift tests decode the same fixtures as the web suite", () => {
   const source = execFileSync(

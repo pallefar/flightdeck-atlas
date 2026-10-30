@@ -105,12 +105,23 @@ test.describe("the board", () => {
     await expect(detail.getByRole("status").first()).toContainText(
       "Audit chain verified (4 events)",
     );
-    // The server said the scan is still missing, so the lane lists it and
-    // disables the gate it could not pass.
-    await expect(detail.getByText("Clear the governance scan")).toBeVisible();
+    // The server said the scan is still missing: the requirements list it, the
+    // analysis offers it as a next action, and the gate it cannot pass is off.
+    const requirements = detail.getByRole("region", { name: "Still needed for this stage" });
+    await expect(requirements.getByText("Clear the governance scan")).toBeVisible();
+    await expect(
+      detail.getByRole("button", { name: "Clear the governance scan" }),
+    ).toBeVisible();
+    // The analysis panel scores the facts and takes you to the section.
+    const analysis = detail.getByRole("region", { name: "Analysis" });
+    await expect(
+      analysis.getByRole("progressbar", { name: "Readiness" }),
+    ).toHaveAttribute("aria-valuenow", /\d+/);
+    await analysis.getByRole("button", { name: "Attach evidence and have it accepted" }).click();
+    await expect(page.locator("#brain-section-evidence")).toHaveClass(/is-focus/);
     // The assignment step is visible: who owns it, and a control to assign more.
     await expect(detail.getByText("owner@example.test")).toBeVisible();
-    await expect(detail.getByRole("button", { name: "Assign" })).toBeVisible();
+    await expect(detail.getByRole("button", { name: "Assign", exact: true })).toBeVisible();
     await expect(
       detail.getByRole("button", { name: "Pass this stage" }),
     ).toBeDisabled();
