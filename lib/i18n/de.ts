@@ -636,4 +636,8 @@ export const de: Record<MessageKey, string> = {
   "brain.field.asIsSignedOff": "Ist-Karte freigegeben",
   "brain.value.chart": "Stunden je Zeitraum",
   "brain.card.readiness": "{met} von {total} Onboarding-Fakten liegen vor",
+  "brain.wizard.quick": "Schnellstart (Quick-Lane)",
+  "brain.wizard.quickHint": "Beginnt bei der Aufnahme und merkt Karte, Ausrichtung und Wert als aufgeschoben vor — mit Eigentümer und Datum, in der Audit-Kette.",
+  "brain.card.quick": "Quick · {count} aufgeschoben",
+  "brain.lane.deferred": "Aufgeschobene Freigaben",
 };

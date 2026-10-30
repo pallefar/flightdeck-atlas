@@ -34,6 +34,10 @@ export type ChainDb = {
 export const GENESIS = "0".repeat(64);
 export type GateEventInput = {
   projectId: string;
+  /** "governed" or "quick"; the chain records which path the project took. */
+  lane?: "governed" | "quick";
+  /** The sign-offs this event leaves deferred (stage names). */
+  deferred?: string[];
   stage: StageOrRetired;
   fromStage: StageOrRetired | null;
   toStage: StageOrRetired | null;
@@ -57,6 +61,8 @@ export type StoredGateEvent = {
   actor: string;
   role: string;
   decision: string;
+  lane: string;
+  deferred: string;
   reason: string;
   evidenceRef: string | null;
   materialDigest: string | null;
@@ -68,6 +74,8 @@ export type StoredGateEvent = {
  * implementation) can recompute a row without guessing field order. */
 export function hashPayload(event: {
   projectId: string;
+  lane: string;
+  deferred: string;
   seq: number;
   stage: string;
   fromStage: string | null;
@@ -120,6 +128,8 @@ export async function appendGateEvent(
       actor: input.actor,
       role: input.role,
       decision: input.decision,
+      lane: input.lane ?? "governed",
+      deferred: JSON.stringify(input.deferred ?? []),
       reason: input.reason ?? "",
       evidenceRef: input.evidenceRef ?? null,
       materialDigest: input.materialDigest ?? null,
@@ -137,6 +147,8 @@ export async function appendGateEvent(
       actor: input.actor,
       role: input.role,
       decision: input.decision,
+      lane: input.lane ?? "governed",
+      deferred: JSON.stringify(input.deferred ?? []),
       reason: input.reason ?? "",
       evidenceRef: input.evidenceRef ?? null,
       materialDigest: input.materialDigest ?? null,
@@ -149,9 +161,9 @@ export async function appendGateEvent(
         .prepare(
           `INSERT INTO atlas_gate_events
              (id, project_id, seq, stage, from_stage, to_stage, actor, role,
-              decision, reason, evidence_ref, material_digest, prev_hash, hash,
-              created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+              decision, lane, deferred, reason, evidence_ref, material_digest,
+              prev_hash, hash, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         )
         .bind(
           event.id,
@@ -163,6 +175,8 @@ export async function appendGateEvent(
           event.actor,
           event.role,
           event.decision,
+          event.lane,
+          event.deferred,
           event.reason,
           event.evidenceRef,
           event.materialDigest,
@@ -214,6 +228,8 @@ export async function verifyChain(
       actor: row.actor as string,
       role: row.role as string,
       decision: row.decision as string,
+      lane: (row.lane as string) ?? "governed",
+      deferred: (row.deferred as string) ?? "[]",
       reason: row.reason as string,
       evidenceRef: (row.evidence_ref as string | null) ?? null,
       materialDigest: (row.material_digest as string | null) ?? null,
@@ -251,6 +267,8 @@ export async function gateEventsFor(db: ChainDb, projectId: string) {
       actor: row.actor as string,
       role: row.role as string,
       decision: row.decision as string,
+      lane: (row.lane as string) ?? "governed",
+      deferred: (row.deferred as string) ?? "[]",
       reason: row.reason as string,
       evidenceRef: (row.evidence_ref as string | null) ?? null,
       materialDigest: (row.material_digest as string | null) ?? null,

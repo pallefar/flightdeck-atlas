@@ -13,6 +13,7 @@ export type WizardCreate = {
   kind: "project" | "process" | "workflow";
   name: string;
   problem: string;
+  lane: "governed" | "quick";
 };
 type Props = {
   t: Translate;
@@ -47,6 +48,7 @@ export default function BrainWizard({
   const [kind, setKind] = useState<"project" | "process" | "workflow">("project");
   const [name, setName] = useState("");
   const [problem, setProblem] = useState("");
+  const [quick, setQuick] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -63,9 +65,14 @@ export default function BrainWizard({
   const canContinue =
     step === 0 ? true : step === 1 ? workspaceId !== "" : step === 2 ? name.trim().length > 0 : true;
   const create = useCallback(async () => {
-    const created = await onCreate({ kind, name: name.trim(), problem: problem.trim() });
+    const created = await onCreate({
+      kind,
+      name: name.trim(),
+      problem: problem.trim(),
+      lane: quick ? "quick" : "governed",
+    });
     if (created) onClose();
-  }, [kind, name, problem, onCreate, onClose]);
+  }, [kind, name, problem, quick, onCreate, onClose]);
   const advance = useCallback(() => {
     if (step < STEPS.length - 1) setStep((current) => current + 1);
     else void create();
@@ -188,6 +195,15 @@ export default function BrainWizard({
                   onChange={(event) => setProblem(event.target.value)}
                 />
               </label>
+              <label className="brain-check">
+                <input
+                  type="checkbox"
+                  checked={quick}
+                  onChange={(event) => setQuick(event.target.checked)}
+                />
+                {t("brain.wizard.quick")}
+              </label>
+              <p className="brain-hint">{t("brain.wizard.quickHint")}</p>
               <p className="brain-hint">{t("brain.wizard.details.hint")}</p>
             </section>
           )}

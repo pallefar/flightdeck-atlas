@@ -1,0 +1,29 @@
+{
+  "contract": "atlas-process-steps/1",
+  "projectId": "4f7d1c2a-8b3e-4c5d-9e6f-a1b2c3d4e5f6",
+  "provenance": "kg",
+  "source": {
+    "filename": "invoice-exceptions-sop.docx",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "documentType": "sop"
+  },
+  "steps": [
+    {
+      "number": "10",
+      "action": "Open the case in ServiceNow",
+      "actor": "AP clerk",
+      "inputs": "Exception email",
+      "outputs": "Case",
+      "notes": null
+    },
+    {
+      "number": "20",
+      "action": "Check the purchase order in SAP",
+      "actor": "AP clerk",
+      "inputs": "PO number",
+      "outputs": "Match decision",
+      "notes": "Two systems, retyped"
+    }
+  ],
+  "createdAt": "2026-10-30T09:00:00.000Z"
+}

@@ -345,6 +345,9 @@ export const gateEvents = sqliteTable(
     actor: text("actor").notNull(),
     role: text("role").notNull(),
     decision: text("decision").notNull(),
+    lane: text("lane").notNull().default("governed"),
+    /** The sign-offs this event leaves deferred, as stage names (JSON). */
+    deferred: text("deferred").notNull().default("[]"),
     reason: text("reason").notNull().default(""),
     evidenceRef: text("evidence_ref"),
     materialDigest: text("material_digest"),
@@ -377,6 +380,9 @@ export const onboarding = sqliteTable(
      * for rows written before workspaces existed; the migration backfills them
      * into the default workspace. */
     workspaceId: text("workspace_id"),
+    /** "governed" walks every gate; "quick" starts at capture and records the
+     * skipped sign-offs as deferred, with an owner and a date. */
+    lane: text("lane").notNull().default("governed"),
     stage: text("stage").notNull().default("intake"),
     status: text("status").notNull().default("active"),
     data: text("data").notNull(),
@@ -387,6 +393,9 @@ export const onboarding = sqliteTable(
   },
   (t) => [
     index("idx_atlas_onboarding_stage").on(t.stage, t.updatedAt),
+    // The lane's two values are enforced by the domain and the route; SQLite
+    // cannot add a CHECK without rebuilding the table, and this table holds
+    // live rows.
     check("atlas_onboarding_status", sql`${t.status} IN ('active','retired')`),
   ],
 );

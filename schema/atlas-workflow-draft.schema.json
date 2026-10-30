@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas-workflow-draft/1",
+  "title": "Atlas workflow draft",
+  "description": "A workflow a person can test: trigger, inputs, steps, decisions, the sign-off and whether Atlas builds it or Studio does. A test run writes nothing.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "projectId",
+    "name",
+    "trigger",
+    "inputs",
+    "steps",
+    "decisions",
+    "signOff",
+    "complexity",
+    "testReport",
+    "createdAt"
+  ],
+  "properties": {
+    "contract": { "const": "atlas-workflow-draft/1" },
+    "projectId": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "trigger": { "enum": ["new-case", "form", "schedule", "on-demand"] },
+    "inputs": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "classification"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "classification": {
+            "enum": ["public", "internal", "confidential", "export-restricted", "itar", "cui", "customer-pii"]
+          }
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action", "actor", "system"],
+        "properties": {
+          "action": { "type": "string", "minLength": 1, "maxLength": 300 },
+          "actor": { "enum": ["person", "workflow"] },
+          "system": { "type": ["string", "null"], "maxLength": 80 }
+        }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["question", "thenStep"],
+        "properties": {
+          "question": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "thenStep": { "type": ["string", "null"], "maxLength": 20 }
+        }
+      }
+    },
+    "signOff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "email"],
+      "properties": {
+        "role": { "enum": ["process_owner", "workspace_admin"] },
+        "email": { "type": "string", "minLength": 3, "maxLength": 160 }
+      }
+    },
+    "complexity": { "enum": ["simple", "studio"] },
+    "testReport": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["ranAt", "cases", "wroteAnything", "notes"],
+      "properties": {
+        "ranAt": { "type": "string", "format": "date-time" },
+        "cases": { "type": "integer", "minimum": 0, "maximum": 50 },
+        "wroteAnything": { "type": "boolean" },
+        "notes": { "type": "string", "maxLength": 500 }
+      }
+    },
+    "createdAt": { "type": "string", "format": "date-time" }
+  }
+}

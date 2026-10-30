@@ -123,6 +123,10 @@ public enum AtlasGateEventDecision: String, Codable, CaseIterable, Sendable {
   case reject = "reject"
   case reopen = "reopen"
 }
+public enum AtlasGateEventLane: String, Codable, CaseIterable, Sendable {
+  case governed = "governed"
+  case quick = "quick"
+}
 public struct AtlasGateEvent: Codable, Equatable, Sendable {
   public let contract: String
   public let id: String
@@ -134,6 +138,8 @@ public struct AtlasGateEvent: Codable, Equatable, Sendable {
   public let actor: String
   public let role: String
   public let decision: AtlasGateEventDecision
+  public let lane: AtlasGateEventLane?
+  public let deferred: [AtlasGateEventDeferred]?
   public let reason: String
   public let evidenceRef: String?
   public let materialDigest: String?
@@ -141,7 +147,7 @@ public struct AtlasGateEvent: Codable, Equatable, Sendable {
   public let hash: String
   public let createdAt: String
 
-  public init(contract: String, id: String, projectId: String, seq: Int, stage: AtlasGateEventStage, fromStage: AtlasGateEventFromStage?, toStage: AtlasGateEventToStage?, actor: String, role: String, decision: AtlasGateEventDecision, reason: String, evidenceRef: String?, materialDigest: String?, prevHash: String, hash: String, createdAt: String) {
+  public init(contract: String, id: String, projectId: String, seq: Int, stage: AtlasGateEventStage, fromStage: AtlasGateEventFromStage?, toStage: AtlasGateEventToStage?, actor: String, role: String, decision: AtlasGateEventDecision, lane: AtlasGateEventLane?, deferred: [AtlasGateEventDeferred]?, reason: String, evidenceRef: String?, materialDigest: String?, prevHash: String, hash: String, createdAt: String) {
     self.contract = contract
     self.id = id
     self.projectId = projectId
@@ -152,6 +158,8 @@ public struct AtlasGateEvent: Codable, Equatable, Sendable {
     self.actor = actor
     self.role = role
     self.decision = decision
+    self.lane = lane
+    self.deferred = deferred
     self.reason = reason
     self.evidenceRef = evidenceRef
     self.materialDigest = materialDigest
@@ -171,6 +179,8 @@ public struct AtlasGateEvent: Codable, Equatable, Sendable {
     case actor = "actor"
     case role = "role"
     case decision = "decision"
+    case lane = "lane"
+    case deferred = "deferred"
     case reason = "reason"
     case evidenceRef = "evidenceRef"
     case materialDigest = "materialDigest"
@@ -305,6 +315,81 @@ public struct AtlasOnboardingRecord: Codable, Equatable, Sendable {
   }
 }
 
+public enum AtlasProcessStepsProvenance: String, Codable, CaseIterable, Sendable {
+  case kg = "kg"
+  case atlas = "atlas"
+  case manual = "manual"
+}
+public struct AtlasProcessStepsSource: Codable, Equatable, Sendable {
+  public let filename: String
+  public let sha256: String
+  public let documentType: String?
+
+  public init(filename: String, sha256: String, documentType: String?) {
+    self.filename = filename
+    self.sha256 = sha256
+    self.documentType = documentType
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case filename = "filename"
+    case sha256 = "sha256"
+    case documentType = "documentType"
+  }
+}
+public struct AtlasProcessStepsItem: Codable, Equatable, Sendable {
+  public let number: String
+  public let action: String
+  public let actor: String?
+  public let inputs: String?
+  public let outputs: String?
+  public let notes: String?
+
+  public init(number: String, action: String, actor: String?, inputs: String?, outputs: String?, notes: String?) {
+    self.number = number
+    self.action = action
+    self.actor = actor
+    self.inputs = inputs
+    self.outputs = outputs
+    self.notes = notes
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case number = "number"
+    case action = "action"
+    case actor = "actor"
+    case inputs = "inputs"
+    case outputs = "outputs"
+    case notes = "notes"
+  }
+}
+public struct AtlasProcessSteps: Codable, Equatable, Sendable {
+  public let contract: String
+  public let projectId: String
+  public let provenance: AtlasProcessStepsProvenance
+  public let source: AtlasProcessStepsSource
+  public let steps: [AtlasProcessStepsItem]
+  public let createdAt: String
+
+  public init(contract: String, projectId: String, provenance: AtlasProcessStepsProvenance, source: AtlasProcessStepsSource, steps: [AtlasProcessStepsItem], createdAt: String) {
+    self.contract = contract
+    self.projectId = projectId
+    self.provenance = provenance
+    self.source = source
+    self.steps = steps
+    self.createdAt = createdAt
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case contract = "contract"
+    case projectId = "projectId"
+    case provenance = "provenance"
+    case source = "source"
+    case steps = "steps"
+    case createdAt = "createdAt"
+  }
+}
+
 public enum AtlasValueBasis: String, Codable, CaseIterable, Sendable {
   case estimate = "estimate"
   case measured = "measured"
@@ -380,6 +465,154 @@ public struct AtlasValue: Codable, Equatable, Sendable {
     case confidence = "confidence"
     case sourceRef = "sourceRef"
     case notes = "notes"
+    case createdAt = "createdAt"
+  }
+}
+
+public enum AtlasWorkflowDraftTrigger: String, Codable, CaseIterable, Sendable {
+  case newCase = "new-case"
+  case form = "form"
+  case schedule = "schedule"
+  case onDemand = "on-demand"
+}
+public enum AtlasWorkflowDraftItemClassification: String, Codable, CaseIterable, Sendable {
+  case `public` = "public"
+  case `internal` = "internal"
+  case confidential = "confidential"
+  case exportRestricted = "export-restricted"
+  case itar = "itar"
+  case cui = "cui"
+  case customerPii = "customer-pii"
+}
+public struct AtlasWorkflowDraftItem: Codable, Equatable, Sendable {
+  public let name: String
+  public let classification: AtlasWorkflowDraftItemClassification
+
+  public init(name: String, classification: AtlasWorkflowDraftItemClassification) {
+    self.name = name
+    self.classification = classification
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case name = "name"
+    case classification = "classification"
+  }
+}
+public enum AtlasWorkflowDraftItemActor: String, Codable, CaseIterable, Sendable {
+  case person = "person"
+  case workflow = "workflow"
+}
+public struct AtlasWorkflowDraftItem: Codable, Equatable, Sendable {
+  public let action: String
+  public let actor: AtlasWorkflowDraftItemActor
+  public let system: String?
+
+  public init(action: String, actor: AtlasWorkflowDraftItemActor, system: String?) {
+    self.action = action
+    self.actor = actor
+    self.system = system
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case action = "action"
+    case actor = "actor"
+    case system = "system"
+  }
+}
+public struct AtlasWorkflowDraftItem: Codable, Equatable, Sendable {
+  public let question: String
+  public let thenStep: String?
+
+  public init(question: String, thenStep: String?) {
+    self.question = question
+    self.thenStep = thenStep
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case question = "question"
+    case thenStep = "thenStep"
+  }
+}
+public enum AtlasWorkflowDraftSignOffRole: String, Codable, CaseIterable, Sendable {
+  case processOwner = "process_owner"
+  case workspaceAdmin = "workspace_admin"
+}
+public struct AtlasWorkflowDraftSignOff: Codable, Equatable, Sendable {
+  public let role: AtlasWorkflowDraftSignOffRole
+  public let email: String
+
+  public init(role: AtlasWorkflowDraftSignOffRole, email: String) {
+    self.role = role
+    self.email = email
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case role = "role"
+    case email = "email"
+  }
+}
+public enum AtlasWorkflowDraftComplexity: String, Codable, CaseIterable, Sendable {
+  case simple = "simple"
+  case studio = "studio"
+}
+public struct AtlasWorkflowDraftTestReport: Codable, Equatable, Sendable {
+  public let ranAt: String
+  public let cases: Int
+  public let wroteAnything: Bool
+  public let notes: String
+
+  public init(ranAt: String, cases: Int, wroteAnything: Bool, notes: String) {
+    self.ranAt = ranAt
+    self.cases = cases
+    self.wroteAnything = wroteAnything
+    self.notes = notes
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case ranAt = "ranAt"
+    case cases = "cases"
+    case wroteAnything = "wroteAnything"
+    case notes = "notes"
+  }
+}
+public struct AtlasWorkflowDraft: Codable, Equatable, Sendable {
+  public let contract: String
+  public let projectId: String
+  public let name: String
+  public let trigger: AtlasWorkflowDraftTrigger
+  public let inputs: [AtlasWorkflowDraftItem]
+  public let steps: [AtlasWorkflowDraftItem]
+  public let decisions: [AtlasWorkflowDraftItem]
+  public let signOff: AtlasWorkflowDraftSignOff
+  public let complexity: AtlasWorkflowDraftComplexity
+  public let testReport: AtlasWorkflowDraftTestReport?
+  public let createdAt: String
+
+  public init(contract: String, projectId: String, name: String, trigger: AtlasWorkflowDraftTrigger, inputs: [AtlasWorkflowDraftItem], steps: [AtlasWorkflowDraftItem], decisions: [AtlasWorkflowDraftItem], signOff: AtlasWorkflowDraftSignOff, complexity: AtlasWorkflowDraftComplexity, testReport: AtlasWorkflowDraftTestReport?, createdAt: String) {
+    self.contract = contract
+    self.projectId = projectId
+    self.name = name
+    self.trigger = trigger
+    self.inputs = inputs
+    self.steps = steps
+    self.decisions = decisions
+    self.signOff = signOff
+    self.complexity = complexity
+    self.testReport = testReport
+    self.createdAt = createdAt
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case contract = "contract"
+    case projectId = "projectId"
+    case name = "name"
+    case trigger = "trigger"
+    case inputs = "inputs"
+    case steps = "steps"
+    case decisions = "decisions"
+    case signOff = "signOff"
+    case complexity = "complexity"
+    case testReport = "testReport"
     case createdAt = "createdAt"
   }
 }

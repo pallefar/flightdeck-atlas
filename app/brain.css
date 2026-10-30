@@ -688,3 +688,12 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+.brain-card-lane {
+  align-self: flex-start;
+  margin-top: 2px;
+  font-size: 0.66rem;
+  border-radius: 999px;
+  padding: 1px 7px;
+  color: #7a4a00;
+  background: #ffe9c7;
+}

@@ -4,6 +4,10 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import {
   CONTRACT_IDS,
+  stepsContract,
+  workflowContract,
+  parseSteps,
+  parseWorkflow,
   evidenceContract,
   gateEventContract,
   parseEvidence,
@@ -37,6 +41,8 @@ function peel(schema: z.ZodTypeAny) {
     const name = current._def.typeName;
     if (name === "ZodNullable") nullable = true;
     else if (name === "ZodOptional") optional = true;
+    // A defaulted field is optional on the wire: the schema supplies it.
+    else if (name === "ZodDefault") optional = true;
     else if (name !== "ZodEffects") break;
     current = (current._def as { innerType?: z.ZodTypeAny; schema?: z.ZodTypeAny })
       .innerType ?? (current._def as { schema: z.ZodTypeAny }).schema;
@@ -189,6 +195,18 @@ const cases = [
     schema: recordContract as z.ZodTypeAny,
     id: CONTRACT_IDS.record,
   },
+  {
+    name: "atlas-process-steps",
+    fixture: "atlas-process-steps.v1.json",
+    schema: stepsContract as z.ZodTypeAny,
+    id: CONTRACT_IDS.steps,
+  },
+  {
+    name: "atlas-workflow-draft",
+    fixture: "atlas-workflow-draft.v1.json",
+    schema: workflowContract as z.ZodTypeAny,
+    id: CONTRACT_IDS.workflow,
+  },
 ] as const;
 test.describe("contract fixtures", () => {
   for (const testCase of cases) {
@@ -216,7 +234,11 @@ test.describe("contract fixtures", () => {
             ? parseGateEvent(bad)
             : testCase.id === CONTRACT_IDS.value
               ? parseValue(bad)
-              : parseRecord(bad);
+              : testCase.id === CONTRACT_IDS.steps
+                ? parseSteps(bad)
+                : testCase.id === CONTRACT_IDS.workflow
+                  ? parseWorkflow(bad)
+                  : parseRecord(bad);
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.code).toBe("wrong_version");
     });
@@ -229,7 +251,11 @@ test.describe("contract fixtures", () => {
             ? parseGateEvent(bad)
             : testCase.id === CONTRACT_IDS.value
               ? parseValue(bad)
-              : parseRecord(bad);
+              : testCase.id === CONTRACT_IDS.steps
+                ? parseSteps(bad)
+                : testCase.id === CONTRACT_IDS.workflow
+                  ? parseWorkflow(bad)
+                  : parseRecord(bad);
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.code).toBe("unknown_key");
     });
@@ -279,6 +305,35 @@ test.describe("refusals that carry a reason the caller can act on", () => {
     // existing blocked row without the parser lying about the class.
     const body = { ...fixture("atlas-evidence.v1.json"), classification: "cui" };
     expect(parseEvidence(body).ok).toBe(true);
+  });
+  test("a test run may not have written anything", () => {
+    const bad = {
+      ...fixture("atlas-workflow-draft.v1.json"),
+      testReport: {
+        ranAt: "2026-10-30T09:10:00.000Z",
+        cases: 1,
+        wroteAnything: true,
+        notes: "It wrote a case.",
+      },
+    };
+    const result = parseWorkflow(bad);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.problems.join(" ")).toContain("writes nothing");
+  });
+  test("a three-step workflow cannot claim to need Studio", () => {
+    const bad = { ...fixture("atlas-workflow-draft.v1.json"), complexity: "studio" };
+    const result = parseWorkflow(bad);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.problems.join(" ")).toContain("simple workflow");
+  });
+  test("process steps keep their source labels and refuse an empty action", () => {
+    const good = fixture("atlas-process-steps.v1.json");
+    expect(good.steps.map((step: { number: string }) => step.number)).toEqual(["10", "20"]);
+    const bad = {
+      ...good,
+      steps: [{ ...good.steps[0], action: "" }],
+    };
+    expect(parseSteps(bad).ok).toBe(false);
   });
   test("a gate event whose hash is not sha256 is refused", () => {
     const bad = { ...fixture("atlas-gate-event.v1.json"), hash: "nope" };

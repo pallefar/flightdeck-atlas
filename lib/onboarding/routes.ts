@@ -284,6 +284,8 @@ export function createOnboardingRoutes(deps: BrainDeps) {
     return {
       record,
       status: row.status,
+      lane: (row as { lane?: string }).lane ?? "governed",
+      deferredGates: data.deferredGates,
       facts,
       /** The editable fields as stored, so a client form starts from the
        * truth rather than from empty inputs. */
@@ -362,7 +364,7 @@ export function createOnboardingRoutes(deps: BrainDeps) {
     // project's detail shows.
     const { results } = await deps.db
       .prepare(
-        `SELECT o.project_id, o.stage, o.status, o.revision, o.updated_at, p.data, o.data AS brain_data,
+        `SELECT o.project_id, o.stage, o.status, o.revision, o.updated_at, p.data, o.data AS brain_data, o.lane,
           (SELECT COUNT(*) FROM atlas_project_roles r
             WHERE r.project_id = o.project_id AND r.role = 'owner') AS has_owner,
           (SELECT COUNT(*) FROM atlas_project_roles r
@@ -414,6 +416,8 @@ export function createOnboardingRoutes(deps: BrainDeps) {
           revision: Number(r.revision),
           updatedAt: r.updated_at as string,
           kind: kindOf((r.brain_data as string) ?? "{}"),
+          lane: (r.lane as string) ?? "governed",
+          deferred: deferredCountOf((r.brain_data as string) ?? "{}"),
           readiness: score.readiness,
           met: score.met,
           total: score.total,
@@ -482,6 +486,7 @@ export function createOnboardingRoutes(deps: BrainDeps) {
         },
         403,
       );
+    const lane = body?.lane === "quick" ? "quick" : "governed";
     const ownerEmail =
       typeof body?.ownerEmail === "string" && body.ownerEmail.trim()
         ? body.ownerEmail.trim().toLowerCase()
@@ -498,16 +503,30 @@ export function createOnboardingRoutes(deps: BrainDeps) {
         400,
       );
     const at = now();
+    // The quick lane: start where the work is, and record what was skipped as
+    // a debt with an owner and a date rather than pretending it happened.
+    const dueAt = new Date(Date.parse(at) + 14 * 24 * 3600 * 1000).toISOString();
+    const deferred =
+      lane === "quick"
+        ? ["as-is", "aligned", "value"].map((stage) => ({
+            stage: stage as "as-is" | "aligned" | "value",
+            owner: ownerEmail,
+            dueAt,
+          }))
+        : [];
+    const startStage = lane === "quick" ? "capture" : "intake";
+    if (lane === "quick") data = { ...data, deferredGates: deferred };
     await deps.db
       .prepare(
         `INSERT INTO atlas_onboarding
-           (project_id, workspace_id, stage, status, data, revision, created_by, created_at, updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
+           (project_id, workspace_id, lane, stage, status, data, revision, created_by, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
       )
       .bind(
         id,
         workspaceId,
-        "intake",
+        lane,
+        startStage,
         "active",
         JSON.stringify(data),
         1,
@@ -526,17 +545,25 @@ export function createOnboardingRoutes(deps: BrainDeps) {
       .bind(id, "owner", ownerEmail, auth.access.email, at)
       .run();
     // Opening the intake is the first audited event of the project's brain.
-    await appendGateEvent(deps.db, {
-      projectId: id,
-      stage: "intake",
-      fromStage: null,
-      toStage: "intake",
-      actor: auth.access.userId,
-      role: "onboarding.create",
-      decision: "pass",
-      reason: "Intake opened",
-      at,
-    });
+    // On the quick lane, the three stages it starts past are recorded with the
+    // debt they leave, in the same chain.
+    const opened: ("intake" | "reuse" | "capture")[] =
+      lane === "quick" ? ["intake", "reuse", "capture"] : ["intake"];
+    for (const stage of opened) {
+      await appendGateEvent(deps.db, {
+        projectId: id,
+        lane,
+        deferred: deferred.map((item) => item.stage),
+        stage,
+        fromStage: null,
+        toStage: stage,
+        actor: auth.access.userId,
+        role: "onboarding.create",
+        decision: "pass",
+        reason: stage === "intake" ? "Intake opened" : `Quick lane: ${stage} recorded`,
+        at,
+      });
+    }
     return get(id, request);
   };
   const patch = async (request: Request, id: string): Promise<Response> => {
@@ -731,9 +758,13 @@ export function createOnboardingRoutes(deps: BrainDeps) {
           ? "aligned"
           : (current as StageOrRetired);
     const data = parseRowData(found.row);
+    // A deferred sign-off is paid off by passing its gate: the event carries
+    // the remaining list, so the chain always says what is still owed.
+    const stillDeferred = data.deferredGates.filter((item) => item.stage !== stage);
+    const nextData = { ...data, deferredGates: stillDeferred };
     const digest =
       current === "aligned" || target === "aligned"
-        ? await digestOf(data)
+        ? await digestOf(nextData)
         : data.materialDigest;
     const stored = await appendGateEvent(deps.db, {
       projectId: id,
@@ -743,6 +774,8 @@ export function createOnboardingRoutes(deps: BrainDeps) {
       actor: auth.access.userId,
       role: gatePermissions(stage).join("+"),
       decision,
+      lane: (found.row as { lane?: string }).lane === "quick" ? "quick" : "governed",
+      deferred: stillDeferred.map((item) => item.stage),
       reason,
       evidenceRef:
         typeof body.evidenceRef === "string" ? body.evidenceRef.slice(0, 200) : null,
@@ -764,7 +797,7 @@ export function createOnboardingRoutes(deps: BrainDeps) {
       .bind(
         decision === "reject" ? current : target,
         target === RETIRED ? "retired" : "active",
-        JSON.stringify({ ...data, materialDigest: digest }),
+        JSON.stringify({ ...nextData, materialDigest: digest }),
         at,
         id,
         found.row.revision,
@@ -1260,6 +1293,15 @@ export function createOnboardingRoutes(deps: BrainDeps) {
 }
 
 
+/** How many sign-offs a project's quick lane still owes. */
+function deferredCountOf(data: string) {
+  try {
+    const parsed = JSON.parse(data) as { deferredGates?: unknown[] };
+    return Array.isArray(parsed.deferredGates) ? parsed.deferredGates.length : 0;
+  } catch {
+    return 0;
+  }
+}
 /** What is being onboarded, read from the stored draft. */
 function kindOf(data: string) {
   try {

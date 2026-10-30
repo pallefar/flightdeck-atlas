@@ -1,0 +1,51 @@
+{
+  "contract": "atlas-workflow-draft/1",
+  "projectId": "4f7d1c2a-8b3e-4c5d-9e6f-a1b2c3d4e5f6",
+  "name": "Exception triage",
+  "trigger": "new-case",
+  "inputs": [
+    {
+      "name": "Exception email",
+      "classification": "internal"
+    },
+    {
+      "name": "Purchase order",
+      "classification": "internal"
+    }
+  ],
+  "steps": [
+    {
+      "action": "Read the exception email",
+      "actor": "workflow",
+      "system": "Outlook"
+    },
+    {
+      "action": "Match the purchase order",
+      "actor": "workflow",
+      "system": "SAP"
+    },
+    {
+      "action": "Approve the match",
+      "actor": "person",
+      "system": null
+    }
+  ],
+  "decisions": [
+    {
+      "question": "Does the amount exceed EUR 5,000?",
+      "thenStep": "30"
+    }
+  ],
+  "signOff": {
+    "role": "process_owner",
+    "email": "process.owner@example.test"
+  },
+  "complexity": "simple",
+  "testReport": {
+    "ranAt": "2026-10-30T09:10:00.000Z",
+    "cases": 1,
+    "wroteAnything": false,
+    "notes": "Dry run on one real case."
+  },
+  "createdAt": "2026-10-30T09:00:00.000Z"
+}

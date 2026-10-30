@@ -636,6 +636,10 @@ export const en = {
   "brain.field.asIsSignedOff": "As-is signed off",
   "brain.value.chart": "Hours by period",
   "brain.card.readiness": "{met} of {total} onboarding facts in place",
+  "brain.wizard.quick": "Fast start (quick lane)",
+  "brain.wizard.quickHint": "Starts at capture and records the map, alignment and value sign-offs as deferred, with an owner and a date — the chain says so.",
+  "brain.card.quick": "quick · {count} deferred",
+  "brain.lane.deferred": "Deferred sign-offs",
 } as const;
 
 export type MessageKey = keyof typeof en;

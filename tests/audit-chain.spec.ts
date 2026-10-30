@@ -98,6 +98,8 @@ test.describe("append", () => {
     const parsed = parseGateEvent({
       contract: CONTRACT_IDS.gateEvent,
       ...events[0],
+      // the row keeps the deferred list as JSON; the wire format is an array
+      deferred: JSON.parse(events[0].deferred),
     });
     expect(parsed.ok).toBe(true);
     expect(row.hash).toBe(events[0].hash);
@@ -139,6 +141,8 @@ test.describe("append", () => {
         actor: row.actor,
         role: row.role,
         decision: row.decision,
+        lane: row.lane,
+        deferred: row.deferred,
         reason: row.reason,
         evidenceRef: row.evidenceRef,
         materialDigest: row.materialDigest,

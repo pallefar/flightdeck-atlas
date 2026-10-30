@@ -198,6 +198,58 @@ test.describe("opening an intake", () => {
     const projected = parseRecord(body.record);
     expect(projected.ok).toBe(true);
   });
+  test("the quick lane starts at capture and records what it deferred", async () => {
+    const h = harness();
+    const created = await h.routes.create(
+      call({ ...intakeFields, workspaceId: "general", lane: "quick" }),
+      P,
+    );
+    expect(created.status).toBe(200);
+    const body = (await created.json()) as {
+      record: { stage: string };
+      lane: string;
+      deferredGates: { stage: string; owner: string; dueAt: string }[];
+      chain: { length: number };
+    };
+    expect(body.lane).toBe("quick");
+    expect(body.record.stage).toBe("capture");
+    expect(body.deferredGates.map((item) => item.stage)).toEqual(["as-is", "aligned", "value"]);
+    expect(body.deferredGates[0].owner).toBe("u1@example.test");
+    // Three passes are recorded at once, and each carries the debt.
+    expect(body.chain.length).toBe(3);
+    const rows = h.sqlite
+      .prepare("SELECT lane, deferred FROM atlas_gate_events ORDER BY seq")
+      .all() as { lane: string; deferred: string }[];
+    expect(rows.every((row) => row.lane === "quick")).toBe(true);
+    expect(JSON.parse(rows[0].deferred)).toEqual(["as-is", "aligned", "value"]);
+  });
+  test("passing a deferred gate pays that sign-off off", async () => {
+    const h = harness();
+    await h.routes.create(call({ ...intakeFields, workspaceId: "general", lane: "quick" }), P);
+    // A quick lane still has to pass the stages it actually reached: capture
+    // needs one accepted, clean evidence item.
+    await h.routes.evidenceAdd(
+      call({
+        kind: "document",
+        source: "sop.docx",
+        sha256: "a".repeat(64),
+        bytes: 10,
+        classification: "internal",
+        scanText: "The operator checks the purchase order in SAP.",
+        status: "accepted",
+      }),
+      P,
+    );
+    const captured = await gateOf(h, "capture");
+    expect(captured.status).toBe(200);
+    await save(h, { asIsMapRef: "map-as-is-1", asIsSignedOff: true });
+    const passed = await gateOf(h, "as-is");
+    expect(passed.status).toBe(200);
+    const body = passed.body as { deferredGates: { stage: string }[]; chain: { length: number } };
+    expect(body.deferredGates.map((item) => item.stage)).toEqual(["aligned", "value"]);
+    // three opening passes, the capture gate, and this one
+    expect(body.chain.length).toBe(5);
+  });
   test("refuses a second intake on the same project", async () => {
     const h = await onboarded();
     const again = await jsonOf(await h.routes.create(call({ workspaceId: "general" }), P));

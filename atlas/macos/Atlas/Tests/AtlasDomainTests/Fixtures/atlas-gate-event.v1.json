@@ -14,5 +14,7 @@
   "materialDigest": null,
   "createdAt": "2026-10-28T10:00:00.000Z",
   "prevHash": "54276f04c530b5df5684f53552c8cd873d9e5c9b742cec151465c20178ea9b1d",
-  "hash": "3d37f8944f544694e0b4907f6f125394d266ba13f9d2b9d237f1ca470dc4bee4"
+  "hash": "3d37f8944f544694e0b4907f6f125394d266ba13f9d2b9d237f1ca470dc4bee4",
+  "lane": "governed",
+  "deferred": []
 }

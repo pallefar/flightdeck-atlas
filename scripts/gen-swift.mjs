@@ -23,6 +23,8 @@ const STRUCT_NAMES = {
   "atlas-gate-event/1": "AtlasGateEvent",
   "atlas-value/1": "AtlasValue",
   "atlas-onboarding-record/1": "AtlasOnboardingRecord",
+  "atlas-process-steps/1": "AtlasProcessSteps",
+  "atlas-workflow-draft/1": "AtlasWorkflowDraft",
 };
 const CAMEL = /[^a-zA-Z0-9]/g;
 const ident = (name) => name.replace(CAMEL, "");
@@ -82,9 +84,16 @@ function enumDecl(name, node) {
     .join("\n");
   return `public enum ${name}: String, Codable, CaseIterable, Sendable {\n${cases}\n}`;
 }
+/** A plain object property gets its own struct, named after the property; an
+ * array of objects uses `<Owner>Item`. Both are declared beside their owner. */
+function nestedFor(node, key, owner) {
+  if (node.type === "array" && node.items?.type === "object") return `${owner}Item`;
+  const base = Array.isArray(node.type) ? node.type.find((t) => t && t !== "null") : node.type;
+  if (base === "object") return `${owner}${upper(ident(key))}`;
+  return undefined;
+}
 function typeOf(node, key, name) {
-  const nestedName =
-    node.type === "array" && node.items?.type === "object" ? `${name}Item` : undefined;
+  const nestedName = nestedFor(node, key, name);
   let type = swiftType(node, key, name, nestedName);
   if (isNullable(node) && !type.endsWith("?")) type += "?";
   return type;
@@ -100,6 +109,9 @@ function structDecl(name, schema) {
     if (isEnum(node)) declarations.push(enumDecl(`${name}${upper(ident(key))}`, node));
     if (node.type === "array" && node.items?.type === "object")
       declarations.push(structDecl(`${name}Item`, node.items));
+    const objectProp = nestedFor(node, key, name);
+    if (objectProp && !(node.type === "array"))
+      declarations.push(structDecl(objectProp, node));
     let type = typeOf(node, key, name);
     if (!required.has(key) && !type.endsWith("?")) type += "?";
     fields.push(`  public let ${ident(key)}: ${type}`);

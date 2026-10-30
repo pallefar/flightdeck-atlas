@@ -58,6 +58,19 @@ export const brainDataSchema = z
     /** The digest of the material fields as last accepted at stage 4. A save
      * that changes them reopens alignment (PRD §6). */
     materialDigest: z.string().regex(/^[0-9a-f]{64}$/).nullable().default(null),
+    /** Sign-offs the quick lane left open: who owes them and by when. */
+    deferredGates: z
+      .array(
+        z
+          .object({
+            stage: z.enum(["as-is", "aligned", "value"]),
+            owner: z.string().trim().min(1).max(160),
+            dueAt: z.string().datetime({ offset: true }),
+          })
+          .strict(),
+      )
+      .max(3)
+      .default([]),
   })
   .strict();
 export type BrainData = z.infer<typeof brainDataSchema>;

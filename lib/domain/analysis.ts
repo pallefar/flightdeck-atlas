@@ -18,7 +18,13 @@ export type ActionKind =
   | "baseline"
   | "chain"
   | "requirement";
-export type RiskKind = "process_owner" | "approvers" | "evidence" | "scan" | "chain";
+export type RiskKind =
+  | "process_owner"
+  | "approvers"
+  | "evidence"
+  | "scan"
+  | "chain"
+  | "deferred";
 export type AnalysisAction = {
   /** What to do next as a KIND, so both surfaces translate it themselves. */
   kind: ActionKind;
@@ -147,9 +153,14 @@ export function analyseBrain(view: BrainView): BrainAnalysis {
       ...(facts.accepted > 0 ? [] : (["evidence"] as RiskKind[])),
       ...(facts.review > 0 ? (["scan"] as RiskKind[]) : []),
       ...(view.chain.ok ? [] : (["chain"] as RiskKind[])),
+      ...(deferredCount(view) > 0 ? (["deferred"] as RiskKind[]) : []),
     ],
   };
 }
+/** How many sign-offs the quick lane left open. Not part of the score: a
+ * deferred sign-off is a governance debt, not a fact the project has. */
+export const deferredCount = (view: BrainView) =>
+  Array.isArray(view.data?.deferredGates) ? (view.data.deferredGates as unknown[]).length : 0;
 /** The readable form of a requirement code, beside the analysis so a new code
  * shows up here rather than rendering raw. Mirrors requirementText in Swift. */
 export function requirementText(code: string): string {

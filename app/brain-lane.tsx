@@ -26,6 +26,8 @@ type ListRow = {
   readiness?: number;
   met?: number;
   total?: number;
+  lane?: string;
+  deferred?: number;
 };
 const CLASSIFICATIONS = [
   "public",
@@ -214,6 +216,7 @@ export default function BrainLane() {
       kind: "project" | "process" | "workflow";
       name: string;
       problem: string;
+      lane?: "governed" | "quick";
     }) => {
       const name = input.name.trim();
       if (!name) return false;
@@ -259,6 +262,7 @@ export default function BrainLane() {
           body: JSON.stringify({
             entryType: input.kind,
             workspaceId,
+            lane: input.lane ?? "governed",
             problem: input.problem,
             ...(ownerEmail.trim() ? { ownerEmail: ownerEmail.trim() } : {}),
           }),
@@ -591,6 +595,11 @@ export default function BrainLane() {
                           {t("brain.revision", { revision: card.revision })} ·{" "}
                           {t("brain.updated", { at: card.updatedAt.slice(0, 10) })}
                         </span>
+                        {card.lane === "quick" && (card.deferred ?? 0) > 0 && (
+                          <span className="brain-card-lane">
+                            {t("brain.card.quick", { count: String(card.deferred ?? 0) })}
+                          </span>
+                        )}
                         {typeof card.readiness === "number" && (
                           <span
                             className="brain-card-ready"

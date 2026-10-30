@@ -24,10 +24,23 @@
     "createdAt"
   ],
   "properties": {
-    "contract": { "const": "atlas-gate-event/1" },
-    "id": { "type": "string", "minLength": 1, "maxLength": 80 },
-    "projectId": { "type": "string", "minLength": 1, "maxLength": 80 },
-    "seq": { "type": "integer", "minimum": 1 },
+    "contract": {
+      "const": "atlas-gate-event/1"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1
+    },
     "stage": {
       "enum": [
         "intake",
@@ -44,7 +57,10 @@
       ]
     },
     "fromStage": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "enum": [
         "intake",
         "reuse",
@@ -61,7 +77,10 @@
       ]
     },
     "toStage": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "enum": [
         "intake",
         "reuse",
@@ -77,17 +96,77 @@
         null
       ]
     },
-    "actor": { "type": "string", "minLength": 1, "maxLength": 200 },
-    "role": { "type": "string", "minLength": 1, "maxLength": 80 },
-    "decision": { "enum": ["pass", "reject", "reopen"] },
-    "reason": { "type": "string", "maxLength": 500 },
-    "evidenceRef": { "type": ["string", "null"], "maxLength": 2000 },
+    "actor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "role": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "decision": {
+      "enum": [
+        "pass",
+        "reject",
+        "reopen"
+      ]
+    },
+    "lane": {
+      "enum": [
+        "governed",
+        "quick"
+      ]
+    },
+    "deferred": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "enum": [
+          "intake",
+          "reuse",
+          "capture",
+          "as-is",
+          "aligned",
+          "value",
+          "to-be",
+          "build",
+          "live",
+          "measured",
+          "retired"
+        ]
+      }
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "evidenceRef": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 2000
+    },
     "materialDigest": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "pattern": "^[0-9a-f]{64}$"
     },
-    "prevHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-    "createdAt": { "type": "string", "format": "date-time" }
+    "prevHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    }
   }
 }

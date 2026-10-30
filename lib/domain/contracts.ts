@@ -22,6 +22,8 @@ export const CONTRACT_IDS = {
   gateEvent: "atlas-gate-event/1",
   value: "atlas-value/1",
   record: "atlas-onboarding-record/1",
+  steps: "atlas-process-steps/1",
+  workflow: "atlas-workflow-draft/1",
 } as const;
 const hex64 = z.string().regex(/^[0-9a-f]{64}$/, "Expected a sha256 hex digest.");
 const id = z.string().min(1).max(80);
@@ -66,6 +68,10 @@ export const gateEventContract = z
     actor: z.string().trim().min(1).max(200),
     role: z.string().trim().min(1).max(80),
     decision: z.enum(GATE_DECISIONS),
+    /** Which path the project took. A quick-lane pass is still a pass; the
+     * sign-offs it left open travel with it, by name. */
+    lane: z.enum(["governed", "quick"]).default("governed"),
+    deferred: z.array(z.enum([...STAGES, RETIRED])).max(10).default([]),
     reason: z.string().trim().max(500),
     evidenceRef: optionalText,
     materialDigest: hex64.nullable(),
@@ -148,6 +154,121 @@ export const recordContract = z
   })
   .strict();
 export type RecordContract = z.infer<typeof recordContract>;
+
+/** The steps of a process, as KG extracts them and as a person edits them.
+ * One shape for both, so a draft workflow can be built from either. */
+export const stepsContract = z
+  .object({
+    contract: z.literal(CONTRACT_IDS.steps),
+    projectId: id,
+    provenance: z.enum(["kg", "atlas", "manual"]),
+    source: z
+      .object({
+        filename: z.string().trim().min(1).max(200),
+        sha256: hex64,
+        documentType: z.string().trim().max(80).nullable(),
+      })
+      .strict(),
+    steps: z
+      .array(
+        z
+          .object({
+            /** The source's own label ("10.", "20a"), never renumbered. */
+            number: z.string().trim().min(1).max(20),
+            action: z.string().trim().min(1).max(500),
+            actor: z.string().trim().max(120).nullable(),
+            inputs: z.string().trim().max(300).nullable(),
+            outputs: z.string().trim().max(300).nullable(),
+            notes: z.string().trim().max(300).nullable(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(60),
+    createdAt: at,
+  })
+  .strict();
+export type StepsContract = z.infer<typeof stepsContract>;
+/** A workflow a person can test. Atlas owns its meaning; Studio owns the
+ * implementation of the complex ones. */
+export const workflowContract = z
+  .object({
+    contract: z.literal(CONTRACT_IDS.workflow),
+    projectId: id,
+    name: z.string().trim().min(1).max(120),
+    trigger: z.enum(["new-case", "form", "schedule", "on-demand"]),
+    inputs: z
+      .array(
+        z
+          .object({
+            name: z.string().trim().min(1).max(80),
+            classification: z.enum(CLASSIFICATIONS),
+          })
+          .strict(),
+      )
+      .max(10),
+    steps: z
+      .array(
+        z
+          .object({
+            action: z.string().trim().min(1).max(300),
+            actor: z.enum(["person", "workflow"]),
+            system: z.string().trim().max(80).nullable(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(10),
+    decisions: z
+      .array(
+        z
+          .object({
+            question: z.string().trim().min(1).max(200),
+            /** The step number it branches to, or null for "carry on". */
+            thenStep: z.string().trim().max(20).nullable(),
+          })
+          .strict(),
+      )
+      .max(5),
+    signOff: z
+      .object({
+        role: z.enum(["process_owner", "workspace_admin"]),
+        email: z.string().trim().min(3).max(160),
+      })
+      .strict(),
+    complexity: z.enum(["simple", "studio"]),
+    testReport: z
+      .object({
+        ranAt: at,
+        cases: z.number().int().nonnegative().max(50),
+        wroteAnything: z.boolean(),
+        notes: z.string().trim().max(500),
+      })
+      .strict()
+      .nullable(),
+    createdAt: at,
+  })
+  .strict()
+  .superRefine((draft, ctx) => {
+    // A workflow that writes nothing during its test is the only kind that may
+    // claim to be tested; a run that wrote something is a real run, not a test.
+    if (draft.testReport && draft.testReport.wroteAnything)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["testReport", "wroteAnything"],
+        message: "A test run writes nothing.",
+      });
+    // Complex work is not Atlas's to implement: it goes to Studio, and a
+    // simple workflow may not carry a Studio step count.
+    if (draft.complexity === "studio" && draft.steps.length <= 3)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["complexity"],
+        message: "Three steps or fewer is a simple workflow.",
+      });
+  });
+export type WorkflowContract = z.infer<typeof workflowContract>;
+
 export type ContractProblem =
   | "wrong_version"
   | "unknown_key"
@@ -188,3 +309,7 @@ export const parseValue = (input: unknown) =>
   parseContract(valueContract, CONTRACT_IDS.value, input);
 export const parseRecord = (input: unknown) =>
   parseContract(recordContract, CONTRACT_IDS.record, input);
+export const parseSteps = (input: unknown) =>
+  parseContract(stepsContract, CONTRACT_IDS.steps, input);
+export const parseWorkflow = (input: unknown) =>
+  parseContract(workflowContract, CONTRACT_IDS.workflow, input);
