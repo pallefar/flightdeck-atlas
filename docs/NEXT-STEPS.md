@@ -27,6 +27,17 @@ the two workflow contracts and the quick lane.
 5. ~~`process-steps/1` gets a producer route~~ — done: `PUT /api/onboarding/:id/steps`, one
    contract for KG extraction and for a person typing the steps.
 
+## Batch 2 (five improvements)
+
+1. ~~A workflow editor in the lane~~ — name, trigger and steps, saved as a contract body.
+2. ~~A dry-run attestation~~ — "I tested it, nothing was written" records the test report; Atlas never invents one.
+3. ~~An overdue banner~~ — a deferred sign-off past its date shouts at the top of the project.
+4. ~~The app's readiness card lists the debt~~ — "Quick lane: N sign-off(s) deferred", red when late.
+5. ~~The app gains a Workflow tab~~ — name, trigger, steps, who builds it, and the test run.
+
+Still open: the editor and attestation are **not covered by a browser test**, and the app's tab is
+read-only — a draft is built in the lane, not in the app.
+
 ## Not yet done (in order)
 
 1. **The app's wizard and cards do not offer the quick lane yet.** The API accepts
