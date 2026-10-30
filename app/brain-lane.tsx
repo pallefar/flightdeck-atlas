@@ -10,6 +10,7 @@
 // unless its record says so.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "@/lib/i18n/react";
+import BrainWizard from "./brain-wizard";
 import { STAGES, RETIRED } from "@/lib/domain/stages";
 type Workspace = { id: string; name: string; slug: string; role?: string };
 type ListRow = {
@@ -100,8 +101,7 @@ export default function BrainLane() {
   const [notice, setNotice] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<{ id: string; name: string }[]>([]);
   const [startId, setStartId] = useState("");
-  const [newName, setNewName] = useState("");
-  const [newType, setNewType] = useState<"project" | "process">("project");
+  const [wizardOpen, setWizardOpen] = useState(false);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspaceId, setWorkspaceId] = useState("");
   const [ownerEmail, setOwnerEmail] = useState("");
@@ -237,69 +237,75 @@ export default function BrainLane() {
   }, [startId, t, open]);
   /** The one flow that creates a project AND opens its intake, so a person
    * never leaves the lane to start onboarding. Two calls, in order: Atlas's
-   * existing project create, then the intake on its id. */
-  const onboardNew = useCallback(async () => {
-    const name = newName.trim();
-    if (!name) return;
-    if (!workspaceId) {
-      setNotice(t("brain.create.workspaceRequired"));
-      return;
-    }
-    setBusy(true);
-    try {
-      const created = await fetch("/api/projects", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          name,
-          description: "",
-          status: "In progress",
-          category: newType === "process" ? "Process" : "Project",
-          location: "",
-          latitude: null,
-          longitude: null,
-          dueDate: "",
-          color: "orange",
-          tasks: [],
-        }),
-      });
-      const createdBody = (await created.json().catch(() => ({}))) as {
-        error?: string;
-        project?: { id: string };
-      };
-      if (!created.ok || !createdBody.project?.id) {
-        setNotice(createdBody.error ?? t("brain.onboard.failed"));
-        return;
+   * existing project create, then the intake on its id. Returns whether the
+   * wizard may close. */
+  const createOnboard = useCallback(
+    async (input: { kind: "project" | "process"; name: string; problem: string }) => {
+      const name = input.name.trim();
+      if (!name) return false;
+      if (!workspaceId) {
+        setNotice(t("brain.create.workspaceRequired"));
+        return false;
       }
-      const id = createdBody.project.id;
-      const opened = await fetch(`/api/onboarding/${id}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          entryType: newType,
-          workspaceId,
-          ...(ownerEmail.trim() ? { ownerEmail: ownerEmail.trim() } : {}),
-        }),
-      });
-      if (!opened.ok) {
-        const payload = (await opened.json().catch(() => ({}))) as { error?: string };
-        setNotice(payload.error ?? t("brain.onboard.failed"));
-        return;
+      setBusy(true);
+      try {
+        const created = await fetch("/api/projects", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            name,
+            description: "",
+            status: "In progress",
+            category: input.kind === "process" ? "Process" : "Project",
+            location: "",
+            latitude: null,
+            longitude: null,
+            dueDate: "",
+            color: "orange",
+            tasks: [],
+          }),
+        });
+        const createdBody = (await created.json().catch(() => ({}))) as {
+          error?: string;
+          project?: { id: string };
+        };
+        if (!created.ok || !createdBody.project?.id) {
+          setNotice(createdBody.error ?? t("brain.onboard.failed"));
+          return false;
+        }
+        const id = createdBody.project.id;
+        const opened = await fetch(`/api/onboarding/${id}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            entryType: input.kind,
+            workspaceId,
+            problem: input.problem,
+            ...(ownerEmail.trim() ? { ownerEmail: ownerEmail.trim() } : {}),
+          }),
+        });
+        if (!opened.ok) {
+          const payload = (await opened.json().catch(() => ({}))) as { error?: string };
+          setNotice(payload.error ?? t("brain.onboard.failed"));
+          return false;
+        }
+        const refreshed = await fetch("/api/onboarding", { cache: "no-store" });
+        if (refreshed.ok) {
+          const body = (await refreshed.json()) as { projects: ListRow[] };
+          setRows(body.projects);
+        }
+        await open(id);
+        setNotice(t("brain.onboard.done"));
+        return true;
+      } catch {
+        setNotice(t("brain.onboard.failed"));
+        return false;
+      } finally {
+        setBusy(false);
       }
-      setNewName("");
-      const refreshed = await fetch("/api/onboarding", { cache: "no-store" });
-      if (refreshed.ok) {
-        const body = (await refreshed.json()) as { projects: ListRow[] };
-        setRows(body.projects);
-      }
-      await open(id);
-      setNotice(t("brain.onboard.done"));
-    } catch {
-      setNotice(t("brain.onboard.failed"));
-    } finally {
-      setBusy(false);
-    }
-  }, [newName, newType, workspaceId, ownerEmail, t, open]);
+    },
+    [workspaceId, ownerEmail, t, open],
+  );
   const assignRole = useCallback(async () => {
     if (!view) return;
     const email = roleDraft.email.trim();
@@ -490,60 +496,34 @@ export default function BrainLane() {
         </p>
       )}
       <section className="brain-start" aria-label={t("brain.onboard.title")}>
-        <h2>{t("brain.onboard.title")}</h2>
-        <div className="brain-row">
-          <label>
-            {t("brain.onboard.name")}
-            <input
-              value={newName}
-              onChange={(event) => setNewName(event.target.value)}
-              placeholder={t("brain.onboard.name")}
-            />
-          </label>
-          <label>
-            {t("brain.workspace.choose")}
-            <select
-              value={workspaceId}
-              onChange={(event) => setWorkspaceId(event.target.value)}
-            >
-              {workspaces.map((workspace) => (
-                <option key={workspace.id} value={workspace.id}>
-                  {workspace.name}
-                  {workspace.role ? ` (${workspace.role})` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            {t("brain.owner")}
-            <input
-              value={ownerEmail}
-              onChange={(event) => setOwnerEmail(event.target.value)}
-              placeholder={t("brain.owner.hint")}
-            />
-          </label>
-          <label>
-            {t("brain.onboard.type")}
-            <select
-              value={newType}
-              onChange={(event) =>
-                setNewType(event.target.value === "process" ? "process" : "project")
-              }
-            >
-              <option value="project">{t("brain.onboard.type.project")}</option>
-              <option value="process">{t("brain.onboard.type.process")}</option>
-            </select>
-          </label>
+        <div className="brain-cta">
+          <div>
+            <h2>{t("brain.onboard.title")}</h2>
+            <p className="brain-hint">{t("brain.onboard.hint")}</p>
+          </div>
           <button
             type="button"
             className="brain-primary"
-            disabled={busy || newName.trim().length === 0}
-            onClick={() => void onboardNew()}
+            onClick={() => setWizardOpen(true)}
+            disabled={busy || workspaces.length === 0}
           >
-            {t("brain.onboard.action")}
+            {t("brain.onboard.open")}
           </button>
         </div>
       </section>
+      {wizardOpen && (
+        <BrainWizard
+          t={t}
+          workspaces={workspaces}
+          workspaceId={workspaceId}
+          onWorkspace={setWorkspaceId}
+          ownerEmail={ownerEmail}
+          onOwner={setOwnerEmail}
+          busy={busy}
+          onClose={() => setWizardOpen(false)}
+          onCreate={createOnboard}
+        />
+      )}
       <section className="brain-start" aria-label={t("brain.start.title")}>
         <h2>{t("brain.start.title")}</h2>
         {candidates.length === 0 ? (

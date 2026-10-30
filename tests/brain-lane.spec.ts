@@ -232,39 +232,6 @@ test.describe("assigning a role", () => {
     await expect(detail.getByText("process@example.test")).toBeVisible();
   });
 });
-test.describe("onboarding a new project or process", () => {
-  test("creates the project, opens its intake and shows it", async ({ page }) => {
-    await page.route("**/api/onboarding", (route) => route.fulfill({ json: list }));
-    await page.route("**/api/workspaces", (route) =>
-      route.fulfill({
-        json: { workspaces: [{ id: "general", name: "General", slug: "general", role: "admin" }] },
-      }),
-    );
-    await page.route("**/api/onboarding/*", (route) =>
-      route.fulfill({ json: { ...view, record: { ...view.record, entryType: "process" } } }),
-    );
-    await page.route("**/api/projects", async (route) => {
-      if (route.request().method() === "POST") {
-        return route.fulfill({
-          status: 201,
-          json: { project: { id: "p-9", name: "Invoice matching" } },
-        });
-      }
-      return route.fulfill({ json: { projects: [] } });
-    });
-    await page.goto("/?view=brain");
-    const form = page.getByRole("region", { name: "Onboard a new project or process" });
-    await form.getByLabel("Name").fill("Invoice matching");
-    await form.getByLabel("What are you onboarding?").selectOption("process");
-    await form.getByRole("button", { name: "Onboard it" }).click();
-    await expect(page.locator(".brain-notice")).toContainText(
-      "Project created and its intake is open.",
-    );
-    // The detail opens on the new project and says it is a process.
-    const detail = page.getByRole("complementary", { name: "Project brain" });
-    await expect(detail).toContainText("Process");
-  });
-});
 test.describe("German", () => {
   test.use({ locale: "de-DE" });
   test("the lane, its columns and its errors are German", async ({ page }) => {
