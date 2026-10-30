@@ -35,6 +35,7 @@ struct ProjectWorkspace: View {
     case summary = "Summary"
     case map = "Map"
     case measure = "Measure"
+    case workflow = "Workflow"
     case evidence = "Evidence"
     case roles = "Roles"
     case audit = "Audit"
@@ -60,6 +61,7 @@ struct ProjectWorkspace: View {
               case .summary: summaryTab(snapshot)
               case .map: mapTab(snapshot)
               case .measure: measureTab(snapshot)
+              case .workflow: workflowTab(snapshot)
               case .evidence: evidenceTab(snapshot)
               case .roles: rolesTab(snapshot)
               case .audit: auditTab(snapshot)
@@ -177,14 +179,14 @@ struct ProjectWorkspace: View {
   private func summaryTab(_ snapshot: AtlasSnapshot) -> some View {
     let analysis = analyse(snapshot)
     return VStack(alignment: .leading, spacing: 18) {
-      readinessCard(analysis)
+      readinessCard(analysis, snapshot)
       requirements(snapshot)
       factsForm(snapshot)
       reuseForm
     }
   }
 
-  private func readinessCard(_ analysis: BrainAnalysis) -> some View {
+  private func readinessCard(_ analysis: BrainAnalysis, _ snapshot: AtlasSnapshot) -> some View {
     VStack(alignment: .leading, spacing: 8) {
       HStack(alignment: .firstTextBaseline) {
         Text("Readiness").font(.headline)
@@ -200,6 +202,18 @@ struct ProjectWorkspace: View {
         fact("Evidence", "\(analysis.evidenceAccepted) ok · \(analysis.evidencePending) pending · \(analysis.evidenceNeedsReview) review")
         fact("Value", analysis.hasBaseline ? "baseline recorded" : "\(analysis.valueRecords) record(s)")
         fact("Audit", analysis.chainOk ? "ok · \(analysis.chainLength)" : "broken")
+      }
+      if let deferred = snapshot.data?.deferredGates, !deferred.isEmpty {
+        Label(
+          deferred.contains(where: \.overdue)
+            ? "Quick lane: \(deferred.count) sign-off(s) deferred, at least one past due"
+            : "Quick lane: \(deferred.count) sign-off(s) deferred",
+          systemImage: deferred.contains(where: \.overdue)
+            ? "exclamationmark.triangle.fill"
+            : "clock.arrow.circlepath"
+        )
+        .font(.caption)
+        .foregroundStyle(deferred.contains(where: \.overdue) ? Color.red : Color.orange)
       }
       if !analysis.risks.isEmpty {
         ForEach(analysis.risks, id: \.self) { risk in
@@ -439,6 +453,38 @@ struct ProjectWorkspace: View {
     case "d30": return "30 days"
     case "d90": return "90 days"
     default: return period
+    }
+  }
+
+  // MARK: workflow
+
+  private func workflowTab(_ snapshot: AtlasSnapshot) -> some View {
+    section("Workflow") {
+      if let draft = snapshot.data?.workflow {
+        Text(draft.name).font(.headline)
+        Text("\(draft.trigger) · \(draft.steps.count) steps · built by \(draft.complexity)")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+        ForEach(Array(draft.steps.enumerated()), id: \.offset) { index, step in
+          Text("\(index + 1). \(step.action)").font(.callout)
+        }
+        if let report = draft.testReport {
+          Text(
+            report.wroteAnything
+              ? "Test run: wrote data — that is a real run, not a test"
+              : "Test run: \(report.cases) case(s), dry run, nothing written"
+          )
+          .font(.caption)
+          .foregroundStyle(report.wroteAnything ? Color.red : Color.secondary)
+        } else {
+          Text("Not tested yet: record a test run you did yourself.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      } else {
+        Text("No workflow yet. Build one in Atlas, then it appears here.")
+          .foregroundStyle(.secondary)
+      }
     }
   }
 

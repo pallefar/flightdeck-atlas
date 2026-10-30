@@ -697,3 +697,19 @@
   color: #7a4a00;
   background: #ffe9c7;
 }
+/* A debt past its date is the one thing on this page that should shout. */
+.brain-overdue {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fdecec;
+  color: #8a1c1c;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+@media (prefers-color-scheme: dark) {
+  .brain-overdue {
+    background: #3a1616;
+    color: #ffb4b4;
+  }
+}

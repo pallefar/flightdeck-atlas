@@ -90,6 +90,31 @@ public struct AtlasSnapshot: Codable, Equatable, Identifiable, Sendable {
     public let teoaApprover: String?
     public let visionApprover: String?
   }
+  public struct DeferredGate: Codable, Equatable, Identifiable, Sendable {
+    public let stage: String
+    public let owner: String
+    public let dueAt: String
+    public var id: String { stage }
+    public var overdue: Bool { (ISO8601DateFormatter().date(from: dueAt) ?? .distantFuture) < Date() }
+  }
+  public struct WorkflowDraft: Codable, Equatable, Sendable {
+    public struct Step: Codable, Equatable, Sendable {
+      public let action: String
+      public let actor: String
+      public let system: String?
+    }
+    public struct TestReport: Codable, Equatable, Sendable {
+      public let ranAt: String
+      public let cases: Int
+      public let wroteAnything: Bool
+      public let notes: String
+    }
+    public let name: String
+    public let trigger: String
+    public let steps: [Step]
+    public let complexity: String
+    public let testReport: TestReport?
+  }
   public struct Intake: Codable, Equatable, Sendable {
     public let classificationDeclared: Bool?
     public let classification: String?
@@ -109,6 +134,9 @@ public struct AtlasSnapshot: Codable, Equatable, Identifiable, Sendable {
     public let buildDecision: String?
     public let operatorBundleRef: String?
     public let retireReason: String?
+    /** What the quick lane still owes, and the workflow draft if there is one. */
+    public let deferredGates: [DeferredGate]?
+    public let workflow: WorkflowDraft?
 
     public var draft: IntakeDraft {
       IntakeDraft(

@@ -653,6 +653,23 @@ export const en = {
   "brain.workflow.untested": "not tested yet",
   "brain.workflow.wrote": "wrote data",
   "brain.workflow.dry": "dry run, wrote nothing",
+  "brain.workflow.name": "Name",
+  "brain.workflow.stepsHint": "The steps, one per line",
+  "brain.workflow.save": "Save the draft",
+  "brain.workflow.saved": "Workflow draft saved.",
+  "brain.workflow.failed": "The draft could not be saved.",
+  "brain.workflow.needsName": "Give the workflow a name and at least one step.",
+  "brain.workflow.attest": "I tested it — nothing was written",
+  "brain.workflow.attestHint": "Only record a test run you did yourself. Atlas never invents one.",
+  "brain.workflow.attestNote": "One real case, dry run, nothing written.",
+  "brain.workflow.attested": "Test run recorded.",
+  "brain.workflow.trigger.new-case": "A new case",
+  "brain.workflow.trigger.form": "A form",
+  "brain.workflow.trigger.schedule": "A schedule",
+  "brain.workflow.trigger.on-demand": "On demand",
+  "brain.workflow.complexity.simple": "Atlas",
+  "brain.workflow.complexity.studio": "Studio",
+  "brain.deferred.overdue": "{count} deferred sign-off(s) are past due:",
 } as const;
 
 export type MessageKey = keyof typeof en;

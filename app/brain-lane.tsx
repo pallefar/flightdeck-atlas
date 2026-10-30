@@ -74,6 +74,19 @@ export default function BrainLane() {
   const [candidates, setCandidates] = useState<{ id: string; name: string }[]>([]);
   const [startId, setStartId] = useState("");
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [savingWorkflow, setSavingWorkflow] = useState(false);
+  // The debt the quick lane left and which part is already late. Read once,
+  // when the view is applied, so rendering stays pure.
+  const [overdueDeferred, setOverdueDeferred] = useState<{ stage: string; dueAt: string }[]>([]);
+  const applyView = useCallback((next: BrainView) => {
+    const now = Date.now();
+    setView(next);
+    setOverdueDeferred(
+      ((next.deferredGates ?? []) as { stage: string; dueAt: string }[]).filter(
+        (item) => Date.parse(item.dueAt) < now,
+      ),
+    );
+  }, []);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspaceId, setWorkspaceId] = useState("");
   const [ownerEmail, setOwnerEmail] = useState("");
@@ -155,13 +168,13 @@ export default function BrainLane() {
         const response = await fetch(`/api/onboarding/${id}`, { cache: "no-store" });
         if (!response.ok) throw new Error(String(response.status));
         const body = (await response.json()) as BrainView;
-        setView(body);
+        applyView(body);
         setFields(initialFields(body.data));
       } catch {
         setError(t("brain.detailError"));
       }
     },
-    [t],
+    [t, applyView],
   );
   // A direct link from the app (or a bookmark): ?view=brain&project=<id>
   // opens that project's brain once the list has loaded. State is set from a
@@ -306,7 +319,7 @@ export default function BrainLane() {
           setNotice(payload.error ?? t("brain.map.failed"));
           return;
         }
-        setView(payload as unknown as BrainView);
+        applyView(payload as unknown as BrainView);
         setNotice(t("brain.map.requested"));
       } catch {
         setNotice(t("brain.map.failed"));
@@ -314,8 +327,97 @@ export default function BrainLane() {
         setBusy(false);
       }
     },
-    [view, t],
+    [view, t, applyView],
   );
+  /** Save a workflow draft. The server refuses anything that does not match
+   * the contract, so the lane builds the body the schema describes. */
+  const saveWorkflow = useCallback(async () => {
+    if (!view) return;
+    const name = String(fields.workflowName ?? "").trim();
+    const steps = String(fields.workflowSteps ?? "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 10)
+      .map((action) => ({ action, actor: "workflow" as const, system: null }));
+    if (!name || steps.length === 0) {
+      setNotice(t("brain.workflow.needsName"));
+      return;
+    }
+    setSavingWorkflow(true);
+    try {
+      const body = {
+        contract: "atlas-workflow-draft/1",
+        projectId: view.record.projectId,
+        name,
+        trigger: String(fields.workflowTrigger ?? "new-case"),
+        inputs: [],
+        steps,
+        decisions: [],
+        signOff: {
+          role: "process_owner",
+          email: view.assignments?.processOwner ?? view.assignments?.owner ?? "",
+        },
+        complexity: steps.length > 3 ? "studio" : "simple",
+        testReport: view.workflow?.testReport ?? null,
+        createdAt: view.workflow ? new Date().toISOString() : new Date().toISOString(),
+      };
+      const response = await fetch(`/api/onboarding/${view.record.projectId}/workflow`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        setNotice(payload.error ?? t("brain.workflow.failed"));
+        return;
+      }
+      setNotice(t("brain.workflow.saved"));
+      await open(view.record.projectId);
+    } catch {
+      setNotice(t("brain.workflow.failed"));
+    } finally {
+      setSavingWorkflow(false);
+    }
+  }, [view, fields, t, open]);
+
+  /** A person ran it once and confirms nothing was written. Their attestation
+   * is the test report; Atlas does not invent one. */
+  const attestDryRun = useCallback(async () => {
+    if (!view?.workflow) return;
+    setSavingWorkflow(true);
+    try {
+      const body = {
+        ...view.workflow,
+        contract: "atlas-workflow-draft/1",
+        projectId: view.record.projectId,
+        inputs: view.workflow.inputs ?? [],
+        decisions: view.workflow.decisions ?? [],
+        testReport: {
+          ranAt: new Date().toISOString(),
+          cases: 1,
+          wroteAnything: false,
+          notes: t("brain.workflow.attestNote"),
+        },
+      };
+      const response = await fetch(`/api/onboarding/${view.record.projectId}/workflow`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        setNotice(t("brain.workflow.failed"));
+        return;
+      }
+      setNotice(t("brain.workflow.attested"));
+      await open(view.record.projectId);
+    } catch {
+      setNotice(t("brain.workflow.failed"));
+    } finally {
+      setSavingWorkflow(false);
+    }
+  }, [view, t, open]);
+
   const assignRole = useCallback(async () => {
     if (!view) return;
     const email = roleDraft.email.trim();
@@ -332,14 +434,14 @@ export default function BrainLane() {
         setNotice(payload.error ?? t("brain.roles.failed"));
         return;
       }
-      setView((await response.json()) as BrainView);
+      applyView((await response.json()) as BrainView);
       setNotice(t("brain.roles.assigned"));
     } catch {
       setNotice(t("brain.roles.failed"));
     } finally {
       setBusy(false);
     }
-  }, [view, roleDraft, t]);
+  }, [view, roleDraft, t, applyView]);
   const send = useCallback(
     async (
       path: string,
@@ -375,7 +477,7 @@ export default function BrainLane() {
           const refreshed = await fetch(`/api/onboarding/${selected}`, {
             cache: "no-store",
           });
-          if (refreshed.ok) setView((await refreshed.json()) as BrainView);
+          if (refreshed.ok) applyView((await refreshed.json()) as BrainView);
         }
         return { ok: true, message: "" };
       } catch {
@@ -633,7 +735,12 @@ export default function BrainLane() {
             <p aria-live="polite">{t("brain.loading")}</p>
           ) : (
             <>
-              <section aria-label={t("brain.requirements.title")}>
+              {overdueDeferred.length > 0 && (
+                <p className="brain-overdue" role="alert">
+                  {t("brain.deferred.overdue", { count: String(overdueDeferred.length) })}
+                </p>
+              )}
+              <section id="brain-section-requirements" aria-label={t("brain.requirements.title")}>
                 <h3>{t("brain.requirements.title")}</h3>
                 {view.stage.missing.length === 0 ? (
                   <p>{t("brain.requirements.met")}</p>
@@ -830,6 +937,62 @@ export default function BrainLane() {
                 ) : (
                   <p className="brain-hint">{t("brain.workflow.none")}</p>
                 )}
+                <div className="brain-workflow-editor">
+                  <div className="brain-row">
+                    <label>
+                      {t("brain.workflow.name")}
+                      <input
+                        value={String(fields.workflowName ?? "")}
+                        onChange={(event) =>
+                          setFields((f) => ({ ...f, workflowName: event.target.value }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      {t("brain.workflow.trigger")}
+                      <select
+                        value={String(fields.workflowTrigger ?? "new-case")}
+                        onChange={(event) =>
+                          setFields((f) => ({ ...f, workflowTrigger: event.target.value }))
+                        }
+                      >
+                        <option value="new-case">{t("brain.workflow.trigger.new-case")}</option>
+                        <option value="form">{t("brain.workflow.trigger.form")}</option>
+                        <option value="schedule">{t("brain.workflow.trigger.schedule")}</option>
+                        <option value="on-demand">{t("brain.workflow.trigger.on-demand")}</option>
+                      </select>
+                    </label>
+                  </div>
+                  <label>
+                    {t("brain.workflow.stepsHint")}
+                    <textarea
+                      rows={3}
+                      value={String(fields.workflowSteps ?? "")}
+                      onChange={(event) =>
+                        setFields((f) => ({ ...f, workflowSteps: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <div className="brain-row">
+                    <button
+                      type="button"
+                      className="brain-primary"
+                      disabled={busy || savingWorkflow}
+                      onClick={() => void saveWorkflow()}
+                    >
+                      {savingWorkflow ? t("brain.saving") : t("brain.workflow.save")}
+                    </button>
+                    <button
+                      type="button"
+                      className="brain-secondary"
+                      disabled={busy || savingWorkflow || !view.workflow}
+                      onClick={() => void attestDryRun()}
+                    >
+                      {t("brain.workflow.attest")}
+                    </button>
+                  </div>
+                  <p className="brain-hint">{t("brain.workflow.attestHint")}</p>
+                </div>
               </section>
               <section id="brain-section-evidence" aria-label={t("brain.evidence.title")}>
                 <h3>{t("brain.evidence.title")}</h3>

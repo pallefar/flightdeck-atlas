@@ -52,10 +52,15 @@ export type BrainView = {
   canGate: Record<string, boolean>;
   facts?: Record<string, boolean | string | null>;
   handoffs?: { id: string; kind: string; status: string; createdAt: string }[];
+  lane?: string;
+  deferredGates?: { stage: string; owner: string; dueAt: string }[];
   workflow?: {
     name: string;
     trigger: string;
     steps: { action: string; actor: string; system: string | null }[];
+    inputs?: { name: string; classification: string }[];
+    decisions?: { question: string; thenStep: string | null }[];
+    signOff?: { role: string; email: string };
     complexity: string;
     testReport: { ranAt: string; cases: number; wroteAnything: boolean; notes: string } | null;
   } | null;
